@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestListAgentsBuildsCoreURLAndAuthHeader(t *testing.T) {
@@ -242,11 +243,19 @@ func TestRuntimeMethodsUseRuntimeTokenAndProtocolEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	if heartbeat.AgentID != "agent-1" || claimed.RunID != "run-1" || completed.RunID != "run-1" || child.RunID != "child-1" {
-		t.Fatalf("unexpected responses: heartbeat=%+v claimed=%+v completed=%+v child=%+v", heartbeat, claimed, completed, child)
+	childAt, err := client.CallAgentAt(context.Background(), "/api/v1/agent-runtime/call-agent", CallAgentRequest{
+		CurrentRunID:  "run-1",
+		TargetAgentID: "target-agent",
+		Input:         "child",
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(calls) != 4 {
+
+	if heartbeat.AgentID != "agent-1" || claimed.RunID != "run-1" || completed.RunID != "run-1" || child.RunID != "child-1" || childAt.RunID != "child-1" {
+		t.Fatalf("unexpected responses: heartbeat=%+v claimed=%+v completed=%+v child=%+v childAt=%+v", heartbeat, claimed, completed, child, childAt)
+	}
+	if len(calls) != 5 {
 		t.Fatalf("calls len = %d", len(calls))
 	}
 	for _, call := range calls {
@@ -263,10 +272,15 @@ func TestRuntimeMethodsUseRuntimeTokenAndProtocolEndpoints(t *testing.T) {
 	if calls[3].Body["current_run_id"] != "run-1" || calls[3].Body["target_agent_id"] != "target-agent" {
 		t.Fatalf("call agent body = %#v", calls[3].Body)
 	}
+	if calls[4].Path != "/api/v1/agent-runtime/call-agent" || calls[4].Body["input"] != "child" {
+		t.Fatalf("call agent at body = %#v path=%s", calls[4].Body, calls[4].Path)
+	}
 }
 
 func TestClaimRuntimeRunReturnsNilOnNoContent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "3")
+		w.Header().Set("X-OpenLinker-Max-Claim-Wait-Seconds", "30")
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
@@ -281,6 +295,13 @@ func TestClaimRuntimeRunReturnsNilOnNoContent(t *testing.T) {
 	}
 	if claimed != nil {
 		t.Fatalf("claimed = %+v, want nil", claimed)
+	}
+	detailed, err := client.ClaimRuntimeRunDetailed(context.Background(), ClaimRuntimeRunParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detailed.Run != nil || detailed.RetryAfter != 3*time.Second || detailed.MaxClaimWaitSeconds != 30 {
+		t.Fatalf("detailed = %+v", detailed)
 	}
 }
 

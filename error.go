@@ -1,6 +1,9 @@
 package openlinker
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 type Error struct {
 	StatusCode   int
@@ -8,6 +11,7 @@ type Error struct {
 	Message      string
 	Details      any
 	RequestID    string
+	RetryAfter   time.Duration
 	ResponseBody []byte
 }
 

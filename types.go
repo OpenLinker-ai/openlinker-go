@@ -114,14 +114,14 @@ type AgentCardResponse struct {
 
 type RunAgentRequest struct {
 	AgentID  string `json:"agent_id"`
-	Input    JSON   `json:"input"`
-	Metadata JSON   `json:"metadata,omitempty"`
+	Input    any    `json:"input"`
+	Metadata any    `json:"metadata,omitempty"`
 }
 
 type RunResponse struct {
 	RunID               string `json:"run_id"`
 	Status              string `json:"status"`
-	Output              JSON   `json:"output,omitempty"`
+	Output              any    `json:"output,omitempty"`
 	ErrorCode           string `json:"error_code,omitempty"`
 	ErrorMessage        string `json:"error_message,omitempty"`
 	CostCents           int32  `json:"cost_cents"`
@@ -130,9 +130,9 @@ type RunResponse struct {
 	ParentRunID         string `json:"parent_run_id,omitempty"`
 	CallerAgentID       string `json:"caller_agent_id,omitempty"`
 	BillingMode         string `json:"billing_mode,omitempty"`
-	RequirementEvidence JSON   `json:"requirement_evidence,omitempty"`
-	EvidenceSummary     JSON   `json:"evidence_summary,omitempty"`
-	NextAction          JSON   `json:"next_action,omitempty"`
+	RequirementEvidence any    `json:"requirement_evidence,omitempty"`
+	EvidenceSummary     any    `json:"evidence_summary,omitempty"`
+	NextAction          any    `json:"next_action,omitempty"`
 }
 
 type ListRunEventsParams struct {
@@ -150,7 +150,7 @@ type RunEventResponse struct {
 	ParentRunID string `json:"parent_run_id,omitempty"`
 	Sequence    int32  `json:"sequence"`
 	EventType   string `json:"event_type"`
-	Payload     JSON   `json:"payload"`
+	Payload     any    `json:"payload"`
 	CreatedAt   string `json:"created_at"`
 }
 
@@ -159,7 +159,7 @@ type RunArtifactResponse struct {
 	RunID            string `json:"run_id"`
 	ArtifactType     string `json:"artifact_type"`
 	Title            string `json:"title"`
-	Content          JSON   `json:"content"`
+	Content          any    `json:"content"`
 	Visibility       string `json:"visibility"`
 	SourceArtifactID string `json:"source_artifact_id,omitempty"`
 	MimeType         string `json:"mime_type,omitempty"`
@@ -176,7 +176,7 @@ type RunMessageResponse struct {
 	EventSequence *int32 `json:"event_sequence,omitempty"`
 	Role          string `json:"role"`
 	Content       string `json:"content"`
-	Payload       JSON   `json:"payload"`
+	Payload       any    `json:"payload"`
 	CreatedAt     string `json:"created_at"`
 }
 
@@ -213,8 +213,8 @@ type ClaimRuntimeRunParams struct {
 type RuntimePullRunResponse struct {
 	RunID          string           `json:"run_id"`
 	AgentID        string           `json:"agent_id"`
-	Input          JSON             `json:"input"`
-	Metadata       JSON             `json:"metadata,omitempty"`
+	Input          any              `json:"input"`
+	Metadata       any              `json:"metadata,omitempty"`
 	Source         string           `json:"source"`
 	ResultEndpoint string           `json:"result_endpoint"`
 	ResultMethod   string           `json:"result_method"`
@@ -224,7 +224,7 @@ type RuntimePullRunResponse struct {
 
 type AgentEvent struct {
 	EventType string `json:"event_type"`
-	Payload   JSON   `json:"payload,omitempty"`
+	Payload   any    `json:"payload,omitempty"`
 }
 
 type AgentError struct {
@@ -234,7 +234,7 @@ type AgentError struct {
 
 type RuntimePullResultRequest struct {
 	Status     string       `json:"status"`
-	Output     JSON         `json:"output,omitempty"`
+	Output     any          `json:"output,omitempty"`
 	Events     []AgentEvent `json:"events,omitempty"`
 	Error      *AgentError  `json:"error,omitempty"`
 	DurationMS int32        `json:"duration_ms,omitempty"`
@@ -245,8 +245,8 @@ type CallAgentRequest struct {
 	CurrentRunID  string `json:"current_run_id,omitempty"`
 	TargetAgentID string `json:"target_agent_id"`
 	Reason        string `json:"reason,omitempty"`
-	Input         JSON   `json:"input"`
-	Metadata      JSON   `json:"metadata,omitempty"`
+	Input         any    `json:"input"`
+	Metadata      any    `json:"metadata,omitempty"`
 }
 
 type RuntimeWSClientMessage struct {
@@ -254,9 +254,9 @@ type RuntimeWSClientMessage struct {
 	ID         string       `json:"id,omitempty"`
 	RunID      string       `json:"run_id,omitempty"`
 	EventType  string       `json:"event_type,omitempty"`
-	Payload    JSON         `json:"payload,omitempty"`
+	Payload    any          `json:"payload,omitempty"`
 	Status     string       `json:"status,omitempty"`
-	Output     JSON         `json:"output,omitempty"`
+	Output     any          `json:"output,omitempty"`
 	Events     []AgentEvent `json:"events,omitempty"`
 	Error      *AgentError  `json:"error,omitempty"`
 	DurationMS int32        `json:"duration_ms,omitempty"`
@@ -267,8 +267,8 @@ type RuntimeWSServerMessage struct {
 	ID                string                  `json:"id,omitempty"`
 	RunID             string                  `json:"run_id,omitempty"`
 	AgentID           string                  `json:"agent_id,omitempty"`
-	Input             JSON                    `json:"input,omitempty"`
-	Metadata          JSON                    `json:"metadata,omitempty"`
+	Input             any                     `json:"input,omitempty"`
+	Metadata          any                     `json:"metadata,omitempty"`
 	Source            string                  `json:"source,omitempty"`
 	ResultEndpoint    string                  `json:"result_endpoint,omitempty"`
 	ResultMethod      string                  `json:"result_method,omitempty"`

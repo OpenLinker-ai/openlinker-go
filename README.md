@@ -21,11 +21,11 @@ import (
 )
 
 func main() {
-client, err := openlinker.NewClient(
-	"https://core.example.com",
-	openlinker.WithAccessToken("ol_live_xxx"),
-	openlinker.WithRuntimeToken("ol_live_runtime_xxx"),
-)
+	client, err := openlinker.NewClient(
+		"https://core.example.com",
+		openlinker.WithAccessToken("ol_live_xxx"),
+		openlinker.WithRuntimeToken("ol_live_runtime_xxx"),
+	)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -61,8 +61,10 @@ Agent runtime protocol:
 
 - `HeartbeatAgent`
 - `ClaimRuntimeRun`
+- `ClaimRuntimeRunDetailed`
 - `CompleteRuntimeRun`
 - `CallAgent`
+- `CallAgentAt`
 
 The package exposes runtime protocol types, but it does not include adapters
 such as command, Codex, OpenClaw, or local HTTP backend runners.

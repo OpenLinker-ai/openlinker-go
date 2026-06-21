@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const defaultSDKAgent = "openlinker-go/0.0.0"
@@ -207,6 +208,20 @@ func (c *Client) HeartbeatAgent(ctx context.Context) (*AgentHeartbeatResponse, e
 }
 
 func (c *Client) ClaimRuntimeRun(ctx context.Context, params ClaimRuntimeRunParams) (*RuntimePullRunResponse, error) {
+	result, err := c.ClaimRuntimeRunDetailed(ctx, params)
+	if err != nil || result == nil {
+		return nil, err
+	}
+	return result.Run, nil
+}
+
+type ClaimRuntimeRunResult struct {
+	Run                 *RuntimePullRunResponse
+	RetryAfter          time.Duration
+	MaxClaimWaitSeconds int32
+}
+
+func (c *Client) ClaimRuntimeRunDetailed(ctx context.Context, params ClaimRuntimeRunParams) (*ClaimRuntimeRunResult, error) {
 	query := make(url.Values)
 	setQueryInt32(query, "wait", params.WaitSeconds)
 
@@ -216,7 +231,10 @@ func (c *Client) ClaimRuntimeRun(ctx context.Context, params ClaimRuntimeRunPara
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent {
-		return nil, nil
+		return &ClaimRuntimeRunResult{
+			RetryAfter:          retryAfter(resp.Header),
+			MaxClaimWaitSeconds: headerInt32(resp.Header, "X-OpenLinker-Max-Claim-Wait-Seconds"),
+		}, nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, parseError(resp)
@@ -225,7 +243,7 @@ func (c *Client) ClaimRuntimeRun(ctx context.Context, params ClaimRuntimeRunPara
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("openlinker: decode response: %w", err)
 	}
-	return &out, nil
+	return &ClaimRuntimeRunResult{Run: &out}, nil
 }
 
 func (c *Client) CompleteRuntimeRun(ctx context.Context, runID string, result RuntimePullResultRequest) (*RunResponse, error) {
@@ -238,8 +256,15 @@ func (c *Client) CompleteRuntimeRun(ctx context.Context, runID string, result Ru
 }
 
 func (c *Client) CallAgent(ctx context.Context, req CallAgentRequest) (*RunResponse, error) {
+	return c.CallAgentAt(ctx, "", req)
+}
+
+func (c *Client) CallAgentAt(ctx context.Context, endpoint string, req CallAgentRequest) (*RunResponse, error) {
 	var out RunResponse
-	if err := c.doRuntime(ctx, http.MethodPost, "/agent-runtime/call-agent", nil, req, &out); err != nil {
+	if strings.TrimSpace(endpoint) == "" {
+		endpoint = "/agent-runtime/call-agent"
+	}
+	if err := c.doRuntime(ctx, http.MethodPost, endpoint, nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -324,8 +349,17 @@ func (c *Client) newRequestWithToken(ctx context.Context, method, path string, q
 }
 
 func (c *Client) endpoint(path string, query url.Values) string {
+	if isAbsoluteURL(path) {
+		u, err := url.Parse(path)
+		if err == nil {
+			u.RawQuery = query.Encode()
+			return u.String()
+		}
+	}
 	u := *c.baseURL
-	u.Path = strings.TrimRight(u.Path, "/") + "/api/v1/" + strings.TrimLeft(path, "/")
+	normalizedPath := strings.TrimLeft(path, "/")
+	normalizedPath = strings.TrimPrefix(normalizedPath, "api/v1/")
+	u.Path = strings.TrimRight(u.Path, "/") + "/api/v1/" + normalizedPath
 	u.RawQuery = query.Encode()
 	return u.String()
 }
@@ -349,8 +383,13 @@ func parseError(resp *http.Response) error {
 		Message:      message,
 		Details:      parsed.Error.Details,
 		RequestID:    firstHeader(resp.Header, "X-Request-Id", "X-Correlation-Id"),
+		RetryAfter:   retryAfter(resp.Header),
 		ResponseBody: raw,
 	}
+}
+
+func isAbsoluteURL(raw string) bool {
+	return strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://")
 }
 
 func normalizeBaseURL(raw string) string {
@@ -383,6 +422,34 @@ func firstHeader(headers http.Header, names ...string) string {
 		}
 	}
 	return ""
+}
+
+func retryAfter(headers http.Header) time.Duration {
+	value := headers.Get("Retry-After")
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if retryAt, err := http.ParseTime(value); err == nil {
+		if d := time.Until(retryAt); d > 0 {
+			return d
+		}
+	}
+	return 0
+}
+
+func headerInt32(headers http.Header, name string) int32 {
+	value := headers.Get(name)
+	if value == "" {
+		return 0
+	}
+	parsed, err := strconv.ParseInt(value, 10, 32)
+	if err != nil || parsed <= 0 {
+		return 0
+	}
+	return int32(parsed)
 }
 
 func readSSE(reader io.Reader, handle func(StreamRunEvent) error) error {
