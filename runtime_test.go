@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -100,6 +101,64 @@ func TestRuntimePullConnectorAssignsAndCompletesRun(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for result")
+	}
+}
+
+func TestRuntimePullConnectorStopsOnEmptyClaim(t *testing.T) {
+	var claims int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer ol_live_empty" {
+			t.Fatalf("authorization = %q", got)
+		}
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent-runtime/heartbeat":
+			writeJSON(t, w, AgentHeartbeatResponse{AgentID: "agent-empty"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/agent-runtime/runs/claim":
+			atomic.AddInt32(&claims, 1)
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, WithRuntimeToken("ol_live_empty"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	connector := NewRuntimePullConnector(client)
+	connector.Wait = time.Second
+	connector.Heartbeat = time.Millisecond
+	connector.EmptyRetry = time.Millisecond
+	connector.StopOnEmpty = true
+	assigned := make(chan RuntimeAssignment, 1)
+	if err := connector.Start(context.Background(), RuntimeHandlers{
+		OnAssigned: func(assignment RuntimeAssignment) {
+			assigned <- assignment
+		},
+		OnError: func(err error) {
+			t.Errorf("unexpected connector error: %v", err)
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&claims) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := connector.Stop(stopCtx); err != nil {
+		t.Fatal(err)
+	}
+	if atomic.LoadInt32(&claims) != 1 {
+		t.Fatalf("claims = %d", claims)
+	}
+	select {
+	case assignment := <-assigned:
+		t.Fatalf("unexpected assignment = %+v", assignment)
+	default:
 	}
 }
 
@@ -211,5 +270,65 @@ func TestRuntimeWSConnectorHandlesAssignmentsAndSendsMessages(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for websocket messages")
+	}
+}
+
+func TestRuntimeWSConnectorReconnectsAfterClose(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	var connections int32
+	assignedCh := make(chan RuntimeAssignment, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/agent-runtime/ws" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		connectionID := atomic.AddInt32(&connections, 1)
+		go func() {
+			defer conn.Close()
+			if connectionID == 1 {
+				_ = conn.WriteJSON(RuntimeWSServerMessage{Type: "runtime.ready", AgentID: "agent-1"})
+				return
+			}
+			_ = conn.WriteJSON(RuntimeWSServerMessage{
+				Type:    "run.assigned",
+				RunID:   "run-reconnect",
+				AgentID: "agent-1",
+				Input:   "after reconnect",
+			})
+			time.Sleep(50 * time.Millisecond)
+		}()
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, WithRuntimeToken("ol_live_ws"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	connector := NewRuntimeWSConnector(client)
+	connector.Reconnect = true
+	connector.ReconnectMin = time.Millisecond
+	connector.ReconnectMax = 5 * time.Millisecond
+	if err := connector.Start(context.Background(), RuntimeHandlers{
+		OnAssigned: func(assignment RuntimeAssignment) {
+			assignedCh <- assignment
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer connector.Stop(context.Background())
+
+	select {
+	case assignment := <-assignedCh:
+		if assignment.RunID != "run-reconnect" || assignment.Input != "after reconnect" {
+			t.Fatalf("assignment = %+v", assignment)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for reconnect assignment")
+	}
+	if atomic.LoadInt32(&connections) < 2 {
+		t.Fatalf("connections = %d", connections)
 	}
 }
