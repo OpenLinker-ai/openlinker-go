@@ -1,0 +1,293 @@
+package openlinker
+
+type JSON map[string]any
+
+type ListAgentsParams struct {
+	Query        string
+	Tags         []string
+	Page         int
+	Size         int
+	CallableOnly bool
+}
+
+type CreatorMini struct {
+	DisplayName string `json:"display_name"`
+}
+
+type Availability struct {
+	Status              string `json:"status"`
+	Label               string `json:"label"`
+	Hint                string `json:"hint"`
+	LastSuccessfulRunAt string `json:"last_successful_run_at,omitempty"`
+	LastFailedRunAt     string `json:"last_failed_run_at,omitempty"`
+	LastCheckedAt       string `json:"last_checked_at,omitempty"`
+	ConsecutiveFailures int32  `json:"consecutive_failures"`
+}
+
+type Readiness struct {
+	Listed                 bool              `json:"listed"`
+	Discoverable           bool              `json:"discoverable"`
+	Callable               bool              `json:"callable"`
+	Verified               bool              `json:"verified"`
+	Certified              bool              `json:"certified"`
+	PaidEnabled            bool              `json:"paid_enabled"`
+	AgentCardURL           string            `json:"agent_card_url"`
+	A2AEndpoint            string            `json:"a2a_endpoint"`
+	LastSuccessfulRunAt    string            `json:"last_successful_run_at,omitempty"`
+	AvailabilityStatus     string            `json:"availability_status"`
+	VerifiedSkillCount     int32             `json:"verified_skill_count"`
+	LatestBenchmarkBatchID string            `json:"latest_benchmark_batch_id,omitempty"`
+	Explanation            map[string]string `json:"explanation"`
+}
+
+type MarketListItem struct {
+	ID                string       `json:"id"`
+	Slug              string       `json:"slug"`
+	Name              string       `json:"name"`
+	Description       string       `json:"description"`
+	PricePerCallCents int32        `json:"price_per_call_cents"`
+	Tags              []string     `json:"tags"`
+	TotalCalls        int32        `json:"total_calls"`
+	Creator           CreatorMini  `json:"creator"`
+	ConnectionMode    string       `json:"connection_mode"`
+	MCPToolName       string       `json:"mcp_tool_name,omitempty"`
+	Availability      Availability `json:"availability"`
+	Readiness         Readiness    `json:"readiness"`
+}
+
+type MarketListResponse struct {
+	Items []MarketListItem `json:"items"`
+	Total int32            `json:"total"`
+	Page  int32            `json:"page"`
+	Size  int32            `json:"size"`
+}
+
+type SkillMini struct {
+	ID          string `json:"id"`
+	Category    string `json:"category"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+type AgentDetailResponse struct {
+	MarketListItem
+	EndpointURL         string      `json:"endpoint_url"`
+	CreatedAt           string      `json:"created_at"`
+	CertifiedAt         string      `json:"certified_at,omitempty"`
+	LifecycleStatus     string      `json:"lifecycle_status"`
+	Visibility          string      `json:"visibility"`
+	CertificationStatus string      `json:"certification_status"`
+	VerifiedSkillCount  int32       `json:"verified_skill_count"`
+	LatestBenchmarkID   string      `json:"latest_benchmark_batch_id,omitempty"`
+	Skills              []SkillMini `json:"skills"`
+	Capability          JSON        `json:"capability,omitempty"`
+	Examples            []JSON      `json:"examples"`
+}
+
+type AgentCardResponse struct {
+	Name                              string                `json:"name"`
+	Description                       string                `json:"description"`
+	URL                               string                `json:"url"`
+	Version                           string                `json:"version"`
+	ProtocolVersion                   string                `json:"protocolVersion,omitempty"`
+	ProtocolVersions                  []string              `json:"protocolVersions,omitempty"`
+	PreferredTransport                string                `json:"preferredTransport,omitempty"`
+	AdditionalInterfaces              []JSON                `json:"additionalInterfaces,omitempty"`
+	SupportedInterfaces               []JSON                `json:"supportedInterfaces,omitempty"`
+	SupportsAuthenticatedExtendedCard bool                  `json:"supportsAuthenticatedExtendedCard,omitempty"`
+	Provider                          JSON                  `json:"provider"`
+	Capabilities                      JSON                  `json:"capabilities"`
+	DefaultInputModes                 []string              `json:"default_input_modes"`
+	DefaultOutputModes                []string              `json:"default_output_modes"`
+	DefaultInputModesCurrent          []string              `json:"defaultInputModes,omitempty"`
+	DefaultOutputModesCurrent         []string              `json:"defaultOutputModes,omitempty"`
+	Skills                            []JSON                `json:"skills"`
+	SecuritySchemes                   JSON                  `json:"securitySchemes,omitempty"`
+	Security                          []map[string][]string `json:"security,omitempty"`
+	SecurityRequirements              []map[string][]string `json:"securityRequirements,omitempty"`
+	Authentication                    JSON                  `json:"authentication"`
+	OpenLinker                        JSON                  `json:"openlinker"`
+	Capability                        JSON                  `json:"capability,omitempty"`
+	Examples                          []JSON                `json:"examples,omitempty"`
+	Signature                         JSON                  `json:"signature,omitempty"`
+}
+
+type RunAgentRequest struct {
+	AgentID  string `json:"agent_id"`
+	Input    JSON   `json:"input"`
+	Metadata JSON   `json:"metadata,omitempty"`
+}
+
+type RunResponse struct {
+	RunID               string `json:"run_id"`
+	Status              string `json:"status"`
+	Output              JSON   `json:"output,omitempty"`
+	ErrorCode           string `json:"error_code,omitempty"`
+	ErrorMessage        string `json:"error_message,omitempty"`
+	CostCents           int32  `json:"cost_cents"`
+	DurationMS          int32  `json:"duration_ms"`
+	Source              string `json:"source,omitempty"`
+	ParentRunID         string `json:"parent_run_id,omitempty"`
+	CallerAgentID       string `json:"caller_agent_id,omitempty"`
+	BillingMode         string `json:"billing_mode,omitempty"`
+	RequirementEvidence JSON   `json:"requirement_evidence,omitempty"`
+	EvidenceSummary     JSON   `json:"evidence_summary,omitempty"`
+	NextAction          JSON   `json:"next_action,omitempty"`
+}
+
+type ListRunEventsParams struct {
+	AfterSequence int32
+	Limit         int32
+}
+
+type ListRunEventsResponse struct {
+	Events []RunEventResponse `json:"events"`
+}
+
+type RunEventResponse struct {
+	EventID     string `json:"event_id"`
+	RunID       string `json:"run_id"`
+	ParentRunID string `json:"parent_run_id,omitempty"`
+	Sequence    int32  `json:"sequence"`
+	EventType   string `json:"event_type"`
+	Payload     JSON   `json:"payload"`
+	CreatedAt   string `json:"created_at"`
+}
+
+type RunArtifactResponse struct {
+	ID               string `json:"id"`
+	RunID            string `json:"run_id"`
+	ArtifactType     string `json:"artifact_type"`
+	Title            string `json:"title"`
+	Content          JSON   `json:"content"`
+	Visibility       string `json:"visibility"`
+	SourceArtifactID string `json:"source_artifact_id,omitempty"`
+	MimeType         string `json:"mime_type,omitempty"`
+	FileURI          string `json:"file_uri,omitempty"`
+	FileName         string `json:"file_name,omitempty"`
+	FileSHA256       string `json:"file_sha256,omitempty"`
+	FileSizeBytes    *int64 `json:"file_size_bytes,omitempty"`
+	CreatedAt        string `json:"created_at"`
+}
+
+type RunMessageResponse struct {
+	ID            string `json:"id"`
+	RunID         string `json:"run_id"`
+	EventSequence *int32 `json:"event_sequence,omitempty"`
+	Role          string `json:"role"`
+	Content       string `json:"content"`
+	Payload       JSON   `json:"payload"`
+	CreatedAt     string `json:"created_at"`
+}
+
+type ListItemsResponse[T any] struct {
+	Items []T `json:"items"`
+}
+
+type AgentA2AContext struct {
+	CurrentRunID      string   `json:"current_run_id"`
+	ParentRunID       string   `json:"parent_run_id,omitempty"`
+	CallerAgentID     string   `json:"caller_agent_id,omitempty"`
+	CallAgentEndpoint string   `json:"call_agent_endpoint"`
+	CallAgentMethod   string   `json:"call_agent_method"`
+	RuntimeTokenType  string   `json:"runtime_token_type"`
+	RuntimeScopes     []string `json:"runtime_scopes"`
+}
+
+type AgentHeartbeatResponse struct {
+	AgentID                          string `json:"agent_id"`
+	AvailabilityStatus               string `json:"availability_status"`
+	LastCheckedAt                    string `json:"last_checked_at,omitempty"`
+	ConsecutiveFailures              int32  `json:"consecutive_failures"`
+	PendingRunCount                  int32  `json:"pending_run_count"`
+	ClaimNow                         bool   `json:"claim_now"`
+	NextClaimAfterSeconds            int32  `json:"next_claim_after_seconds"`
+	RecommendedHeartbeatAfterSeconds int32  `json:"recommended_heartbeat_after_seconds"`
+	MaxClaimWaitSeconds              int32  `json:"max_claim_wait_seconds"`
+}
+
+type ClaimRuntimeRunParams struct {
+	WaitSeconds int32
+}
+
+type RuntimePullRunResponse struct {
+	RunID          string           `json:"run_id"`
+	AgentID        string           `json:"agent_id"`
+	Input          JSON             `json:"input"`
+	Metadata       JSON             `json:"metadata,omitempty"`
+	Source         string           `json:"source"`
+	ResultEndpoint string           `json:"result_endpoint"`
+	ResultMethod   string           `json:"result_method"`
+	ResultRequired bool             `json:"result_required"`
+	A2A            *AgentA2AContext `json:"a2a,omitempty"`
+}
+
+type AgentEvent struct {
+	EventType string `json:"event_type"`
+	Payload   JSON   `json:"payload,omitempty"`
+}
+
+type AgentError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type RuntimePullResultRequest struct {
+	Status     string       `json:"status"`
+	Output     JSON         `json:"output,omitempty"`
+	Events     []AgentEvent `json:"events,omitempty"`
+	Error      *AgentError  `json:"error,omitempty"`
+	DurationMS int32        `json:"duration_ms,omitempty"`
+}
+
+type CallAgentRequest struct {
+	ParentRunID   string `json:"parent_run_id,omitempty"`
+	CurrentRunID  string `json:"current_run_id,omitempty"`
+	TargetAgentID string `json:"target_agent_id"`
+	Reason        string `json:"reason,omitempty"`
+	Input         JSON   `json:"input"`
+	Metadata      JSON   `json:"metadata,omitempty"`
+}
+
+type RuntimeWSClientMessage struct {
+	Type       string       `json:"type"`
+	ID         string       `json:"id,omitempty"`
+	RunID      string       `json:"run_id,omitempty"`
+	EventType  string       `json:"event_type,omitempty"`
+	Payload    JSON         `json:"payload,omitempty"`
+	Status     string       `json:"status,omitempty"`
+	Output     JSON         `json:"output,omitempty"`
+	Events     []AgentEvent `json:"events,omitempty"`
+	Error      *AgentError  `json:"error,omitempty"`
+	DurationMS int32        `json:"duration_ms,omitempty"`
+}
+
+type RuntimeWSServerMessage struct {
+	Type              string                  `json:"type"`
+	ID                string                  `json:"id,omitempty"`
+	RunID             string                  `json:"run_id,omitempty"`
+	AgentID           string                  `json:"agent_id,omitempty"`
+	Input             JSON                    `json:"input,omitempty"`
+	Metadata          JSON                    `json:"metadata,omitempty"`
+	Source            string                  `json:"source,omitempty"`
+	ResultEndpoint    string                  `json:"result_endpoint,omitempty"`
+	ResultMethod      string                  `json:"result_method,omitempty"`
+	ResultRequired    bool                    `json:"result_required,omitempty"`
+	A2A               *AgentA2AContext        `json:"a2a,omitempty"`
+	Status            string                  `json:"status,omitempty"`
+	Result            *RunResponse            `json:"result,omitempty"`
+	Event             *RunEventResponse       `json:"event,omitempty"`
+	Heartbeat         *AgentHeartbeatResponse `json:"heartbeat,omitempty"`
+	Error             *AgentError             `json:"error,omitempty"`
+	RetryAfterSeconds int32                   `json:"retry_after_seconds,omitempty"`
+}
+
+type StreamRunEventsOptions struct {
+	AfterSequence int32
+}
+
+type StreamRunEvent struct {
+	ID    string
+	Event string
+	Data  []byte
+}
