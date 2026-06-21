@@ -65,9 +65,13 @@ Agent runtime protocol:
 - `CompleteRuntimeRun`
 - `CallAgent`
 - `CallAgentAt`
+- `RuntimePullConnector`
+- `RuntimeWSConnector`
 
-The package exposes runtime protocol types, but it does not include adapters
-such as command, Codex, OpenClaw, or local HTTP backend runners.
+The package includes the base runtime integration layer: pull loop, websocket
+connect/reconnect, assignment callbacks, `run.event`, and `run.result`
+submission. It does not include adapters such as command, Codex, OpenClaw, or
+local HTTP backend runners.
 
 ## Development
 
