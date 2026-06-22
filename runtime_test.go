@@ -273,6 +273,53 @@ func TestRuntimeWSConnectorHandlesAssignmentsAndSendsMessages(t *testing.T) {
 	}
 }
 
+func TestRuntimeWSConnectorSendsHeartbeat(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	messageCh := make(chan RuntimeWSClientMessage, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/agent-runtime/ws" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		if err := conn.WriteJSON(RuntimeWSServerMessage{Type: "runtime.ready", AgentID: "agent-1"}); err != nil {
+			t.Error(err)
+			return
+		}
+		var message RuntimeWSClientMessage
+		if err := conn.ReadJSON(&message); err != nil {
+			t.Error(err)
+			return
+		}
+		messageCh <- message
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, WithRuntimeToken("ol_live_ws"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	connector := NewRuntimeWSConnector(client)
+	connector.Reconnect = false
+	connector.Heartbeat = time.Millisecond
+	if err := connector.Start(context.Background(), RuntimeHandlers{}); err != nil {
+		t.Fatal(err)
+	}
+	defer connector.Stop(context.Background())
+
+	select {
+	case message := <-messageCh:
+		if message.Type != "heartbeat" || message.ID == "" {
+			t.Fatalf("heartbeat message = %+v", message)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for websocket heartbeat")
+	}
+}
+
 func TestRuntimeWSConnectorReconnectsAfterClose(t *testing.T) {
 	upgrader := websocket.Upgrader{}
 	var connections int32

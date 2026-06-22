@@ -179,6 +179,47 @@ func TestErrorFallbackRetryAfterAndDecodeFailures(t *testing.T) {
 	}
 }
 
+func TestRuntimeHTTPFallbackTokenNoContentAndDecodeEdges(t *testing.T) {
+	var auths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auths = append(auths, r.Header.Get("Authorization"))
+		switch r.URL.Path {
+		case "/api/v1/agent-runtime/heartbeat":
+			w.WriteHeader(http.StatusNoContent)
+		case "/api/v1/agent-runtime/call-agent":
+			w.WriteHeader(http.StatusNoContent)
+		case "/api/v1/agent-runtime/runs/claim":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("{"))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, WithAccessToken("ol_live_access"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if heartbeat, err := client.HeartbeatAgent(context.Background()); err != nil || heartbeat.AgentID != "" {
+		t.Fatalf("HeartbeatAgent = %+v err=%v", heartbeat, err)
+	}
+	if child, err := client.CallAgent(context.Background(), CallAgentRequest{CurrentRunID: "run-1", TargetAgentID: "agent-2", Input: JSON{"q": "hello"}}); err != nil || child.RunID != "" {
+		t.Fatalf("CallAgent no content = %+v err=%v", child, err)
+	}
+	if _, err := client.ClaimRuntimeRunDetailed(context.Background(), ClaimRuntimeRunParams{}); err == nil || !strings.Contains(err.Error(), "decode response") {
+		t.Fatalf("ClaimRuntimeRunDetailed decode err = %v", err)
+	}
+	if len(auths) != 3 {
+		t.Fatalf("auths len = %d", len(auths))
+	}
+	for _, auth := range auths {
+		if auth != "Bearer ol_live_access" {
+			t.Fatalf("runtime fallback auth = %q", auth)
+		}
+	}
+}
+
 func TestReadSSEVariantsAndHandlerErrors(t *testing.T) {
 	var events []StreamRunEvent
 	err := readSSE(strings.NewReader(": keepalive\nid: 1\nevent:\ndata: one\ndata: two\n\nid: 2\ndata: final\n\n"), func(event StreamRunEvent) error {
@@ -354,6 +395,71 @@ func TestRuntimePullConnectorRetriesRateLimitBeforeAssignment(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for assignment after retry")
+	}
+	if atomic.LoadInt32(&claims) < 2 {
+		t.Fatalf("claims = %d", claims)
+	}
+}
+
+func TestRuntimePullConnectorReportsClaimErrorsThenStopsOnEmpty(t *testing.T) {
+	var claims int32
+	errCh := make(chan error, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent-runtime/heartbeat":
+			writeJSON(t, w, AgentHeartbeatResponse{AgentID: "agent-1"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/agent-runtime/runs/claim":
+			if atomic.AddInt32(&claims, 1) == 1 {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"error":{"code":"BROKEN","message":"claim failed"}}`))
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, WithRuntimeToken("ol_live_claim_error"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	connector := NewRuntimePullConnector(client)
+	connector.Wait = time.Millisecond
+	connector.Heartbeat = time.Millisecond
+	connector.EmptyRetry = time.Millisecond
+	connector.StopOnEmpty = true
+	if err := connector.Start(context.Background(), RuntimeHandlers{
+		OnAssigned: func(assignment RuntimeAssignment) {
+			t.Errorf("unexpected assignment: %+v", assignment)
+		},
+		OnError: func(err error) {
+			errCh <- err
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer connector.Stop(context.Background())
+
+	select {
+	case err := <-errCh:
+		if !strings.Contains(err.Error(), "runtime pull claim returned 500") || !strings.Contains(err.Error(), "claim failed") {
+			t.Fatalf("claim error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for claim error")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for atomic.LoadInt32(&claims) < 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := connector.Stop(stopCtx); err != nil {
+		t.Fatal(err)
 	}
 	if atomic.LoadInt32(&claims) < 2 {
 		t.Fatalf("claims = %d", claims)

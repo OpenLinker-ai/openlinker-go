@@ -191,6 +191,7 @@ type RuntimeWSConnector struct {
 	Reconnect    bool
 	ReconnectMin time.Duration
 	ReconnectMax time.Duration
+	Heartbeat    time.Duration
 	Dialer       WebSocketDialer
 
 	mu       sync.Mutex
@@ -198,6 +199,7 @@ type RuntimeWSConnector struct {
 	handlers RuntimeHandlers
 	ctx      context.Context
 	cancel   context.CancelFunc
+	wg       sync.WaitGroup
 }
 
 func NewRuntimeWSConnector(client *Client) *RuntimeWSConnector {
@@ -221,6 +223,9 @@ func (c *RuntimeWSConnector) Start(ctx context.Context, handlers RuntimeHandlers
 	if c.ReconnectMax <= 0 {
 		c.ReconnectMax = 10 * time.Second
 	}
+	if c.Heartbeat <= 0 {
+		c.Heartbeat = 60 * time.Second
+	}
 	if c.Dialer == nil {
 		c.Dialer = websocket.DefaultDialer
 	}
@@ -232,7 +237,16 @@ func (c *RuntimeWSConnector) Start(ctx context.Context, handlers RuntimeHandlers
 	if err := c.connect(c.ctx); err != nil {
 		return err
 	}
-	go c.readLoop()
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		c.readLoop()
+	}()
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		c.heartbeatLoop()
+	}()
 	return nil
 }
 
@@ -246,9 +260,22 @@ func (c *RuntimeWSConnector) Stop(ctx context.Context) error {
 	c.mu.Unlock()
 	if conn != nil {
 		_ = conn.WriteControl(websocket.CloseMessage, []byte{}, time.Now().Add(time.Second))
-		return conn.Close()
+		_ = conn.Close()
 	}
-	return nil
+	done := make(chan struct{})
+	go func() {
+		c.wg.Wait()
+		close(done)
+	}()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-done:
+		return nil
+	}
 }
 
 func (c *RuntimeWSConnector) SendRunEvent(ctx context.Context, runID string, event AgentEvent) error {
@@ -343,6 +370,25 @@ func (c *RuntimeWSConnector) readLoop() {
 				continue
 			}
 			break
+		}
+	}
+}
+
+func (c *RuntimeWSConnector) heartbeatLoop() {
+	ticker := time.NewTicker(c.Heartbeat)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ticker.C:
+			err := c.send(c.ctx, RuntimeWSClientMessage{
+				Type: "heartbeat",
+				ID:   fmt.Sprintf("heartbeat-%d", time.Now().UnixMilli()),
+			})
+			if err != nil && c.ctx.Err() == nil && c.handlers.OnError != nil {
+				c.handlers.OnError(err)
+			}
 		}
 	}
 }
