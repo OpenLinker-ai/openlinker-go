@@ -3,6 +3,7 @@ package openlinker
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -121,6 +122,93 @@ func TestClientEndpointAndConstructionValidation(t *testing.T) {
 	if got := client.runtimeAuthToken(); got != "runtime" {
 		t.Fatalf("runtime token = %q", got)
 	}
+	defaultAgentClient, err := NewClient("https://example.test", WithSDKAgent(" "))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaultAgentClient.sdkAgent != defaultSDKAgent {
+		t.Fatalf("default sdk agent = %q", defaultAgentClient.sdkAgent)
+	}
+}
+
+func TestClientMethodsPropagateRequestErrors(t *testing.T) {
+	client, err := NewClient(
+		"https://example.test",
+		WithAccessToken("ol_live_access"),
+		WithRuntimeToken("ol_live_runtime"),
+		WithHTTPClient(sdkHTTPClient(http.StatusBadGateway, `{"error":{"code":"BROKEN","message":"bad gateway"}}`)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name string
+		call func() error
+	}{
+		{name: "get agent", call: func() error {
+			_, err := client.GetAgent(ctx, "agent")
+			return err
+		}},
+		{name: "get agent card", call: func() error {
+			_, err := client.GetAgentCard(ctx, "agent", false)
+			return err
+		}},
+		{name: "run agent", call: func() error {
+			_, err := client.RunAgent(ctx, RunAgentRequest{AgentID: "agent", Input: JSON{"q": "hi"}})
+			return err
+		}},
+		{name: "start run", call: func() error {
+			_, err := client.StartAgentRun(ctx, RunAgentRequest{AgentID: "agent", Input: JSON{"q": "hi"}})
+			return err
+		}},
+		{name: "get run", call: func() error {
+			_, err := client.GetRun(ctx, "run")
+			return err
+		}},
+		{name: "list events", call: func() error {
+			_, err := client.ListRunEvents(ctx, "run", ListRunEventsParams{})
+			return err
+		}},
+		{name: "list artifacts", call: func() error {
+			_, err := client.ListRunArtifacts(ctx, "run")
+			return err
+		}},
+		{name: "list messages", call: func() error {
+			_, err := client.ListRunMessages(ctx, "run")
+			return err
+		}},
+		{name: "stream events", call: func() error {
+			return client.StreamRunEvents(ctx, "run", StreamRunEventsOptions{}, func(StreamRunEvent) error { return nil })
+		}},
+		{name: "heartbeat", call: func() error {
+			_, err := client.HeartbeatAgent(ctx)
+			return err
+		}},
+		{name: "claim", call: func() error {
+			_, err := client.ClaimRuntimeRun(ctx, ClaimRuntimeRunParams{})
+			return err
+		}},
+		{name: "complete", call: func() error {
+			_, err := client.CompleteRuntimeRun(ctx, "run", RuntimePullResultRequest{Status: "success"})
+			return err
+		}},
+		{name: "call agent", call: func() error {
+			_, err := client.CallAgentAt(ctx, "/agent-runtime/call-agent", CallAgentRequest{CurrentRunID: "run", TargetAgentID: "agent", Input: JSON{"q": "hi"}})
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var sdkErr *Error
+			if err := tc.call(); !errors.As(err, &sdkErr) || sdkErr.Code != "BROKEN" {
+				t.Fatalf("err = %T %v", err, err)
+			}
+		})
+	}
+
+	if err := client.do(ctx, http.MethodPost, "/run", nil, map[string]any{"bad": func() {}}, nil); err == nil || !strings.Contains(err.Error(), "encode request") {
+		t.Fatalf("encode error = %v", err)
+	}
 }
 
 func TestErrorFallbackRetryAfterAndDecodeFailures(t *testing.T) {
@@ -177,6 +265,23 @@ func TestErrorFallbackRetryAfterAndDecodeFailures(t *testing.T) {
 	if got := headerInt32(headers, "X-OpenLinker-Max-Claim-Wait-Seconds"); got != 0 {
 		t.Fatalf("headerInt32 invalid = %d", got)
 	}
+}
+
+type sdkRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f sdkRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func sdkHTTPClient(status int, body string) *http.Client {
+	return &http.Client{Transport: sdkRoundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: status,
+			Status:     http.StatusText(status),
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}, nil
+	})}
 }
 
 func TestRuntimeHTTPFallbackTokenNoContentAndDecodeEdges(t *testing.T) {
