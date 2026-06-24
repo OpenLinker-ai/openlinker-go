@@ -118,21 +118,48 @@ type RunAgentRequest struct {
 	Metadata any    `json:"metadata,omitempty"`
 }
 
+type TaskCallbackAuthentication struct {
+	Scheme      string `json:"scheme,omitempty"`
+	Credentials string `json:"credentials,omitempty"`
+}
+
+type TaskCallbackConfig struct {
+	URL            string                      `json:"url,omitempty"`
+	Token          string                      `json:"token,omitempty"`
+	Authentication *TaskCallbackAuthentication `json:"authentication,omitempty"`
+	Metadata       any                         `json:"metadata,omitempty"`
+	EventTypes     []string                    `json:"event_types,omitempty"`
+}
+
+type TaskCallbackSubscription struct {
+	ID                  string   `json:"id"`
+	RunID               string   `json:"run_id"`
+	TargetURL           string   `json:"target_url"`
+	EventTypes          []string `json:"event_types"`
+	AuthScheme          string   `json:"auth_scheme,omitempty"`
+	Status              string   `json:"status"`
+	ConsecutiveFailures int32    `json:"consecutive_failures"`
+	Secret              string   `json:"secret,omitempty"`
+	CreatedAt           string   `json:"created_at"`
+	UpdatedAt           string   `json:"updated_at"`
+}
+
 type RunResponse struct {
-	RunID               string `json:"run_id"`
-	Status              string `json:"status"`
-	Output              any    `json:"output,omitempty"`
-	ErrorCode           string `json:"error_code,omitempty"`
-	ErrorMessage        string `json:"error_message,omitempty"`
-	CostCents           int32  `json:"cost_cents"`
-	DurationMS          int32  `json:"duration_ms"`
-	Source              string `json:"source,omitempty"`
-	ParentRunID         string `json:"parent_run_id,omitempty"`
-	CallerAgentID       string `json:"caller_agent_id,omitempty"`
-	BillingMode         string `json:"billing_mode,omitempty"`
-	RequirementEvidence any    `json:"requirement_evidence,omitempty"`
-	EvidenceSummary     any    `json:"evidence_summary,omitempty"`
-	NextAction          any    `json:"next_action,omitempty"`
+	RunID               string                    `json:"run_id"`
+	Status              string                    `json:"status"`
+	Output              any                       `json:"output,omitempty"`
+	ErrorCode           string                    `json:"error_code,omitempty"`
+	ErrorMessage        string                    `json:"error_message,omitempty"`
+	CostCents           int32                     `json:"cost_cents"`
+	DurationMS          int32                     `json:"duration_ms"`
+	Source              string                    `json:"source,omitempty"`
+	ParentRunID         string                    `json:"parent_run_id,omitempty"`
+	CallerAgentID       string                    `json:"caller_agent_id,omitempty"`
+	BillingMode         string                    `json:"billing_mode,omitempty"`
+	TaskCallback        *TaskCallbackSubscription `json:"task_callback,omitempty"`
+	RequirementEvidence any                       `json:"requirement_evidence,omitempty"`
+	EvidenceSummary     any                       `json:"evidence_summary,omitempty"`
+	NextAction          any                       `json:"next_action,omitempty"`
 }
 
 type ListRunEventsParams struct {
@@ -241,12 +268,13 @@ type RuntimePullResultRequest struct {
 }
 
 type CallAgentRequest struct {
-	ParentRunID   string `json:"parent_run_id,omitempty"`
-	CurrentRunID  string `json:"current_run_id,omitempty"`
-	TargetAgentID string `json:"target_agent_id"`
-	Reason        string `json:"reason,omitempty"`
-	Input         any    `json:"input"`
-	Metadata      any    `json:"metadata,omitempty"`
+	ParentRunID   string              `json:"parent_run_id,omitempty"`
+	CurrentRunID  string              `json:"current_run_id,omitempty"`
+	TargetAgentID string              `json:"target_agent_id"`
+	Reason        string              `json:"reason,omitempty"`
+	Input         any                 `json:"input"`
+	Metadata      any                 `json:"metadata,omitempty"`
+	TaskCallback  *TaskCallbackConfig `json:"task_callback,omitempty"`
 }
 
 type RuntimeWSClientMessage struct {

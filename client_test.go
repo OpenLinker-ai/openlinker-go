@@ -239,6 +239,12 @@ func TestRuntimeMethodsUseRuntimeTokenAndProtocolEndpoints(t *testing.T) {
 		TargetAgentID: "target-agent",
 		Reason:        "delegate",
 		Input:         JSON{"query": "child"},
+		TaskCallback: &TaskCallbackConfig{
+			URL:        "https://caller.example.com/a2a/events",
+			Token:      "caller-token",
+			EventTypes: []string{"run.completed", "run.failed", "run.canceled"},
+			Metadata:   JSON{"client": "go-sdk"},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -271,6 +277,14 @@ func TestRuntimeMethodsUseRuntimeTokenAndProtocolEndpoints(t *testing.T) {
 	}
 	if calls[3].Body["current_run_id"] != "run-1" || calls[3].Body["target_agent_id"] != "target-agent" {
 		t.Fatalf("call agent body = %#v", calls[3].Body)
+	}
+	push, ok := calls[3].Body["task_callback"].(map[string]any)
+	if !ok || push["url"] != "https://caller.example.com/a2a/events" || push["token"] != "caller-token" {
+		t.Fatalf("call agent task callback = %#v", calls[3].Body["task_callback"])
+	}
+	events, ok := push["event_types"].([]any)
+	if !ok || len(events) != 3 || events[0] != "run.completed" {
+		t.Fatalf("call agent push events = %#v", push["event_types"])
 	}
 	if calls[4].Path != "/api/v1/agent-runtime/call-agent" || calls[4].Body["input"] != "child" {
 		t.Fatalf("call agent at body = %#v path=%s", calls[4].Body, calls[4].Path)
