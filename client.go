@@ -137,12 +137,36 @@ func (c *Client) RunAgent(ctx context.Context, req RunAgentRequest) (*RunRespons
 	return &out, nil
 }
 
+func (c *Client) RunAgentWithCallbacks(ctx context.Context, req RunAgentRequest, opts PlatformCallbackOptions) (*RunResponse, error) {
+	started, err := c.StartAgentRun(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := c.streamPlatformCallbacks(ctx, started.RunID, opts, true); err != nil {
+		return nil, err
+	}
+	return c.GetRun(ctx, started.RunID)
+}
+
 func (c *Client) StartAgentRun(ctx context.Context, req RunAgentRequest) (*RunResponse, error) {
 	var out RunResponse
 	if err := c.do(ctx, http.MethodPost, "/runs", nil, req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (c *Client) StartAgentRunWithCallbacks(ctx context.Context, req RunAgentRequest, opts PlatformCallbackOptions) (*RunResponse, error) {
+	started, err := c.StartAgentRun(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	go func(runID string) {
+		if _, streamErr := c.streamPlatformCallbacks(ctx, runID, opts, false); streamErr != nil && opts.OnError != nil {
+			opts.OnError(streamErr)
+		}
+	}(started.RunID)
+	return started, nil
 }
 
 func (c *Client) GetRun(ctx context.Context, runID string) (*RunResponse, error) {
@@ -197,6 +221,41 @@ func (c *Client) StreamRunEvents(ctx context.Context, runID string, opts StreamR
 		return parseError(resp)
 	}
 	return readSSE(resp.Body, handle)
+}
+
+func (c *Client) streamPlatformCallbacks(ctx context.Context, runID string, opts PlatformCallbackOptions, untilTerminal bool) (*StreamRunEvent, error) {
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var terminal *StreamRunEvent
+	err := c.StreamRunEvents(streamCtx, runID, StreamRunEventsOptions{AfterSequence: opts.AfterSequence}, func(event StreamRunEvent) error {
+		if matchesPlatformCallbackEvent(opts.EventTypes, event.Event) && opts.OnEvent != nil {
+			if err := opts.OnEvent(event); err != nil {
+				return err
+			}
+		}
+		if isTerminalRunEvent(event.Event) {
+			copyEvent := event
+			terminal = &copyEvent
+			if opts.OnTerminal != nil {
+				if err := opts.OnTerminal(event); err != nil {
+					return err
+				}
+			}
+			if untilTerminal {
+				cancel()
+			}
+		}
+		return nil
+	})
+	if err != nil && !(untilTerminal && terminal != nil && errors.Is(err, context.Canceled)) {
+		return terminal, err
+	}
+	if opts.OnClose != nil {
+		if err := opts.OnClose(); err != nil {
+			return terminal, err
+		}
+	}
+	return terminal, nil
 }
 
 func (c *Client) HeartbeatAgent(ctx context.Context) (*AgentHeartbeatResponse, error) {
@@ -506,4 +565,20 @@ func readSSE(reader io.Reader, handle func(StreamRunEvent) error) error {
 		return err
 	}
 	return dispatch()
+}
+
+func matchesPlatformCallbackEvent(eventTypes []string, eventType string) bool {
+	if len(eventTypes) == 0 {
+		return true
+	}
+	for _, allowed := range eventTypes {
+		if allowed == eventType {
+			return true
+		}
+	}
+	return false
+}
+
+func isTerminalRunEvent(eventType string) bool {
+	return eventType == "run.completed" || eventType == "run.failed" || eventType == "run.canceled"
 }

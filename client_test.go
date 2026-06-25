@@ -79,6 +79,13 @@ func TestRunAgentEncodesRequestBody(t *testing.T) {
 		AgentID:  "00000000-0000-0000-0000-000000000001",
 		Input:    JSON{"query": "hello"},
 		Metadata: JSON{"trace_id": "trace-1"},
+		TaskCallback: &TaskCallbackConfig{
+			URL:        "https://caller.example.com/a2a/events",
+			Token:      "caller-token",
+			Secret:     "caller-secret",
+			EventTypes: []string{"run.completed", "run.failed"},
+			Metadata:   JSON{"client": "go-sdk"},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -91,6 +98,80 @@ func TestRunAgentEncodesRequestBody(t *testing.T) {
 	}
 	if got["input"].(map[string]any)["query"] != "hello" {
 		t.Fatalf("input = %#v", got["input"])
+	}
+	push, ok := got["task_callback"].(map[string]any)
+	if !ok || push["url"] != "https://caller.example.com/a2a/events" || push["token"] != "caller-token" {
+		t.Fatalf("task callback = %#v", got["task_callback"])
+	}
+	if push["secret"] != "caller-secret" {
+		t.Fatalf("task callback secret = %#v", push["secret"])
+	}
+	events, ok := push["event_types"].([]any)
+	if !ok || len(events) != 2 || events[0] != "run.completed" {
+		t.Fatalf("task callback events = %#v", push["event_types"])
+	}
+}
+
+func TestRunAgentWithCallbacksUsesPlatformStream(t *testing.T) {
+	var calls []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.String())
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/runs":
+			var got map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := got["task_callback"]; ok {
+				t.Fatalf("platform callback should not create external task_callback: %#v", got)
+			}
+			writeJSON(t, w, RunResponse{RunID: "run-platform", Status: "running"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/runs/run-platform/stream":
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = w.Write([]byte("id: 1\nevent: run.message.delta\ndata: {\"text\":\"working\"}\n\n"))
+			_, _ = w.Write([]byte("id: 2\nevent: run.completed\ndata: {\"status\":\"success\"}\n\n"))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/runs/run-platform":
+			writeJSON(t, w, RunResponse{RunID: "run-platform", Status: "success", Output: JSON{"ok": true}})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []StreamRunEvent
+	var terminal []StreamRunEvent
+	resp, err := client.RunAgentWithCallbacks(context.Background(), RunAgentRequest{
+		AgentID: "00000000-0000-0000-0000-000000000001",
+		Input:   JSON{"query": "hello"},
+	}, PlatformCallbackOptions{
+		EventTypes: []string{"run.message.delta"},
+		OnEvent: func(event StreamRunEvent) error {
+			events = append(events, event)
+			return nil
+		},
+		OnTerminal: func(event StreamRunEvent) error {
+			terminal = append(terminal, event)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Status != "success" {
+		t.Fatalf("response = %+v", resp)
+	}
+	if len(events) != 1 || events[0].Event != "run.message.delta" {
+		t.Fatalf("events = %+v", events)
+	}
+	if len(terminal) != 1 || terminal[0].Event != "run.completed" {
+		t.Fatalf("terminal = %+v", terminal)
+	}
+	if len(calls) != 3 || calls[0] != "POST /api/v1/runs" || calls[1] != "GET /api/v1/runs/run-platform/stream" || calls[2] != "GET /api/v1/runs/run-platform" {
+		t.Fatalf("calls = %#v", calls)
 	}
 }
 
@@ -242,6 +323,7 @@ func TestRuntimeMethodsUseRuntimeTokenAndProtocolEndpoints(t *testing.T) {
 		TaskCallback: &TaskCallbackConfig{
 			URL:        "https://caller.example.com/a2a/events",
 			Token:      "caller-token",
+			Secret:     "caller-secret",
 			EventTypes: []string{"run.completed", "run.failed", "run.canceled"},
 			Metadata:   JSON{"client": "go-sdk"},
 		},
@@ -281,6 +363,9 @@ func TestRuntimeMethodsUseRuntimeTokenAndProtocolEndpoints(t *testing.T) {
 	push, ok := calls[3].Body["task_callback"].(map[string]any)
 	if !ok || push["url"] != "https://caller.example.com/a2a/events" || push["token"] != "caller-token" {
 		t.Fatalf("call agent task callback = %#v", calls[3].Body["task_callback"])
+	}
+	if push["secret"] != "caller-secret" {
+		t.Fatalf("call agent task callback secret = %#v", push["secret"])
 	}
 	events, ok := push["event_types"].([]any)
 	if !ok || len(events) != 3 || events[0] != "run.completed" {

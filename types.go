@@ -113,9 +113,12 @@ type AgentCardResponse struct {
 }
 
 type RunAgentRequest struct {
-	AgentID  string `json:"agent_id"`
-	Input    any    `json:"input"`
-	Metadata any    `json:"metadata,omitempty"`
+	AgentID                string              `json:"agent_id"`
+	Input                  any                 `json:"input"`
+	Metadata               any                 `json:"metadata,omitempty"`
+	TaskCallback           *TaskCallbackConfig `json:"task_callback,omitempty"`
+	PushNotification       *TaskCallbackConfig `json:"push_notification,omitempty"`
+	PushNotificationConfig *TaskCallbackConfig `json:"pushNotificationConfig,omitempty"`
 }
 
 type TaskCallbackAuthentication struct {
@@ -126,6 +129,7 @@ type TaskCallbackAuthentication struct {
 type TaskCallbackConfig struct {
 	URL            string                      `json:"url,omitempty"`
 	Token          string                      `json:"token,omitempty"`
+	Secret         string                      `json:"secret,omitempty"`
 	Authentication *TaskCallbackAuthentication `json:"authentication,omitempty"`
 	Metadata       any                         `json:"metadata,omitempty"`
 	EventTypes     []string                    `json:"event_types,omitempty"`
@@ -318,4 +322,13 @@ type StreamRunEvent struct {
 	ID    string
 	Event string
 	Data  []byte
+}
+
+type PlatformCallbackOptions struct {
+	EventTypes    []string
+	AfterSequence int32
+	OnEvent       func(StreamRunEvent) error
+	OnTerminal    func(StreamRunEvent) error
+	OnClose       func() error
+	OnError       func(error)
 }

@@ -42,6 +42,60 @@ func main() {
 }
 ```
 
+Platform-hosted callbacks reuse the run event stream and do not require a
+public callback URL:
+
+```go
+result, err := client.RunAgentWithCallbacks(context.Background(), openlinker.RunAgentRequest{
+	AgentID: agents.Items[0].ID,
+	Input:   openlinker.JSON{"query": "Summarize this dataset"},
+}, openlinker.PlatformCallbackOptions{
+	EventTypes: []string{"run.message.delta"},
+	OnEvent: func(event openlinker.StreamRunEvent) error {
+		fmt.Println(event.Event, string(event.Data))
+		return nil
+	},
+})
+```
+
+External webhook callbacks are available for server integrations. The SDK
+builds the callback config, passes the external address and secret to Core, and
+provides request verification helpers:
+
+```go
+callback, err := openlinker.NewWebhookRunCallback(os.Getenv("OPENLINKER_CALLBACK_URL"), openlinker.WebhookRunCallbackOptions{
+	Secret:     os.Getenv("OPENLINKER_CALLBACK_SECRET"),
+	EventTypes: []string{"run.completed", "run.failed"},
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+_, err = client.StartAgentRun(context.Background(), openlinker.RunAgentRequest{
+	AgentID:      agents.Items[0].ID,
+	Input:        openlinker.JSON{"query": "Summarize this dataset"},
+	TaskCallback: callback,
+})
+```
+
+Verify the raw callback body before decoding it:
+
+```go
+func handleOpenLinkerCallback(w http.ResponseWriter, r *http.Request) {
+	body, ok, err := openlinker.VerifyTaskCallbackRequest(r, os.Getenv("OPENLINKER_CALLBACK_SECRET"), 1<<20)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !ok {
+		http.Error(w, "invalid signature", http.StatusUnauthorized)
+		return
+	}
+
+	_ = body
+}
+```
+
 ## Core Surface
 
 Application-side calls:
@@ -50,7 +104,9 @@ Application-side calls:
 - `GetAgent`
 - `GetAgentCard`
 - `RunAgent`
+- `RunAgentWithCallbacks`
 - `StartAgentRun`
+- `StartAgentRunWithCallbacks`
 - `GetRun`
 - `ListRunEvents`
 - `ListRunArtifacts`
