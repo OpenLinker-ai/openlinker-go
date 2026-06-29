@@ -134,3 +134,12 @@ local HTTP backend runners.
 ```bash
 go test ./...
 ```
+
+## Contributing and Security
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development rules and
+[SECURITY.md](./SECURITY.md) for vulnerability reporting.
+
+## License
+
+Apache-2.0. See [LICENSE](./LICENSE).
