@@ -118,6 +118,13 @@ func TestA2AClientJSONRPCMethods(t *testing.T) {
 	if _, ok := part["kind"]; ok {
 		t.Fatalf("current A2A part should not include kind: %#v", part)
 	}
+	config := params["configuration"].(map[string]any)
+	if config["returnImmediately"] != false {
+		t.Fatalf("current A2A config = %#v", config)
+	}
+	if _, ok := config["blocking"]; ok {
+		t.Fatalf("current A2A config should not include blocking: %#v", config)
+	}
 }
 
 func TestA2AClientLegacyDialect(t *testing.T) {
@@ -151,6 +158,13 @@ func TestA2AClientLegacyDialect(t *testing.T) {
 	part := message["parts"].([]any)[0].(map[string]any)
 	if part["kind"] != "text" || part["text"] != "legacy" {
 		t.Fatalf("legacy part = %#v", part)
+	}
+	config := params["configuration"].(map[string]any)
+	if config["blocking"] != true {
+		t.Fatalf("legacy config = %#v", config)
+	}
+	if _, ok := config["returnImmediately"]; ok {
+		t.Fatalf("legacy config should not include returnImmediately: %#v", config)
 	}
 }
 

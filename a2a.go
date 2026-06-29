@@ -200,6 +200,7 @@ type A2AMessageSendParams struct {
 type A2ASendConfiguration struct {
 	AcceptedOutputModes        []string                       `json:"acceptedOutputModes,omitempty"`
 	Blocking                   *bool                          `json:"blocking,omitempty"`
+	ReturnImmediately          *bool                          `json:"returnImmediately,omitempty"`
 	PushNotificationConfig     *A2APushNotificationConfig     `json:"pushNotificationConfig,omitempty"`
 	TaskPushNotificationConfig *A2ATaskPushNotificationConfig `json:"taskPushNotificationConfig,omitempty"`
 	HistoryLength              *int                           `json:"historyLength,omitempty"`
@@ -667,7 +668,29 @@ func NormalizeA2AParamsForDialect(params any, dialect string) any {
 
 func NormalizeA2AMessageSendParamsForDialect(params A2AMessageSendParams, dialect string) A2AMessageSendParams {
 	params.Message = NormalizeA2AMessageForDialect(params.Message, dialect)
+	params.Configuration = NormalizeA2ASendConfigurationForDialect(params.Configuration, dialect)
 	return params
+}
+
+func NormalizeA2ASendConfigurationForDialect(config *A2ASendConfiguration, dialect string) *A2ASendConfiguration {
+	if config == nil {
+		return nil
+	}
+	normalized := *config
+	if NormalizeA2ADialect(dialect) == A2ADialectLegacy {
+		if normalized.ReturnImmediately != nil {
+			blocking := !*normalized.ReturnImmediately
+			normalized.Blocking = &blocking
+			normalized.ReturnImmediately = nil
+		}
+		return &normalized
+	}
+	if normalized.Blocking != nil {
+		returnImmediately := !*normalized.Blocking
+		normalized.ReturnImmediately = &returnImmediately
+		normalized.Blocking = nil
+	}
+	return &normalized
 }
 
 func NormalizeA2AMessageForDialect(message A2AMessage, dialect string) A2AMessage {
