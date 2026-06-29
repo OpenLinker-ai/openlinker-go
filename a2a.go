@@ -223,19 +223,133 @@ type A2APushAuthenticationInfo struct {
 }
 
 type A2ATaskPushNotificationConfig struct {
-	TaskID                 string                    `json:"taskId"`
-	PushNotificationConfig A2APushNotificationConfig `json:"pushNotificationConfig"`
+	Tenant                 string                     `json:"tenant,omitempty"`
+	ID                     string                     `json:"id,omitempty"`
+	TaskID                 string                     `json:"taskId,omitempty"`
+	URL                    string                     `json:"url,omitempty"`
+	Token                  string                     `json:"token,omitempty"`
+	Secret                 string                     `json:"secret,omitempty"`
+	Authentication         *A2APushAuthenticationInfo `json:"authentication,omitempty"`
+	Metadata               map[string]any             `json:"metadata,omitempty"`
+	EventTypes             []string                   `json:"eventTypes,omitempty"`
+	EventTypesAlias        []string                   `json:"event_types,omitempty"`
+	PushNotificationConfig A2APushNotificationConfig  `json:"pushNotificationConfig,omitempty"`
+}
+
+func (c A2ATaskPushNotificationConfig) MarshalJSON() ([]byte, error) {
+	out := map[string]any{}
+	if strings.TrimSpace(c.Tenant) != "" {
+		out["tenant"] = strings.TrimSpace(c.Tenant)
+	}
+	if strings.TrimSpace(c.ID) != "" {
+		out["id"] = strings.TrimSpace(c.ID)
+	}
+	if strings.TrimSpace(c.TaskID) != "" {
+		out["taskId"] = strings.TrimSpace(c.TaskID)
+	}
+	mergeA2APushConfigFields(out, pushConfigFromA2ATaskPushNotificationConfig(c))
+	if !a2aPushConfigEmpty(c.PushNotificationConfig) {
+		out["pushNotificationConfig"] = c.PushNotificationConfig
+	}
+	return json.Marshal(out)
+}
+
+func (c *A2ATaskPushNotificationConfig) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Tenant                 string                     `json:"tenant,omitempty"`
+		ID                     string                     `json:"id,omitempty"`
+		TaskID                 string                     `json:"taskId,omitempty"`
+		URL                    string                     `json:"url,omitempty"`
+		Token                  string                     `json:"token,omitempty"`
+		Secret                 string                     `json:"secret,omitempty"`
+		Authentication         *A2APushAuthenticationInfo `json:"authentication,omitempty"`
+		Metadata               map[string]any             `json:"metadata,omitempty"`
+		EventTypes             []string                   `json:"eventTypes,omitempty"`
+		EventTypesAlias        []string                   `json:"event_types,omitempty"`
+		PushNotificationConfig A2APushNotificationConfig  `json:"pushNotificationConfig,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	c.Tenant = raw.Tenant
+	c.ID = raw.ID
+	c.TaskID = raw.TaskID
+	c.URL = raw.URL
+	c.Token = raw.Token
+	c.Secret = raw.Secret
+	c.Authentication = raw.Authentication
+	c.Metadata = raw.Metadata
+	c.EventTypes = raw.EventTypes
+	c.EventTypesAlias = raw.EventTypesAlias
+	c.PushNotificationConfig = raw.PushNotificationConfig
+	if c.PushNotificationConfig.ID == "" {
+		c.PushNotificationConfig.ID = c.ID
+	}
+	if c.PushNotificationConfig.URL == "" {
+		c.PushNotificationConfig.URL = c.URL
+	}
+	if c.PushNotificationConfig.Token == "" {
+		c.PushNotificationConfig.Token = c.Token
+	}
+	if c.PushNotificationConfig.Secret == "" {
+		c.PushNotificationConfig.Secret = c.Secret
+	}
+	if c.PushNotificationConfig.Authentication == nil {
+		c.PushNotificationConfig.Authentication = c.Authentication
+	}
+	if c.PushNotificationConfig.Metadata == nil {
+		c.PushNotificationConfig.Metadata = c.Metadata
+	}
+	if len(c.PushNotificationConfig.EventTypes) == 0 {
+		c.PushNotificationConfig.EventTypes = c.EventTypes
+	}
+	if len(c.PushNotificationConfig.EventTypesAlias) == 0 {
+		c.PushNotificationConfig.EventTypesAlias = c.EventTypesAlias
+	}
+	return nil
 }
 
 type A2ATaskPushConfigParams struct {
-	ID                       string                    `json:"id,omitempty"`
-	TaskID                   string                    `json:"taskId,omitempty"`
-	PushNotificationConfigID string                    `json:"pushNotificationConfigId,omitempty"`
-	PushNotificationConfig   A2APushNotificationConfig `json:"pushNotificationConfig,omitempty"`
+	ID                       string                     `json:"id,omitempty"`
+	TaskID                   string                     `json:"taskId,omitempty"`
+	PushNotificationConfigID string                     `json:"pushNotificationConfigId,omitempty"`
+	PushNotificationConfig   A2APushNotificationConfig  `json:"pushNotificationConfig,omitempty"`
+	URL                      string                     `json:"url,omitempty"`
+	Token                    string                     `json:"token,omitempty"`
+	Secret                   string                     `json:"secret,omitempty"`
+	Authentication           *A2APushAuthenticationInfo `json:"authentication,omitempty"`
+	Metadata                 map[string]any             `json:"metadata,omitempty"`
+	EventTypes               []string                   `json:"eventTypes,omitempty"`
+	EventTypesAlias          []string                   `json:"event_types,omitempty"`
+	PageSize                 *int                       `json:"pageSize,omitempty"`
+	PageToken                string                     `json:"pageToken,omitempty"`
 }
 
 type A2ATaskPushConfigList struct {
-	Items []A2ATaskPushNotificationConfig `json:"items"`
+	Configs       []A2ATaskPushNotificationConfig `json:"configs,omitempty"`
+	NextPageToken string                          `json:"nextPageToken,omitempty"`
+	Items         []A2ATaskPushNotificationConfig `json:"items,omitempty"`
+}
+
+func (l *A2ATaskPushConfigList) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Configs       []A2ATaskPushNotificationConfig `json:"configs,omitempty"`
+		NextPageToken string                          `json:"nextPageToken,omitempty"`
+		Items         []A2ATaskPushNotificationConfig `json:"items,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if len(raw.Configs) == 0 && len(raw.Items) > 0 {
+		raw.Configs = raw.Items
+	}
+	if len(raw.Items) == 0 && len(raw.Configs) > 0 {
+		raw.Items = raw.Configs
+	}
+	l.Configs = raw.Configs
+	l.NextPageToken = raw.NextPageToken
+	l.Items = raw.Items
+	return nil
 }
 
 type A2ATaskQueryParams struct {
@@ -319,6 +433,11 @@ type A2AStreamResponse struct {
 	ArtifactUpdate *A2ATaskArtifactUpdateEvent `json:"artifactUpdate,omitempty"`
 }
 
+type A2ASendMessageResponse struct {
+	Task    *A2ATask    `json:"task,omitempty"`
+	Message *A2AMessage `json:"message,omitempty"`
+}
+
 type A2AStreamEvent struct {
 	ID     string
 	Event  string
@@ -352,11 +471,25 @@ func (c *A2AClient) CallInto(ctx context.Context, method string, params any, out
 }
 
 func (c *A2AClient) SendMessage(ctx context.Context, params A2AMessageSendParams) (*A2ATask, error) {
-	var out A2ATask
-	if err := c.CallInto(ctx, A2AMethodMessageSend, params, &out); err != nil {
+	resp, err := c.SendMessageResponse(ctx, params)
+	if err != nil {
 		return nil, err
 	}
-	return &out, nil
+	if resp.Task != nil {
+		return resp.Task, nil
+	}
+	if resp.Message != nil {
+		return nil, fmt.Errorf("openlinker: A2A SendMessage returned a message; use SendMessageResponse to handle message payloads")
+	}
+	return nil, fmt.Errorf("openlinker: A2A SendMessage returned an empty response")
+}
+
+func (c *A2AClient) SendMessageResponse(ctx context.Context, params A2AMessageSendParams) (*A2ASendMessageResponse, error) {
+	var raw json.RawMessage
+	if err := c.CallInto(ctx, A2AMethodMessageSend, params, &raw); err != nil {
+		return nil, err
+	}
+	return decodeA2ASendMessageResponse(raw)
 }
 
 func (c *A2AClient) StreamMessage(ctx context.Context, params A2AMessageSendParams, handle func(A2AStreamEvent) error) error {
@@ -566,6 +699,25 @@ func a2aStreamEventFromSSE(event StreamRunEvent) (A2AStreamEvent, error) {
 	return streamEvent, nil
 }
 
+func decodeA2ASendMessageResponse(raw json.RawMessage) (*A2ASendMessageResponse, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return &A2ASendMessageResponse{}, nil
+	}
+	var wrapped A2ASendMessageResponse
+	if err := json.Unmarshal(raw, &wrapped); err == nil && (wrapped.Task != nil || wrapped.Message != nil) {
+		return &wrapped, nil
+	}
+	var task A2ATask
+	if err := json.Unmarshal(raw, &task); err == nil && (task.ID != "" || task.Status.State != "") {
+		return &A2ASendMessageResponse{Task: &task}, nil
+	}
+	var message A2AMessage
+	if err := json.Unmarshal(raw, &message); err == nil && (message.MessageID != "" || message.Role != "" || len(message.Parts) > 0) {
+		return &A2ASendMessageResponse{Message: &message}, nil
+	}
+	return nil, fmt.Errorf("openlinker: decode A2A SendMessage response: unsupported payload %s", string(raw))
+}
+
 func NewA2ATextMessageParams(messageID, text string, acceptedOutputModes []string) A2AMessageSendParams {
 	return NewA2ATextMessageParamsForDialect(messageID, text, acceptedOutputModes, A2ADialectCurrent)
 }
@@ -661,6 +813,13 @@ func NormalizeA2AParamsForDialect(params any, dialect string) any {
 		}
 		normalized := NormalizeA2AMessageSendParamsForDialect(*typed, dialect)
 		return &normalized
+	case A2ATaskPushConfigParams:
+		return NormalizeA2ATaskPushConfigParamsForDialect(typed, dialect)
+	case *A2ATaskPushConfigParams:
+		if typed == nil {
+			return params
+		}
+		return NormalizeA2ATaskPushConfigParamsForDialect(*typed, dialect)
 	default:
 		return params
 	}
@@ -690,12 +849,160 @@ func NormalizeA2ASendConfigurationForDialect(config *A2ASendConfiguration, diale
 		normalized.ReturnImmediately = &returnImmediately
 		normalized.Blocking = nil
 	}
+	if normalized.TaskPushNotificationConfig != nil {
+		taskCfg := NormalizeA2ATaskPushNotificationConfigForDialect(*normalized.TaskPushNotificationConfig, dialect)
+		normalized.TaskPushNotificationConfig = &taskCfg
+	}
 	return &normalized
+}
+
+func NormalizeA2ATaskPushConfigParamsForDialect(params A2ATaskPushConfigParams, dialect string) any {
+	if NormalizeA2ADialect(dialect) == A2ADialectLegacy {
+		return params
+	}
+	out := map[string]any{}
+	taskID := strings.TrimSpace(params.TaskID)
+	if taskID == "" {
+		taskID = strings.TrimSpace(params.ID)
+	}
+	if taskID != "" {
+		out["taskId"] = taskID
+	}
+	configID := strings.TrimSpace(params.PushNotificationConfigID)
+	if configID == "" {
+		configID = strings.TrimSpace(params.PushNotificationConfig.ID)
+	}
+	if configID == "" && strings.TrimSpace(params.TaskID) != "" {
+		configID = strings.TrimSpace(params.ID)
+	}
+	if configID != "" {
+		out["id"] = configID
+	}
+	mergeA2APushConfigFields(out, pushConfigFromA2ATaskPushParams(params))
+	if params.PageSize != nil {
+		out["pageSize"] = *params.PageSize
+	}
+	if strings.TrimSpace(params.PageToken) != "" {
+		out["pageToken"] = strings.TrimSpace(params.PageToken)
+	}
+	return out
+}
+
+func NormalizeA2ATaskPushNotificationConfigForDialect(config A2ATaskPushNotificationConfig, dialect string) A2ATaskPushNotificationConfig {
+	if NormalizeA2ADialect(dialect) == A2ADialectLegacy {
+		return config
+	}
+	normalized := config
+	push := pushConfigFromA2ATaskPushNotificationConfig(config)
+	normalized.ID = push.ID
+	normalized.URL = push.URL
+	normalized.Token = push.Token
+	normalized.Secret = push.Secret
+	normalized.Authentication = push.Authentication
+	normalized.Metadata = push.Metadata
+	normalized.EventTypes = push.EventTypes
+	normalized.EventTypesAlias = push.EventTypesAlias
+	normalized.PushNotificationConfig = A2APushNotificationConfig{}
+	return normalized
+}
+
+func pushConfigFromA2ATaskPushParams(params A2ATaskPushConfigParams) A2APushNotificationConfig {
+	cfg := params.PushNotificationConfig
+	if cfg.ID == "" && strings.TrimSpace(params.TaskID) != "" {
+		cfg.ID = strings.TrimSpace(params.ID)
+	}
+	if cfg.URL == "" {
+		cfg.URL = params.URL
+	}
+	if cfg.Token == "" {
+		cfg.Token = params.Token
+	}
+	if cfg.Secret == "" {
+		cfg.Secret = params.Secret
+	}
+	if cfg.Authentication == nil {
+		cfg.Authentication = params.Authentication
+	}
+	if cfg.Metadata == nil {
+		cfg.Metadata = params.Metadata
+	}
+	if len(cfg.EventTypes) == 0 {
+		cfg.EventTypes = params.EventTypes
+	}
+	if len(cfg.EventTypesAlias) == 0 {
+		cfg.EventTypesAlias = params.EventTypesAlias
+	}
+	return cfg
+}
+
+func pushConfigFromA2ATaskPushNotificationConfig(config A2ATaskPushNotificationConfig) A2APushNotificationConfig {
+	cfg := config.PushNotificationConfig
+	if cfg.ID == "" {
+		cfg.ID = config.ID
+	}
+	if cfg.URL == "" {
+		cfg.URL = config.URL
+	}
+	if cfg.Token == "" {
+		cfg.Token = config.Token
+	}
+	if cfg.Secret == "" {
+		cfg.Secret = config.Secret
+	}
+	if cfg.Authentication == nil {
+		cfg.Authentication = config.Authentication
+	}
+	if cfg.Metadata == nil {
+		cfg.Metadata = config.Metadata
+	}
+	if len(cfg.EventTypes) == 0 {
+		cfg.EventTypes = config.EventTypes
+	}
+	if len(cfg.EventTypesAlias) == 0 {
+		cfg.EventTypesAlias = config.EventTypesAlias
+	}
+	return cfg
+}
+
+func mergeA2APushConfigFields(out map[string]any, cfg A2APushNotificationConfig) {
+	if strings.TrimSpace(cfg.URL) != "" {
+		out["url"] = strings.TrimSpace(cfg.URL)
+	}
+	if strings.TrimSpace(cfg.Token) != "" {
+		out["token"] = strings.TrimSpace(cfg.Token)
+	}
+	if strings.TrimSpace(cfg.Secret) != "" {
+		out["secret"] = strings.TrimSpace(cfg.Secret)
+	}
+	if cfg.Authentication != nil {
+		out["authentication"] = cfg.Authentication
+	}
+	if cfg.Metadata != nil {
+		out["metadata"] = cfg.Metadata
+	}
+	if len(cfg.EventTypes) > 0 {
+		out["eventTypes"] = cfg.EventTypes
+	}
+	if len(cfg.EventTypesAlias) > 0 {
+		out["event_types"] = cfg.EventTypesAlias
+	}
+}
+
+func a2aPushConfigEmpty(cfg A2APushNotificationConfig) bool {
+	return strings.TrimSpace(cfg.ID) == "" &&
+		strings.TrimSpace(cfg.URL) == "" &&
+		strings.TrimSpace(cfg.Token) == "" &&
+		strings.TrimSpace(cfg.Secret) == "" &&
+		cfg.Authentication == nil &&
+		cfg.Metadata == nil &&
+		len(cfg.EventTypes) == 0 &&
+		len(cfg.EventTypesAlias) == 0
 }
 
 func NormalizeA2AMessageForDialect(message A2AMessage, dialect string) A2AMessage {
 	normalized := message
 	if NormalizeA2ADialect(dialect) == A2ADialectLegacy {
+		normalized.Role = normalizeA2ARoleForLegacy(normalized.Role)
 		if normalized.Kind == "" {
 			normalized.Kind = "message"
 		}
@@ -703,8 +1010,35 @@ func NormalizeA2AMessageForDialect(message A2AMessage, dialect string) A2AMessag
 		return normalized
 	}
 	normalized.Kind = ""
+	normalized.Role = normalizeA2ARoleForCurrent(normalized.Role)
 	normalized.Parts = normalizeA2APartsForDialect(normalized.Parts, A2ADialectCurrent)
 	return normalized
+}
+
+func normalizeA2ARoleForCurrent(role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "user", "role_user":
+		return "ROLE_USER"
+	case "agent", "assistant", "role_agent":
+		return "ROLE_AGENT"
+	case "unspecified", "role_unspecified":
+		return "ROLE_UNSPECIFIED"
+	default:
+		return role
+	}
+}
+
+func normalizeA2ARoleForLegacy(role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "role_user":
+		return "user"
+	case "role_agent":
+		return "agent"
+	case "role_unspecified":
+		return ""
+	default:
+		return role
+	}
 }
 
 func normalizeA2APartsForDialect(parts []map[string]any, dialect string) []map[string]any {
@@ -936,7 +1270,7 @@ func collectA2AText(value any, parts *[]string) {
 		if text, ok := typed["text"].(string); ok && strings.TrimSpace(text) != "" {
 			*parts = append(*parts, strings.TrimSpace(text))
 		}
-		for _, key := range []string{"parts", "artifacts", "history", "message", "messages", "result", "status"} {
+		for _, key := range []string{"task", "message", "statusUpdate", "artifactUpdate", "parts", "artifacts", "history", "messages", "result", "status"} {
 			collectA2AText(typed[key], parts)
 		}
 	case JSON:

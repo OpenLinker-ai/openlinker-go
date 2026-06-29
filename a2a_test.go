@@ -21,34 +21,38 @@ func TestA2AClientJSONRPCMethods(t *testing.T) {
 		}
 		received = append(received, req)
 		switch req.Method {
-		case A2AMethodMessageSend, A2AMethodTasksGet, A2AMethodTasksCancel:
+		case A2AMethodMessageSend:
 			writeJSON(t, w, A2AJSONRPCResponse{
 				JSONRPC: "2.0",
 				ID:      req.ID,
-				Result: mustRawJSON(t, A2ATask{
-					Kind: "task",
-					ID:   "task-a2a",
-					Status: A2ATaskStatus{
-						State: "TASK_STATE_COMPLETED",
-						Message: &A2AMessage{Parts: []map[string]any{{
-							"kind": "text",
-							"text": "done",
-						}}},
+				Result: mustRawJSON(t, A2ASendMessageResponse{
+					Task: &A2ATask{
+						ID: "task-a2a",
+						Status: A2ATaskStatus{
+							State: "TASK_STATE_COMPLETED",
+							Message: &A2AMessage{Parts: []map[string]any{{
+								"text": "done",
+							}}},
+						},
 					},
 				}),
+			})
+		case A2AMethodTasksGet, A2AMethodTasksCancel:
+			writeJSON(t, w, A2AJSONRPCResponse{
+				JSONRPC: "2.0",
+				ID:      req.ID,
+				Result:  mustRawJSON(t, A2ATask{ID: "task-a2a", Status: A2ATaskStatus{State: "TASK_STATE_COMPLETED"}}),
 			})
 		case A2AMethodTasksList:
 			writeJSON(t, w, A2AJSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: mustRawJSON(t, A2ATaskListResponse{Tasks: []A2ATask{{ID: "task-a2a"}}})})
 		case A2AMethodTaskPushNotificationSet, A2AMethodTaskPushNotificationGet:
 			writeJSON(t, w, A2AJSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: mustRawJSON(t, A2ATaskPushNotificationConfig{
 				TaskID: "task-a2a",
-				PushNotificationConfig: A2APushNotificationConfig{
-					ID:  "cfg-1",
-					URL: "https://caller.example/a2a/events",
-				},
+				ID:     "cfg-1",
+				URL:    "https://caller.example/a2a/events",
 			})})
 		case A2AMethodTaskPushNotificationList:
-			writeJSON(t, w, A2AJSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: mustRawJSON(t, A2ATaskPushConfigList{Items: []A2ATaskPushNotificationConfig{{TaskID: "task-a2a"}}})})
+			writeJSON(t, w, A2AJSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: mustRawJSON(t, A2ATaskPushConfigList{Configs: []A2ATaskPushNotificationConfig{{TaskID: "task-a2a", ID: "cfg-1"}}})})
 		case A2AMethodTaskPushNotificationDelete:
 			writeJSON(t, w, A2AJSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Result: mustRawJSON(t, nil)})
 		default:
@@ -111,6 +115,9 @@ func TestA2AClientJSONRPCMethods(t *testing.T) {
 	if _, ok := message["kind"]; ok {
 		t.Fatalf("current A2A message should not include kind: %#v", message)
 	}
+	if message["role"] != "ROLE_USER" {
+		t.Fatalf("current A2A role = %#v", message)
+	}
 	part := message["parts"].([]any)[0].(map[string]any)
 	if part["text"] != "hello" {
 		t.Fatalf("current A2A part = %#v", part)
@@ -124,6 +131,45 @@ func TestA2AClientJSONRPCMethods(t *testing.T) {
 	}
 	if _, ok := config["blocking"]; ok {
 		t.Fatalf("current A2A config should not include blocking: %#v", config)
+	}
+	pushParams := received[4].Params.(map[string]any)
+	if pushParams["taskId"] != "task-a2a" || pushParams["url"] != "https://caller.example/a2a/events" {
+		t.Fatalf("current A2A push params = %#v", pushParams)
+	}
+	if _, ok := pushParams["pushNotificationConfig"]; ok {
+		t.Fatalf("current A2A push params should be flat: %#v", pushParams)
+	}
+}
+
+func TestA2AClientSendMessageResponseSupportsMessagePayload(t *testing.T) {
+	var received A2AJSONRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		writeJSON(t, w, A2AJSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      received.ID,
+			Result: mustRawJSON(t, A2ASendMessageResponse{
+				Message: &A2AMessage{Role: "ROLE_AGENT", Parts: []map[string]any{{"text": "no task"}}},
+			}),
+		})
+	}))
+	defer server.Close()
+
+	client, err := NewA2AClient(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.SendMessageResponse(context.Background(), NewA2ATextMessageParams("msg-1", "hello", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Message == nil || ExtractA2AText(resp.Message) != "no task" {
+		t.Fatalf("message response = %#v", resp)
+	}
+	if _, err := client.SendMessage(context.Background(), NewA2ATextMessageParams("msg-2", "hello", nil)); err == nil || !strings.Contains(err.Error(), "returned a message") {
+		t.Fatalf("SendMessage should reject message payload, got %v", err)
 	}
 }
 
@@ -227,6 +273,19 @@ func TestA2ACompatibilityHelpers(t *testing.T) {
 		if !A2ATaskStateFailed(state) {
 			t.Fatalf("%s should be failed", state)
 		}
+	}
+}
+
+func TestExtractA2ATextSupportsCurrentResponseWrappers(t *testing.T) {
+	value := map[string]any{
+		"task": map[string]any{
+			"artifacts": []any{
+				map[string]any{"parts": []any{map[string]any{"text": "wrapped task text"}}},
+			},
+		},
+	}
+	if got := ExtractA2AText(value); got != "wrapped task text" {
+		t.Fatalf("ExtractA2AText wrapper = %q", got)
 	}
 }
 
