@@ -335,6 +335,10 @@ func TestRuntimeMethodsUseRuntimeTokenAndProtocolEndpoints(t *testing.T) {
 		CurrentRunID:  "run-1",
 		TargetAgentID: "target-agent",
 		Input:         "child",
+		PushNotificationConfig: &TaskCallbackConfig{
+			URL:   "https://caller.example.com/a2a/protocol-events",
+			Token: "protocol-token",
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -373,6 +377,10 @@ func TestRuntimeMethodsUseRuntimeTokenAndProtocolEndpoints(t *testing.T) {
 	}
 	if calls[4].Path != "/api/v1/agent-runtime/call-agent" || calls[4].Body["input"] != "child" {
 		t.Fatalf("call agent at body = %#v path=%s", calls[4].Body, calls[4].Path)
+	}
+	pushConfig, ok := calls[4].Body["pushNotificationConfig"].(map[string]any)
+	if !ok || pushConfig["url"] != "https://caller.example.com/a2a/protocol-events" || pushConfig["token"] != "protocol-token" {
+		t.Fatalf("call agent pushNotificationConfig = %#v", calls[4].Body["pushNotificationConfig"])
 	}
 }
 

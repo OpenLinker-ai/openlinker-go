@@ -272,13 +272,16 @@ type RuntimePullResultRequest struct {
 }
 
 type CallAgentRequest struct {
-	ParentRunID   string              `json:"parent_run_id,omitempty"`
-	CurrentRunID  string              `json:"current_run_id,omitempty"`
-	TargetAgentID string              `json:"target_agent_id"`
-	Reason        string              `json:"reason,omitempty"`
-	Input         any                 `json:"input"`
-	Metadata      any                 `json:"metadata,omitempty"`
-	TaskCallback  *TaskCallbackConfig `json:"task_callback,omitempty"`
+	ParentRunID            string              `json:"parent_run_id,omitempty"`
+	CurrentRunID           string              `json:"current_run_id,omitempty"`
+	TargetAgentID          string              `json:"target_agent_id"`
+	Reason                 string              `json:"reason,omitempty"`
+	Input                  any                 `json:"input"`
+	Metadata               any                 `json:"metadata,omitempty"`
+	TaskCallback           *TaskCallbackConfig `json:"task_callback,omitempty"`
+	PushNotification       *TaskCallbackConfig `json:"push_notification,omitempty"`
+	PushNotificationAlias  *TaskCallbackConfig `json:"pushNotification,omitempty"`
+	PushNotificationConfig *TaskCallbackConfig `json:"pushNotificationConfig,omitempty"`
 }
 
 type RuntimeWSClientMessage struct {
