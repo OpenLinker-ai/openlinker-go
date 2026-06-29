@@ -13,19 +13,35 @@ import (
 )
 
 const (
-	A2AMethodMessageSend                = "message/send"
-	A2AMethodMessageStream              = "message/stream"
-	A2AMethodTasksGet                   = "tasks/get"
-	A2AMethodTasksList                  = "tasks/list"
-	A2AMethodTasksCancel                = "tasks/cancel"
-	A2AMethodTasksResubscribe           = "tasks/resubscribe"
-	A2AMethodTaskPushNotificationSet    = "tasks/pushNotificationConfig/set"
-	A2AMethodTaskPushNotificationGet    = "tasks/pushNotificationConfig/get"
-	A2AMethodTaskPushNotificationList   = "tasks/pushNotificationConfig/list"
-	A2AMethodTaskPushNotificationDelete = "tasks/pushNotificationConfig/delete"
-	A2AMethodAgentGetExtendedCard       = "agent/getExtendedCard"
-	defaultA2AProtocolVersion           = "1.0"
-	defaultA2AJSONRPCIDPrefix           = "openlinker-a2a"
+	A2ADialectCurrent = "current"
+	A2ADialectLegacy  = "legacy"
+
+	A2AMethodMessageSend                = "SendMessage"
+	A2AMethodMessageStream              = "SendStreamingMessage"
+	A2AMethodTasksGet                   = "GetTask"
+	A2AMethodTasksList                  = "ListTasks"
+	A2AMethodTasksCancel                = "CancelTask"
+	A2AMethodTasksResubscribe           = "SubscribeToTask"
+	A2AMethodTaskPushNotificationSet    = "CreateTaskPushNotificationConfig"
+	A2AMethodTaskPushNotificationGet    = "GetTaskPushNotificationConfig"
+	A2AMethodTaskPushNotificationList   = "ListTaskPushNotificationConfigs"
+	A2AMethodTaskPushNotificationDelete = "DeleteTaskPushNotificationConfig"
+	A2AMethodAgentGetExtendedCard       = "GetExtendedAgentCard"
+
+	A2ALegacyMethodMessageSend                = "message/send"
+	A2ALegacyMethodMessageStream              = "message/stream"
+	A2ALegacyMethodTasksGet                   = "tasks/get"
+	A2ALegacyMethodTasksList                  = "tasks/list"
+	A2ALegacyMethodTasksCancel                = "tasks/cancel"
+	A2ALegacyMethodTasksResubscribe           = "tasks/resubscribe"
+	A2ALegacyMethodTaskPushNotificationSet    = "tasks/pushNotificationConfig/set"
+	A2ALegacyMethodTaskPushNotificationGet    = "tasks/pushNotificationConfig/get"
+	A2ALegacyMethodTaskPushNotificationList   = "tasks/pushNotificationConfig/list"
+	A2ALegacyMethodTaskPushNotificationDelete = "tasks/pushNotificationConfig/delete"
+	A2ALegacyMethodAgentGetExtendedCard       = "agent/getExtendedCard"
+
+	defaultA2AProtocolVersion = "1.0"
+	defaultA2AJSONRPCIDPrefix = "openlinker-a2a"
 )
 
 type A2AClient struct {
@@ -34,6 +50,7 @@ type A2AClient struct {
 	Headers         http.Header
 	HTTPClient      *http.Client
 	ProtocolVersion string
+	Dialect         string
 	SDKAgent        string
 }
 
@@ -56,6 +73,7 @@ func NewA2AClient(endpoint string, opts ...A2AClientOption) (*A2AClient, error) 
 		Headers:         make(http.Header),
 		HTTPClient:      http.DefaultClient,
 		ProtocolVersion: defaultA2AProtocolVersion,
+		Dialect:         A2ADialectCurrent,
 		SDKAgent:        defaultSDKAgent,
 	}
 	for _, opt := range opts {
@@ -106,6 +124,16 @@ func WithA2AProtocolVersion(version string) A2AClientOption {
 	return func(c *A2AClient) {
 		c.ProtocolVersion = strings.TrimSpace(version)
 	}
+}
+
+func WithA2ADialect(dialect string) A2AClientOption {
+	return func(c *A2AClient) {
+		c.Dialect = NormalizeA2ADialect(dialect)
+	}
+}
+
+func WithA2AMethodDialect(dialect string) A2AClientOption {
+	return WithA2ADialect(dialect)
 }
 
 func WithA2ASDKAgent(agent string) A2AClientOption {
@@ -402,8 +430,8 @@ func (c *A2AClient) doJSONRPC(ctx context.Context, method string, params any, ac
 	body := A2AJSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      fmt.Sprintf("%s-%d", defaultA2AJSONRPCIDPrefix, time.Now().UnixNano()),
-		Method:  NormalizeA2AJSONRPCMethod(method),
-		Params:  params,
+		Method:  NormalizeA2AJSONRPCMethodForDialect(method, c.Dialect),
+		Params:  NormalizeA2AParamsForDialect(params, c.Dialect),
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -448,8 +476,8 @@ func (c *A2AClient) stream(ctx context.Context, method string, params any, handl
 	body := A2AJSONRPCRequest{
 		JSONRPC: "2.0",
 		ID:      fmt.Sprintf("%s-%d", defaultA2AJSONRPCIDPrefix, time.Now().UnixNano()),
-		Method:  NormalizeA2AJSONRPCMethod(method),
-		Params:  params,
+		Method:  NormalizeA2AJSONRPCMethodForDialect(method, c.Dialect),
+		Params:  NormalizeA2AParamsForDialect(params, c.Dialect),
 	}
 	encoded, err := json.Marshal(body)
 	if err != nil {
@@ -538,6 +566,14 @@ func a2aStreamEventFromSSE(event StreamRunEvent) (A2AStreamEvent, error) {
 }
 
 func NewA2ATextMessageParams(messageID, text string, acceptedOutputModes []string) A2AMessageSendParams {
+	return NewA2ATextMessageParamsForDialect(messageID, text, acceptedOutputModes, A2ADialectCurrent)
+}
+
+func NewA2ALegacyTextMessageParams(messageID, text string, acceptedOutputModes []string) A2AMessageSendParams {
+	return NewA2ATextMessageParamsForDialect(messageID, text, acceptedOutputModes, A2ADialectLegacy)
+}
+
+func NewA2ATextMessageParamsForDialect(messageID, text string, acceptedOutputModes []string, dialect string) A2AMessageSendParams {
 	blocking := true
 	if strings.TrimSpace(messageID) == "" {
 		messageID = fmt.Sprintf("msg-%d", time.Now().UnixNano())
@@ -545,13 +581,11 @@ func NewA2ATextMessageParams(messageID, text string, acceptedOutputModes []strin
 	if len(acceptedOutputModes) == 0 {
 		acceptedOutputModes = []string{"application/json", "text/plain", "text/markdown"}
 	}
-	return A2AMessageSendParams{
+	params := A2AMessageSendParams{
 		Message: A2AMessage{
-			Kind:      "message",
 			MessageID: messageID,
 			Role:      "user",
 			Parts: []map[string]any{{
-				"kind": "text",
 				"text": text,
 			}},
 		},
@@ -560,35 +594,236 @@ func NewA2ATextMessageParams(messageID, text string, acceptedOutputModes []strin
 			AcceptedOutputModes: acceptedOutputModes,
 		},
 	}
+	return NormalizeA2AMessageSendParamsForDialect(params, dialect)
 }
 
 func NormalizeA2AJSONRPCMethod(method string) string {
-	switch strings.TrimSpace(method) {
-	case "message/send", "message:send", "SendMessage":
-		return A2AMethodMessageSend
-	case "message/stream", "message:stream", "SendStreamingMessage":
-		return A2AMethodMessageStream
-	case "tasks/get", "GetTask":
-		return A2AMethodTasksGet
-	case "tasks/list", "ListTasks":
-		return A2AMethodTasksList
-	case "tasks/cancel", "CancelTask":
-		return A2AMethodTasksCancel
-	case "tasks/resubscribe", "SubscribeToTask":
-		return A2AMethodTasksResubscribe
-	case "tasks/pushNotificationConfig/set", "SetTaskPushNotificationConfig", "CreateTaskPushNotificationConfig":
-		return A2AMethodTaskPushNotificationSet
-	case "tasks/pushNotificationConfig/get", "GetTaskPushNotificationConfig":
-		return A2AMethodTaskPushNotificationGet
-	case "tasks/pushNotificationConfig/list", "ListTaskPushNotificationConfigs", "ListTaskPushNotificationConfig":
-		return A2AMethodTaskPushNotificationList
-	case "tasks/pushNotificationConfig/delete", "DeleteTaskPushNotificationConfig":
-		return A2AMethodTaskPushNotificationDelete
-	case "agent/getExtendedCard", "GetExtendedAgentCard":
-		return A2AMethodAgentGetExtendedCard
-	default:
-		return strings.TrimSpace(method)
+	return NormalizeA2AJSONRPCMethodForDialect(method, A2ADialectCurrent)
+}
+
+func NormalizeA2AJSONRPCMethodForDialect(method, dialect string) string {
+	current, legacy := normalizeA2AJSONRPCMethodPair(method)
+	if NormalizeA2ADialect(dialect) == A2ADialectLegacy {
+		return legacy
 	}
+	return current
+}
+
+func NormalizeA2ADialect(dialect string) string {
+	switch strings.ToLower(strings.TrimSpace(dialect)) {
+	case "", "1", "1.0", "1.0.0", "v1", "v1.0", "current", "canonical", "pascal", "pascalcase":
+		return A2ADialectCurrent
+	case "0.3", "0.3.0", "v0.3", "legacy", "slash", "path":
+		return A2ADialectLegacy
+	default:
+		return strings.TrimSpace(dialect)
+	}
+}
+
+func normalizeA2AJSONRPCMethodPair(method string) (current string, legacy string) {
+	trimmed := strings.TrimSpace(method)
+	switch trimmed {
+	case "message/send", "message:send", "SendMessage":
+		return A2AMethodMessageSend, A2ALegacyMethodMessageSend
+	case "message/stream", "message:stream", "SendStreamingMessage":
+		return A2AMethodMessageStream, A2ALegacyMethodMessageStream
+	case "tasks/get", "GetTask":
+		return A2AMethodTasksGet, A2ALegacyMethodTasksGet
+	case "tasks/list", "ListTasks":
+		return A2AMethodTasksList, A2ALegacyMethodTasksList
+	case "tasks/cancel", "CancelTask":
+		return A2AMethodTasksCancel, A2ALegacyMethodTasksCancel
+	case "tasks/resubscribe", "SubscribeToTask":
+		return A2AMethodTasksResubscribe, A2ALegacyMethodTasksResubscribe
+	case "tasks/pushNotificationConfig/set", "SetTaskPushNotificationConfig", "CreateTaskPushNotificationConfig":
+		return A2AMethodTaskPushNotificationSet, A2ALegacyMethodTaskPushNotificationSet
+	case "tasks/pushNotificationConfig/get", "GetTaskPushNotificationConfig":
+		return A2AMethodTaskPushNotificationGet, A2ALegacyMethodTaskPushNotificationGet
+	case "tasks/pushNotificationConfig/list", "ListTaskPushNotificationConfigs", "ListTaskPushNotificationConfig":
+		return A2AMethodTaskPushNotificationList, A2ALegacyMethodTaskPushNotificationList
+	case "tasks/pushNotificationConfig/delete", "DeleteTaskPushNotificationConfig":
+		return A2AMethodTaskPushNotificationDelete, A2ALegacyMethodTaskPushNotificationDelete
+	case "agent/getExtendedCard", "GetExtendedAgentCard":
+		return A2AMethodAgentGetExtendedCard, A2ALegacyMethodAgentGetExtendedCard
+	default:
+		return trimmed, trimmed
+	}
+}
+
+func NormalizeA2AParamsForDialect(params any, dialect string) any {
+	switch typed := params.(type) {
+	case A2AMessageSendParams:
+		return NormalizeA2AMessageSendParamsForDialect(typed, dialect)
+	case *A2AMessageSendParams:
+		if typed == nil {
+			return params
+		}
+		normalized := NormalizeA2AMessageSendParamsForDialect(*typed, dialect)
+		return &normalized
+	default:
+		return params
+	}
+}
+
+func NormalizeA2AMessageSendParamsForDialect(params A2AMessageSendParams, dialect string) A2AMessageSendParams {
+	params.Message = NormalizeA2AMessageForDialect(params.Message, dialect)
+	return params
+}
+
+func NormalizeA2AMessageForDialect(message A2AMessage, dialect string) A2AMessage {
+	normalized := message
+	if NormalizeA2ADialect(dialect) == A2ADialectLegacy {
+		if normalized.Kind == "" {
+			normalized.Kind = "message"
+		}
+		normalized.Parts = normalizeA2APartsForDialect(normalized.Parts, A2ADialectLegacy)
+		return normalized
+	}
+	normalized.Kind = ""
+	normalized.Parts = normalizeA2APartsForDialect(normalized.Parts, A2ADialectCurrent)
+	return normalized
+}
+
+func normalizeA2APartsForDialect(parts []map[string]any, dialect string) []map[string]any {
+	if len(parts) == 0 {
+		return parts
+	}
+	out := make([]map[string]any, 0, len(parts))
+	for _, part := range parts {
+		if NormalizeA2ADialect(dialect) == A2ADialectLegacy {
+			out = append(out, normalizeA2APartForLegacy(part))
+			continue
+		}
+		out = append(out, normalizeA2APartForCurrent(part))
+	}
+	return out
+}
+
+func normalizeA2APartForCurrent(part map[string]any) map[string]any {
+	kind := a2aPartKind(part)
+	switch kind {
+	case "text", "data":
+		return copyA2AMapWithoutKeys(part, "kind", "type")
+	case "file":
+		if legacyFile, ok := part["file"].(map[string]any); ok {
+			return normalizeA2AFilePartForCurrent(legacyFile)
+		}
+		return normalizeA2AFilePartForCurrent(part)
+	default:
+		return copyA2AMapWithoutKeys(part, "kind", "type")
+	}
+}
+
+func normalizeA2AFilePartForCurrent(source map[string]any) map[string]any {
+	out := map[string]any{}
+	if value := firstA2APartString(source, "url", "uri"); value != "" {
+		out["url"] = value
+	}
+	if value, ok := firstA2APartValue(source, "raw", "fileWithBytes", "bytes"); ok {
+		out["raw"] = value
+	}
+	if value := firstA2APartString(source, "filename", "fileName", "name"); value != "" {
+		out["filename"] = value
+	}
+	if value := firstA2APartString(source, "mediaType", "mimeType"); value != "" {
+		out["mediaType"] = value
+	}
+	if metadata, ok := source["metadata"]; ok {
+		out["metadata"] = metadata
+	}
+	return out
+}
+
+func normalizeA2APartForLegacy(part map[string]any) map[string]any {
+	kind := a2aPartKind(part)
+	out := copyA2AMap(part)
+	delete(out, "type")
+	switch kind {
+	case "text":
+		out["kind"] = "text"
+	case "data":
+		out["kind"] = "data"
+	case "file":
+		out["kind"] = "file"
+		if _, hasLegacyFile := out["file"]; !hasLegacyFile {
+			file := map[string]any{}
+			if value := firstA2APartString(part, "url", "uri"); value != "" {
+				file["uri"] = value
+			}
+			if value, ok := firstA2APartValue(part, "raw", "fileWithBytes", "bytes"); ok {
+				file["fileWithBytes"] = value
+			}
+			if value := firstA2APartString(part, "filename", "fileName", "name"); value != "" {
+				file["name"] = value
+			}
+			if value := firstA2APartString(part, "mediaType", "mimeType"); value != "" {
+				file["mimeType"] = value
+			}
+			if len(file) > 0 {
+				out["file"] = file
+			}
+		}
+	}
+	return out
+}
+
+func a2aPartKind(part map[string]any) string {
+	if raw, ok := part["kind"].(string); ok && raw != "" {
+		return strings.ToLower(raw)
+	}
+	if raw, ok := part["type"].(string); ok && raw != "" {
+		return strings.ToLower(raw)
+	}
+	if _, ok := part["text"]; ok {
+		return "text"
+	}
+	if _, ok := part["data"]; ok {
+		return "data"
+	}
+	if _, ok := part["file"]; ok {
+		return "file"
+	}
+	if _, ok := part["url"]; ok {
+		return "file"
+	}
+	if _, ok := part["raw"]; ok {
+		return "file"
+	}
+	return ""
+}
+
+func firstA2APartString(source map[string]any, keys ...string) string {
+	for _, key := range keys {
+		if value, ok := source[key].(string); ok && strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstA2APartValue(source map[string]any, keys ...string) (any, bool) {
+	for _, key := range keys {
+		if value, ok := source[key]; ok {
+			return value, true
+		}
+	}
+	return nil, false
+}
+
+func copyA2AMap(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func copyA2AMapWithoutKeys(in map[string]any, keys ...string) map[string]any {
+	out := copyA2AMap(in)
+	for _, key := range keys {
+		delete(out, key)
+	}
+	return out
 }
 
 func NormalizeA2ATaskState(state string) string {

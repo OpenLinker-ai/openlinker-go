@@ -97,6 +97,61 @@ func TestA2AClientJSONRPCMethods(t *testing.T) {
 	if received[0].Method != A2AMethodMessageSend {
 		t.Fatalf("method = %s", received[0].Method)
 	}
+	params, ok := received[0].Params.(map[string]any)
+	if !ok {
+		encoded, err := json.Marshal(received[0].Params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(encoded, &params); err != nil {
+			t.Fatal(err)
+		}
+	}
+	message := params["message"].(map[string]any)
+	if _, ok := message["kind"]; ok {
+		t.Fatalf("current A2A message should not include kind: %#v", message)
+	}
+	part := message["parts"].([]any)[0].(map[string]any)
+	if part["text"] != "hello" {
+		t.Fatalf("current A2A part = %#v", part)
+	}
+	if _, ok := part["kind"]; ok {
+		t.Fatalf("current A2A part should not include kind: %#v", part)
+	}
+}
+
+func TestA2AClientLegacyDialect(t *testing.T) {
+	var received A2AJSONRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		writeJSON(t, w, A2AJSONRPCResponse{JSONRPC: "2.0", ID: received.ID, Result: mustRawJSON(t, A2ATask{
+			ID:     "task-legacy",
+			Status: A2ATaskStatus{State: "completed"},
+		})})
+	}))
+	defer server.Close()
+
+	client, err := NewA2AClient(server.URL, WithA2ADialect(A2ADialectLegacy))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SendMessage(context.Background(), NewA2ATextMessageParams("msg-legacy", "legacy", nil)); err != nil {
+		t.Fatal(err)
+	}
+	if received.Method != A2ALegacyMethodMessageSend {
+		t.Fatalf("legacy method = %s", received.Method)
+	}
+	params := received.Params.(map[string]any)
+	message := params["message"].(map[string]any)
+	if message["kind"] != "message" {
+		t.Fatalf("legacy message = %#v", message)
+	}
+	part := message["parts"].([]any)[0].(map[string]any)
+	if part["kind"] != "text" || part["text"] != "legacy" {
+		t.Fatalf("legacy part = %#v", part)
+	}
 }
 
 func TestA2AClientStreamAndErrors(t *testing.T) {
@@ -142,8 +197,14 @@ func TestA2ACompatibilityHelpers(t *testing.T) {
 	if NormalizeA2AJSONRPCMethod("SendMessage") != A2AMethodMessageSend {
 		t.Fatal("SendMessage alias did not normalize")
 	}
+	if NormalizeA2AJSONRPCMethodForDialect("SendMessage", A2ADialectLegacy) != A2ALegacyMethodMessageSend {
+		t.Fatal("SendMessage legacy alias did not normalize")
+	}
 	if NormalizeA2AJSONRPCMethod("ListTaskPushNotificationConfigs") != A2AMethodTaskPushNotificationList {
 		t.Fatal("push notification alias did not normalize")
+	}
+	if NormalizeA2ADialect("0.3") != A2ADialectLegacy || NormalizeA2ADialect("1.0") != A2ADialectCurrent {
+		t.Fatal("A2A dialect did not normalize")
 	}
 	if NormalizeA2ATaskState("TASK_STATE_CANCELLED") != "canceled" {
 		t.Fatal("TASK_STATE_CANCELLED did not normalize")
