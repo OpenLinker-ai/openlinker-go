@@ -10,7 +10,7 @@ import (
 )
 
 func TestCoreContractsMapToImplementedMethods(t *testing.T) {
-	files, err := filepath.Glob("../openlinker-js/contracts/*.json")
+	files, err := filepath.Glob("contracts/*.json")
 	if err != nil {
 		t.Fatal(err)
 	}

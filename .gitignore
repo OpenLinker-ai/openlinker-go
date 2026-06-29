@@ -1,0 +1,14 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+bin/
+coverage.out
+*.cover.out
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/

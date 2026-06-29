@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const defaultSDKAgent = "openlinker-go/0.0.0"
+const defaultSDKAgent = "openlinker-go/0.1.0"
 
 type Client struct {
 	baseURL      *url.URL
