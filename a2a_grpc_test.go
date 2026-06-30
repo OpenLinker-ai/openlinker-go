@@ -105,7 +105,7 @@ func TestA2AGRPCClientMethods(t *testing.T) {
 	defer grpcServer.Stop()
 
 	client, err := NewA2AGRPCClient(
-		"bufnet",
+		"passthrough:///bufnet",
 		"agent-slug",
 		WithA2AGRPCToken("ol_test"),
 		WithA2AGRPCTransportCredentials(insecure.NewCredentials()),
