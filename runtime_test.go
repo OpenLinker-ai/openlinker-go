@@ -86,7 +86,7 @@ func TestRuntimePullConnectorAssignsAndCompletesRun(t *testing.T) {
 		if err := connector.CompleteRun(context.Background(), assignment.RunID, RuntimePullResultRequest{
 			Status: "success",
 			Output: JSON{"answer": "ok"},
-			Events: []AgentEvent{{EventType: "run.message.delta", Payload: "done"}},
+			Events: []AgentEvent{{EventType: AgentEventTypeRunMessageDelta, Payload: "done"}},
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -182,12 +182,12 @@ func TestRuntimeWSConnectorHandlesAssignmentsAndSendsMessages(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer conn.Close()
-		if err := conn.WriteJSON(RuntimeWSServerMessage{Type: "runtime.ready", AgentID: "agent-1"}); err != nil {
+		if err := conn.WriteJSON(RuntimeWSServerMessage{Type: RuntimeMessageTypeReady, AgentID: "agent-1"}); err != nil {
 			t.Error(err)
 			return
 		}
 		if err := conn.WriteJSON(RuntimeWSServerMessage{
-			Type:           "run.assigned",
+			Type:           RuntimeMessageTypeRunAssigned,
 			RunID:          "run-ws",
 			AgentID:        "agent-1",
 			Input:          JSON{"task": "ws"},
@@ -246,7 +246,7 @@ func TestRuntimeWSConnectorHandlesAssignmentsAndSendsMessages(t *testing.T) {
 		if assignment.RunID != "run-ws" || assignment.A2A.CurrentRunID != "run-ws" {
 			t.Fatalf("assignment = %+v", assignment)
 		}
-		if err := connector.SendRunEvent(context.Background(), assignment.RunID, AgentEvent{EventType: "run.message.delta", Payload: "hi"}); err != nil {
+		if err := connector.SendRunEvent(context.Background(), assignment.RunID, AgentEvent{EventType: AgentEventTypeRunMessageDelta, Payload: "hi"}); err != nil {
 			t.Fatal(err)
 		}
 		if err := connector.CompleteRun(context.Background(), assignment.RunID, RuntimePullResultRequest{
@@ -262,10 +262,10 @@ func TestRuntimeWSConnectorHandlesAssignmentsAndSendsMessages(t *testing.T) {
 
 	select {
 	case messages := <-messagesCh:
-		if messages[0].Type != "run.event" || messages[0].EventType != "run.message.delta" || messages[0].RunID != "run-ws" {
+		if messages[0].Type != RuntimeMessageTypeRunEvent || messages[0].EventType != AgentEventTypeRunMessageDelta || messages[0].RunID != "run-ws" {
 			t.Fatalf("event message = %+v", messages[0])
 		}
-		if messages[1].Type != "run.result" || messages[1].Status != "success" || messages[1].DurationMS != 12 {
+		if messages[1].Type != RuntimeMessageTypeRunResult || messages[1].Status != "success" || messages[1].DurationMS != 12 {
 			t.Fatalf("result message = %+v", messages[1])
 		}
 	case <-time.After(2 * time.Second):
@@ -285,7 +285,7 @@ func TestRuntimeWSConnectorSendsHeartbeat(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer conn.Close()
-		if err := conn.WriteJSON(RuntimeWSServerMessage{Type: "runtime.ready", AgentID: "agent-1"}); err != nil {
+		if err := conn.WriteJSON(RuntimeWSServerMessage{Type: RuntimeMessageTypeReady, AgentID: "agent-1"}); err != nil {
 			t.Error(err)
 			return
 		}
@@ -312,7 +312,7 @@ func TestRuntimeWSConnectorSendsHeartbeat(t *testing.T) {
 
 	select {
 	case message := <-messageCh:
-		if message.Type != "heartbeat" || message.ID == "" {
+		if message.Type != RuntimeMessageTypeHeartbeat || message.ID == "" {
 			t.Fatalf("heartbeat message = %+v", message)
 		}
 	case <-time.After(2 * time.Second):
@@ -336,11 +336,11 @@ func TestRuntimeWSConnectorReconnectsAfterClose(t *testing.T) {
 		go func() {
 			defer conn.Close()
 			if connectionID == 1 {
-				_ = conn.WriteJSON(RuntimeWSServerMessage{Type: "runtime.ready", AgentID: "agent-1"})
+				_ = conn.WriteJSON(RuntimeWSServerMessage{Type: RuntimeMessageTypeReady, AgentID: "agent-1"})
 				return
 			}
 			_ = conn.WriteJSON(RuntimeWSServerMessage{
-				Type:    "run.assigned",
+				Type:    RuntimeMessageTypeRunAssigned,
 				RunID:   "run-reconnect",
 				AgentID: "agent-1",
 				Input:   "after reconnect",

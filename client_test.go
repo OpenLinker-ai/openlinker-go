@@ -83,7 +83,7 @@ func TestRunAgentEncodesRequestBody(t *testing.T) {
 			URL:        "https://caller.example.com/a2a/events",
 			Token:      "caller-token",
 			Secret:     "caller-secret",
-			EventTypes: []string{"run.completed", "run.failed"},
+			EventTypes: []AgentEventType{AgentEventTypeRunCompleted, AgentEventTypeRunFailed},
 			Metadata:   JSON{"client": "go-sdk"},
 		},
 	})
@@ -148,7 +148,7 @@ func TestRunAgentWithCallbacksUsesPlatformStream(t *testing.T) {
 		AgentID: "00000000-0000-0000-0000-000000000001",
 		Input:   JSON{"query": "hello"},
 	}, PlatformCallbackOptions{
-		EventTypes: []string{"run.message.delta"},
+		EventTypes: []AgentEventType{AgentEventTypeRunMessageDelta},
 		OnEvent: func(event StreamRunEvent) error {
 			events = append(events, event)
 			return nil
@@ -309,7 +309,7 @@ func TestRuntimeMethodsUseRuntimeTokenAndProtocolEndpoints(t *testing.T) {
 	completed, err := client.CompleteRuntimeRun(context.Background(), "run-1", RuntimePullResultRequest{
 		Status:     "success",
 		Output:     JSON{"ok": true},
-		Events:     []AgentEvent{{EventType: "run.message.delta", Payload: JSON{"text": "done"}}},
+		Events:     []AgentEvent{{EventType: AgentEventTypeRunMessageDelta, Payload: JSON{"text": "done"}}},
 		DurationMS: 10,
 	})
 	if err != nil {
@@ -324,7 +324,7 @@ func TestRuntimeMethodsUseRuntimeTokenAndProtocolEndpoints(t *testing.T) {
 			URL:        "https://caller.example.com/a2a/events",
 			Token:      "caller-token",
 			Secret:     "caller-secret",
-			EventTypes: []string{"run.completed", "run.failed", "run.canceled"},
+			EventTypes: []AgentEventType{AgentEventTypeRunCompleted, AgentEventTypeRunFailed, AgentEventTypeRunCanceled},
 			Metadata:   JSON{"client": "go-sdk"},
 		},
 	})

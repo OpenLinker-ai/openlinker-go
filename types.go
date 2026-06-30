@@ -2,6 +2,36 @@ package openlinker
 
 type JSON map[string]any
 
+type AgentEventType string
+
+const (
+	AgentEventTypeRunCreated                 AgentEventType = "run.created"
+	AgentEventTypeRunStarted                 AgentEventType = "run.started"
+	AgentEventTypeRunMessageDelta            AgentEventType = "run.message.delta"
+	AgentEventTypeRunStatusChanged           AgentEventType = "run.status.changed"
+	AgentEventTypeRunArtifactDelta           AgentEventType = "run.artifact.delta"
+	AgentEventTypeRunRequirementsSnapshotted AgentEventType = "run.requirements.snapshotted"
+	AgentEventTypeRunCompleted               AgentEventType = "run.completed"
+	AgentEventTypeRunFailed                  AgentEventType = "run.failed"
+	AgentEventTypeRunCanceled                AgentEventType = "run.canceled"
+	AgentEventTypeRunChildCreated            AgentEventType = "run.child.created"
+	AgentEventTypeRunChildCompleted          AgentEventType = "run.child.completed"
+)
+
+type RuntimeMessageType string
+
+const (
+	RuntimeMessageTypeReady             RuntimeMessageType = "runtime.ready"
+	RuntimeMessageTypeRunAssigned       RuntimeMessageType = "run.assigned"
+	RuntimeMessageTypeRunEvent          RuntimeMessageType = "run.event"
+	RuntimeMessageTypeRunEventAccepted  RuntimeMessageType = "run.event.accepted"
+	RuntimeMessageTypeRunResult         RuntimeMessageType = "run.result"
+	RuntimeMessageTypeRunResultAccepted RuntimeMessageType = "run.result.accepted"
+	RuntimeMessageTypeHeartbeat         RuntimeMessageType = "heartbeat"
+	RuntimeMessageTypeError             RuntimeMessageType = "error"
+	RuntimeMessageTypeRunEmpty          RuntimeMessageType = "run.empty"
+)
+
 type ListAgentsParams struct {
 	Query        string
 	Tags         []string
@@ -132,20 +162,20 @@ type TaskCallbackConfig struct {
 	Secret         string                      `json:"secret,omitempty"`
 	Authentication *TaskCallbackAuthentication `json:"authentication,omitempty"`
 	Metadata       any                         `json:"metadata,omitempty"`
-	EventTypes     []string                    `json:"event_types,omitempty"`
+	EventTypes     []AgentEventType            `json:"event_types,omitempty"`
 }
 
 type TaskCallbackSubscription struct {
-	ID                  string   `json:"id"`
-	RunID               string   `json:"run_id"`
-	TargetURL           string   `json:"target_url"`
-	EventTypes          []string `json:"event_types"`
-	AuthScheme          string   `json:"auth_scheme,omitempty"`
-	Status              string   `json:"status"`
-	ConsecutiveFailures int32    `json:"consecutive_failures"`
-	Secret              string   `json:"secret,omitempty"`
-	CreatedAt           string   `json:"created_at"`
-	UpdatedAt           string   `json:"updated_at"`
+	ID                  string           `json:"id"`
+	RunID               string           `json:"run_id"`
+	TargetURL           string           `json:"target_url"`
+	EventTypes          []AgentEventType `json:"event_types"`
+	AuthScheme          string           `json:"auth_scheme,omitempty"`
+	Status              string           `json:"status"`
+	ConsecutiveFailures int32            `json:"consecutive_failures"`
+	Secret              string           `json:"secret,omitempty"`
+	CreatedAt           string           `json:"created_at"`
+	UpdatedAt           string           `json:"updated_at"`
 }
 
 type RunResponse struct {
@@ -176,13 +206,13 @@ type ListRunEventsResponse struct {
 }
 
 type RunEventResponse struct {
-	EventID     string `json:"event_id"`
-	RunID       string `json:"run_id"`
-	ParentRunID string `json:"parent_run_id,omitempty"`
-	Sequence    int32  `json:"sequence"`
-	EventType   string `json:"event_type"`
-	Payload     any    `json:"payload"`
-	CreatedAt   string `json:"created_at"`
+	EventID     string         `json:"event_id"`
+	RunID       string         `json:"run_id"`
+	ParentRunID string         `json:"parent_run_id,omitempty"`
+	Sequence    int32          `json:"sequence"`
+	EventType   AgentEventType `json:"event_type"`
+	Payload     any            `json:"payload"`
+	CreatedAt   string         `json:"created_at"`
 }
 
 type RunArtifactResponse struct {
@@ -254,8 +284,8 @@ type RuntimePullRunResponse struct {
 }
 
 type AgentEvent struct {
-	EventType string `json:"event_type"`
-	Payload   any    `json:"payload,omitempty"`
+	EventType AgentEventType `json:"event_type"`
+	Payload   any            `json:"payload,omitempty"`
 }
 
 type AgentError struct {
@@ -285,20 +315,20 @@ type CallAgentRequest struct {
 }
 
 type RuntimeWSClientMessage struct {
-	Type       string       `json:"type"`
-	ID         string       `json:"id,omitempty"`
-	RunID      string       `json:"run_id,omitempty"`
-	EventType  string       `json:"event_type,omitempty"`
-	Payload    any          `json:"payload,omitempty"`
-	Status     string       `json:"status,omitempty"`
-	Output     any          `json:"output,omitempty"`
-	Events     []AgentEvent `json:"events,omitempty"`
-	Error      *AgentError  `json:"error,omitempty"`
-	DurationMS int32        `json:"duration_ms,omitempty"`
+	Type       RuntimeMessageType `json:"type"`
+	ID         string             `json:"id,omitempty"`
+	RunID      string             `json:"run_id,omitempty"`
+	EventType  AgentEventType     `json:"event_type,omitempty"`
+	Payload    any                `json:"payload,omitempty"`
+	Status     string             `json:"status,omitempty"`
+	Output     any                `json:"output,omitempty"`
+	Events     []AgentEvent       `json:"events,omitempty"`
+	Error      *AgentError        `json:"error,omitempty"`
+	DurationMS int32              `json:"duration_ms,omitempty"`
 }
 
 type RuntimeWSServerMessage struct {
-	Type              string                  `json:"type"`
+	Type              RuntimeMessageType      `json:"type"`
 	ID                string                  `json:"id,omitempty"`
 	RunID             string                  `json:"run_id,omitempty"`
 	AgentID           string                  `json:"agent_id,omitempty"`
@@ -323,12 +353,12 @@ type StreamRunEventsOptions struct {
 
 type StreamRunEvent struct {
 	ID    string
-	Event string
+	Event AgentEventType
 	Data  []byte
 }
 
 type PlatformCallbackOptions struct {
-	EventTypes    []string
+	EventTypes    []AgentEventType
 	AfterSequence int32
 	OnEvent       func(StreamRunEvent) error
 	OnTerminal    func(StreamRunEvent) error

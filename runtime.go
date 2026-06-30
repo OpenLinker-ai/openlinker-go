@@ -15,16 +15,16 @@ import (
 )
 
 type RuntimeAssignment struct {
-	Type           string           `json:"type,omitempty"`
-	RunID          string           `json:"run_id"`
-	AgentID        string           `json:"agent_id,omitempty"`
-	Input          any              `json:"input,omitempty"`
-	Metadata       any              `json:"metadata,omitempty"`
-	Source         string           `json:"source,omitempty"`
-	ResultEndpoint string           `json:"result_endpoint,omitempty"`
-	ResultMethod   string           `json:"result_method,omitempty"`
-	ResultRequired bool             `json:"result_required,omitempty"`
-	A2A            *AgentA2AContext `json:"a2a,omitempty"`
+	Type           RuntimeMessageType `json:"type,omitempty"`
+	RunID          string             `json:"run_id"`
+	AgentID        string             `json:"agent_id,omitempty"`
+	Input          any                `json:"input,omitempty"`
+	Metadata       any                `json:"metadata,omitempty"`
+	Source         string             `json:"source,omitempty"`
+	ResultEndpoint string             `json:"result_endpoint,omitempty"`
+	ResultMethod   string             `json:"result_method,omitempty"`
+	ResultRequired bool               `json:"result_required,omitempty"`
+	A2A            *AgentA2AContext   `json:"a2a,omitempty"`
 }
 
 type RuntimeHandlers struct {
@@ -280,7 +280,7 @@ func (c *RuntimeWSConnector) Stop(ctx context.Context) error {
 
 func (c *RuntimeWSConnector) SendRunEvent(ctx context.Context, runID string, event AgentEvent) error {
 	return c.send(ctx, RuntimeWSClientMessage{
-		Type:      "run.event",
+		Type:      RuntimeMessageTypeRunEvent,
 		ID:        fmt.Sprintf("event-%s-%d", runID, time.Now().UnixMilli()),
 		RunID:     runID,
 		EventType: event.EventType,
@@ -290,7 +290,7 @@ func (c *RuntimeWSConnector) SendRunEvent(ctx context.Context, runID string, eve
 
 func (c *RuntimeWSConnector) CompleteRun(ctx context.Context, runID string, result RuntimePullResultRequest) error {
 	return c.send(ctx, RuntimeWSClientMessage{
-		Type:       "run.result",
+		Type:       RuntimeMessageTypeRunResult,
 		ID:         fmt.Sprintf("result-%s-%d", runID, time.Now().UnixMilli()),
 		RunID:      runID,
 		Status:     result.Status,
@@ -383,7 +383,7 @@ func (c *RuntimeWSConnector) heartbeatLoop() {
 			return
 		case <-ticker.C:
 			err := c.send(c.ctx, RuntimeWSClientMessage{
-				Type: "heartbeat",
+				Type: RuntimeMessageTypeHeartbeat,
 				ID:   fmt.Sprintf("heartbeat-%d", time.Now().UnixMilli()),
 			})
 			if err != nil && c.ctx.Err() == nil && c.handlers.OnError != nil {
@@ -405,15 +405,15 @@ func (c *RuntimeWSConnector) handleMessage(data []byte) {
 		c.handlers.OnMessage(message)
 	}
 	switch message.Type {
-	case "runtime.ready":
+	case RuntimeMessageTypeReady:
 		if c.handlers.OnReady != nil {
 			c.handlers.OnReady(message)
 		}
-	case "run.assigned":
+	case RuntimeMessageTypeRunAssigned:
 		if c.handlers.OnAssigned != nil {
 			c.handlers.OnAssigned(RuntimeAssignmentFromWSMessage(message))
 		}
-	case "error":
+	case RuntimeMessageTypeError:
 		if c.handlers.OnError != nil {
 			c.handlers.OnError(runtimeMessageError(message))
 		}
@@ -458,7 +458,7 @@ func RuntimeAssignmentFromPullRun(run *RuntimePullRunResponse) RuntimeAssignment
 		return RuntimeAssignment{}
 	}
 	return RuntimeAssignment{
-		Type:           "run.assigned",
+		Type:           RuntimeMessageTypeRunAssigned,
 		RunID:          run.RunID,
 		AgentID:        run.AgentID,
 		Input:          run.Input,

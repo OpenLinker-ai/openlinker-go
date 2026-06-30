@@ -551,9 +551,9 @@ func readSSE(reader io.Reader, handle func(StreamRunEvent) error) error {
 		switch field {
 		case "event":
 			if value == "" {
-				event.Event = "message"
+				event.Event = AgentEventType("message")
 			} else {
-				event.Event = value
+				event.Event = AgentEventType(value)
 			}
 		case "id":
 			event.ID = value
@@ -567,7 +567,7 @@ func readSSE(reader io.Reader, handle func(StreamRunEvent) error) error {
 	return dispatch()
 }
 
-func matchesPlatformCallbackEvent(eventTypes []string, eventType string) bool {
+func matchesPlatformCallbackEvent(eventTypes []AgentEventType, eventType AgentEventType) bool {
 	if len(eventTypes) == 0 {
 		return true
 	}
@@ -579,6 +579,8 @@ func matchesPlatformCallbackEvent(eventTypes []string, eventType string) bool {
 	return false
 }
 
-func isTerminalRunEvent(eventType string) bool {
-	return eventType == "run.completed" || eventType == "run.failed" || eventType == "run.canceled"
+func isTerminalRunEvent(eventType AgentEventType) bool {
+	return eventType == AgentEventTypeRunCompleted ||
+		eventType == AgentEventTypeRunFailed ||
+		eventType == AgentEventTypeRunCanceled
 }

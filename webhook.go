@@ -22,7 +22,7 @@ type WebhookRunCallbackOptions struct {
 	Token          string
 	Authentication *TaskCallbackAuthentication
 	Metadata       any
-	EventTypes     []string
+	EventTypes     []AgentEventType
 }
 
 // NewWebhookRunCallback builds a caller-owned task callback config for an
@@ -46,7 +46,7 @@ func NewWebhookRunCallback(url string, opts WebhookRunCallbackOptions) (*TaskCal
 		Secret:         secret,
 		Authentication: opts.Authentication,
 		Metadata:       opts.Metadata,
-		EventTypes:     append([]string{}, opts.EventTypes...),
+		EventTypes:     append([]AgentEventType{}, opts.EventTypes...),
 	}, nil
 }
 

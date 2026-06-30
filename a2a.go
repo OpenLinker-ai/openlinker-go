@@ -676,7 +676,7 @@ func parseA2AHTTPError(resp *http.Response) error {
 }
 
 func a2aStreamEventFromSSE(event StreamRunEvent) (A2AStreamEvent, error) {
-	streamEvent := A2AStreamEvent{ID: event.ID, Event: event.Event, Raw: event.Data}
+	streamEvent := A2AStreamEvent{ID: event.ID, Event: string(event.Event), Raw: event.Data}
 	if len(event.Data) == 0 {
 		return streamEvent, nil
 	}

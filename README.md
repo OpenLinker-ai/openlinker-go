@@ -50,7 +50,7 @@ result, err := client.RunAgentWithCallbacks(context.Background(), openlinker.Run
 	AgentID: agents.Items[0].ID,
 	Input:   openlinker.JSON{"query": "Summarize this dataset"},
 }, openlinker.PlatformCallbackOptions{
-	EventTypes: []string{"run.message.delta"},
+	EventTypes: []openlinker.AgentEventType{openlinker.AgentEventTypeRunMessageDelta},
 	OnEvent: func(event openlinker.StreamRunEvent) error {
 		fmt.Println(event.Event, string(event.Data))
 		return nil
@@ -65,7 +65,7 @@ provides request verification helpers:
 ```go
 callback, err := openlinker.NewWebhookRunCallback(os.Getenv("OPENLINKER_CALLBACK_URL"), openlinker.WebhookRunCallbackOptions{
 	Secret:     os.Getenv("OPENLINKER_CALLBACK_SECRET"),
-	EventTypes: []string{"run.completed", "run.failed"},
+	EventTypes: []openlinker.AgentEventType{openlinker.AgentEventTypeRunCompleted, openlinker.AgentEventTypeRunFailed},
 })
 if err != nil {
 	log.Fatal(err)

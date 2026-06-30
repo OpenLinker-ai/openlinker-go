@@ -13,7 +13,7 @@ import (
 func TestNewWebhookRunCallbackPassesExternalURLAndSecret(t *testing.T) {
 	callback, err := NewWebhookRunCallback(" https://caller.example.com/openlinker/events ", WebhookRunCallbackOptions{
 		Token:      "caller-token",
-		EventTypes: []string{"run.completed", "run.failed"},
+		EventTypes: []AgentEventType{AgentEventTypeRunCompleted, AgentEventTypeRunFailed},
 		Metadata:   JSON{"client": "go-sdk"},
 	})
 	if err != nil {
