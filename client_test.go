@@ -316,10 +316,13 @@ func TestRuntimeMethodsUseRuntimeTokenAndProtocolEndpoints(t *testing.T) {
 		t.Fatal(err)
 	}
 	child, err := client.CallAgent(context.Background(), CallAgentRequest{
-		CurrentRunID:  "run-1",
-		TargetAgentID: "target-agent",
-		Reason:        "delegate",
-		Input:         JSON{"query": "child"},
+		CurrentRunID:     "run-1",
+		TargetAgentID:    "target-agent",
+		Reason:           "delegate",
+		Input:            JSON{"query": "child"},
+		ContextID:        "ctx-sdk",
+		TraceID:          "trace-sdk",
+		ReferenceTaskIDs: []string{"task-parent"},
 		TaskCallback: &TaskCallbackConfig{
 			URL:        "https://caller.example.com/a2a/events",
 			Token:      "caller-token",
@@ -363,6 +366,13 @@ func TestRuntimeMethodsUseRuntimeTokenAndProtocolEndpoints(t *testing.T) {
 	}
 	if calls[3].Body["current_run_id"] != "run-1" || calls[3].Body["target_agent_id"] != "target-agent" {
 		t.Fatalf("call agent body = %#v", calls[3].Body)
+	}
+	if calls[3].Body["context_id"] != "ctx-sdk" || calls[3].Body["trace_id"] != "trace-sdk" {
+		t.Fatalf("call agent context body = %#v", calls[3].Body)
+	}
+	refs, ok := calls[3].Body["reference_task_ids"].([]any)
+	if !ok || len(refs) != 1 || refs[0] != "task-parent" {
+		t.Fatalf("call agent reference ids = %#v", calls[3].Body["reference_task_ids"])
 	}
 	push, ok := calls[3].Body["task_callback"].(map[string]any)
 	if !ok || push["url"] != "https://caller.example.com/a2a/events" || push["token"] != "caller-token" {

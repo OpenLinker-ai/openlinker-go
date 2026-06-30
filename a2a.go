@@ -375,13 +375,15 @@ type A2ATaskListResponse struct {
 }
 
 type A2AMessage struct {
-	Kind      string           `json:"kind,omitempty"`
-	MessageID string           `json:"messageId,omitempty"`
-	ContextID string           `json:"contextId,omitempty"`
-	TaskID    string           `json:"taskId,omitempty"`
-	Role      string           `json:"role,omitempty"`
-	Parts     []map[string]any `json:"parts,omitempty"`
-	Metadata  map[string]any   `json:"metadata,omitempty"`
+	Kind             string           `json:"kind,omitempty"`
+	MessageID        string           `json:"messageId,omitempty"`
+	ContextID        string           `json:"contextId,omitempty"`
+	TaskID           string           `json:"taskId,omitempty"`
+	ReferenceTaskIDs []string         `json:"referenceTaskIds,omitempty"`
+	Extensions       []string         `json:"extensions,omitempty"`
+	Role             string           `json:"role,omitempty"`
+	Parts            []map[string]any `json:"parts,omitempty"`
+	Metadata         map[string]any   `json:"metadata,omitempty"`
 }
 
 type A2ATask struct {
@@ -403,6 +405,7 @@ type A2ATaskStatus struct {
 type A2AArtifact struct {
 	ArtifactID string           `json:"artifactId,omitempty"`
 	Name       string           `json:"name,omitempty"`
+	Extensions []string         `json:"extensions,omitempty"`
 	Parts      []map[string]any `json:"parts,omitempty"`
 	Metadata   map[string]any   `json:"metadata,omitempty"`
 }
@@ -558,6 +561,263 @@ func (c *A2AClient) GetExtendedAgentCard(ctx context.Context) (*AgentCardRespons
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (c *A2AClient) SendMessageREST(ctx context.Context, params A2AMessageSendParams) (*A2ASendMessageResponse, error) {
+	var raw json.RawMessage
+	if err := c.doREST(ctx, http.MethodPost, "/message:send", nil, NormalizeA2AMessageSendParamsForDialect(params, c.Dialect), &raw, "application/a2a+json"); err != nil {
+		return nil, err
+	}
+	return decodeA2ASendMessageResponse(raw)
+}
+
+func (c *A2AClient) StreamMessageREST(ctx context.Context, params A2AMessageSendParams, handle func(A2AStreamEvent) error) error {
+	return c.streamREST(ctx, "/message:stream", nil, NormalizeA2AMessageSendParamsForDialect(params, c.Dialect), handle)
+}
+
+func (c *A2AClient) GetTaskREST(ctx context.Context, params A2ATaskQueryParams) (*A2ATask, error) {
+	query := url.Values{}
+	if params.HistoryLength != nil {
+		query.Set("historyLength", fmt.Sprint(*params.HistoryLength))
+	}
+	var out A2ATask
+	if err := c.doREST(ctx, http.MethodGet, "/tasks/"+url.PathEscape(params.ID), query, nil, &out, "application/a2a+json"); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *A2AClient) ListTasksREST(ctx context.Context, params A2ATaskListParams) (*A2ATaskListResponse, error) {
+	var out A2ATaskListResponse
+	if err := c.doREST(ctx, http.MethodGet, "/tasks", a2aTaskListQuery(params), nil, &out, "application/a2a+json"); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *A2AClient) CancelTaskREST(ctx context.Context, params A2ATaskQueryParams) (*A2ATask, error) {
+	var out A2ATask
+	if err := c.doREST(ctx, http.MethodPost, "/tasks/"+url.PathEscape(params.ID)+":cancel", nil, nil, &out, "application/a2a+json"); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *A2AClient) ResubscribeTaskREST(ctx context.Context, params A2ATaskQueryParams, handle func(A2AStreamEvent) error) error {
+	query := url.Values{}
+	if params.HistoryLength != nil {
+		query.Set("historyLength", fmt.Sprint(*params.HistoryLength))
+	}
+	return c.streamREST(ctx, "/tasks/"+url.PathEscape(params.ID)+"/subscribe", query, nil, handle)
+}
+
+func (c *A2AClient) SetTaskPushNotificationConfigREST(ctx context.Context, params A2ATaskPushConfigParams) (*A2ATaskPushNotificationConfig, error) {
+	taskID := a2aTaskIDFromPushParams(params)
+	var out A2ATaskPushNotificationConfig
+	if err := c.doREST(ctx, http.MethodPost, "/tasks/"+url.PathEscape(taskID)+"/pushNotificationConfigs", nil, NormalizeA2ATaskPushConfigParamsForDialect(params, c.Dialect), &out, "application/a2a+json"); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *A2AClient) GetTaskPushNotificationConfigREST(ctx context.Context, params A2ATaskPushConfigParams) (*A2ATaskPushNotificationConfig, error) {
+	taskID := a2aTaskIDFromPushParams(params)
+	configID := a2aPushConfigID(params)
+	var out A2ATaskPushNotificationConfig
+	if err := c.doREST(ctx, http.MethodGet, "/tasks/"+url.PathEscape(taskID)+"/pushNotificationConfigs/"+url.PathEscape(configID), nil, nil, &out, "application/a2a+json"); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *A2AClient) ListTaskPushNotificationConfigsREST(ctx context.Context, params A2ATaskPushConfigParams) (*A2ATaskPushConfigList, error) {
+	taskID := a2aTaskIDFromPushParams(params)
+	query := url.Values{}
+	if params.PageSize != nil {
+		query.Set("pageSize", fmt.Sprint(*params.PageSize))
+	}
+	if params.PageToken != "" {
+		query.Set("pageToken", params.PageToken)
+	}
+	var out A2ATaskPushConfigList
+	if err := c.doREST(ctx, http.MethodGet, "/tasks/"+url.PathEscape(taskID)+"/pushNotificationConfigs", query, nil, &out, "application/a2a+json"); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *A2AClient) DeleteTaskPushNotificationConfigREST(ctx context.Context, params A2ATaskPushConfigParams) error {
+	taskID := a2aTaskIDFromPushParams(params)
+	configID := a2aPushConfigID(params)
+	return c.doREST(ctx, http.MethodDelete, "/tasks/"+url.PathEscape(taskID)+"/pushNotificationConfigs/"+url.PathEscape(configID), nil, nil, nil, "application/a2a+json")
+}
+
+func (c *A2AClient) GetExtendedAgentCardREST(ctx context.Context) (*AgentCardResponse, error) {
+	var out AgentCardResponse
+	if err := c.doREST(ctx, http.MethodGet, "/extendedAgentCard", nil, nil, &out, "application/a2a+json"); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *A2AClient) doREST(ctx context.Context, method, path string, query url.Values, body any, out any, accept string) error {
+	var reader io.Reader
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("openlinker: encode A2A REST request: %w", err)
+		}
+		reader = bytes.NewReader(encoded)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.restURL(path, query), reader)
+	if err != nil {
+		return err
+	}
+	c.applyA2AHeaders(req, accept, "application/a2a+json", body != nil)
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return parseA2AHTTPError(resp)
+	}
+	if out == nil || resp.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if len(raw) == 0 {
+		return nil
+	}
+	if target, ok := out.(*json.RawMessage); ok {
+		*target = append((*target)[:0], raw...)
+		return nil
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return fmt.Errorf("openlinker: decode A2A REST response: %w", err)
+	}
+	return nil
+}
+
+func (c *A2AClient) streamREST(ctx context.Context, path string, query url.Values, body any, handle func(A2AStreamEvent) error) error {
+	var reader io.Reader
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("openlinker: encode A2A REST stream request: %w", err)
+		}
+		reader = bytes.NewReader(encoded)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.restURL(path, query), reader)
+	if err != nil {
+		return err
+	}
+	if body == nil {
+		req.Method = http.MethodGet
+	}
+	c.applyA2AHeaders(req, "text/event-stream", "application/a2a+json", body != nil)
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return parseA2AHTTPError(resp)
+	}
+	return readSSE(resp.Body, func(event StreamRunEvent) error {
+		streamEvent, err := a2aStreamEventFromSSE(event)
+		if err != nil {
+			return err
+		}
+		if handle != nil {
+			return handle(streamEvent)
+		}
+		return nil
+	})
+}
+
+func (c *A2AClient) restURL(path string, query url.Values) string {
+	base := strings.TrimRight(c.Endpoint, "/")
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	raw := base + path
+	if len(query) == 0 {
+		return raw
+	}
+	return raw + "?" + query.Encode()
+}
+
+func (c *A2AClient) applyA2AHeaders(req *http.Request, accept, contentType string, hasBody bool) {
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
+	if hasBody && contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	if c.ProtocolVersion != "" {
+		req.Header.Set("a2a-version", c.ProtocolVersion)
+	}
+	if c.SDKAgent != "" {
+		req.Header.Set("X-OpenLinker-SDK", c.SDKAgent)
+	}
+	if c.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	for key, values := range c.Headers {
+		for _, value := range values {
+			req.Header.Set(key, value)
+		}
+	}
+}
+
+func a2aTaskListQuery(params A2ATaskListParams) url.Values {
+	query := url.Values{}
+	if params.ContextID != "" {
+		query.Set("contextId", params.ContextID)
+	}
+	if params.Status != "" {
+		query.Set("status", params.Status)
+	}
+	if params.PageSize != nil {
+		query.Set("pageSize", fmt.Sprint(*params.PageSize))
+	}
+	if params.PageToken != "" {
+		query.Set("pageToken", params.PageToken)
+	}
+	if params.HistoryLength != nil {
+		query.Set("historyLength", fmt.Sprint(*params.HistoryLength))
+	}
+	if params.StatusTimestampAfter != "" {
+		query.Set("statusTimestampAfter", params.StatusTimestampAfter)
+	}
+	if params.IncludeArtifacts != nil {
+		query.Set("includeArtifacts", fmt.Sprint(*params.IncludeArtifacts))
+	}
+	return query
+}
+
+func a2aTaskIDFromPushParams(params A2ATaskPushConfigParams) string {
+	if strings.TrimSpace(params.TaskID) != "" {
+		return strings.TrimSpace(params.TaskID)
+	}
+	return strings.TrimSpace(params.ID)
+}
+
+func a2aPushConfigID(params A2ATaskPushConfigParams) string {
+	if strings.TrimSpace(params.PushNotificationConfigID) != "" {
+		return strings.TrimSpace(params.PushNotificationConfigID)
+	}
+	if strings.TrimSpace(params.PushNotificationConfig.ID) != "" {
+		return strings.TrimSpace(params.PushNotificationConfig.ID)
+	}
+	if strings.TrimSpace(params.TaskID) != "" {
+		return strings.TrimSpace(params.ID)
+	}
+	return ""
 }
 
 func (c *A2AClient) doJSONRPC(ctx context.Context, method string, params any, accept string) (*A2AJSONRPCResponse, error) {

@@ -51,7 +51,10 @@
     }
   ],
   "protocol_types": [
+    "AgentA2AContext",
     "AgentHeartbeatResponse",
+    "RunA2AContext",
+    "RunResponse",
     "RuntimePullRunResponse",
     "RuntimePullResultRequest",
     "RuntimeWSClientMessage",

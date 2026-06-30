@@ -141,6 +141,106 @@ func TestA2AClientJSONRPCMethods(t *testing.T) {
 	}
 }
 
+func TestA2AClientRESTMethods(t *testing.T) {
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("authorization") != "Bearer ol_public" || r.Header.Get("a2a-version") != "1.0" {
+			t.Fatalf("headers = %#v", r.Header)
+		}
+		seen = append(seen, r.Method+" "+r.URL.RequestURI())
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/message:send":
+			if got := r.Header.Get("content-type"); !strings.Contains(got, "application/a2a+json") {
+				t.Fatalf("content-type = %q", got)
+			}
+			writeJSON(t, w, A2ASendMessageResponse{Task: &A2ATask{ID: "task-rest", Status: A2ATaskStatus{State: "TASK_STATE_COMPLETED"}}})
+		case r.Method == http.MethodPost && r.URL.Path == "/message:stream":
+			w.Header().Set("content-type", "text/event-stream")
+			_, _ = w.Write([]byte("event: status-update\ndata: {\"statusUpdate\":{\"status\":{\"state\":\"TASK_STATE_WORKING\"}}}\n\n"))
+		case r.Method == http.MethodGet && r.URL.Path == "/tasks/task-rest":
+			if r.URL.Query().Get("historyLength") != "2" {
+				t.Fatalf("historyLength query = %s", r.URL.RawQuery)
+			}
+			writeJSON(t, w, A2ATask{ID: "task-rest", Status: A2ATaskStatus{State: "TASK_STATE_COMPLETED"}})
+		case r.Method == http.MethodGet && r.URL.Path == "/tasks":
+			if r.URL.Query().Get("contextId") != "ctx-rest" || r.URL.Query().Get("includeArtifacts") != "true" {
+				t.Fatalf("list query = %s", r.URL.RawQuery)
+			}
+			writeJSON(t, w, A2ATaskListResponse{Tasks: []A2ATask{{ID: "task-rest"}}})
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-rest:cancel":
+			writeJSON(t, w, A2ATask{ID: "task-rest", Status: A2ATaskStatus{State: "TASK_STATE_CANCELED"}})
+		case r.Method == http.MethodGet && r.URL.Path == "/tasks/task-rest/subscribe":
+			w.Header().Set("content-type", "text/event-stream")
+			_, _ = w.Write([]byte("event: task\ndata: {\"task\":{\"id\":\"task-rest\",\"status\":{\"state\":\"TASK_STATE_COMPLETED\"}}}\n\n"))
+		case r.Method == http.MethodPost && r.URL.Path == "/tasks/task-rest/pushNotificationConfigs":
+			writeJSON(t, w, A2ATaskPushNotificationConfig{TaskID: "task-rest", ID: "cfg-1", URL: "https://caller.example/a2a/events"})
+		case r.Method == http.MethodGet && r.URL.Path == "/tasks/task-rest/pushNotificationConfigs/cfg-1":
+			writeJSON(t, w, A2ATaskPushNotificationConfig{TaskID: "task-rest", ID: "cfg-1"})
+		case r.Method == http.MethodGet && r.URL.Path == "/tasks/task-rest/pushNotificationConfigs":
+			writeJSON(t, w, A2ATaskPushConfigList{Configs: []A2ATaskPushNotificationConfig{{TaskID: "task-rest", ID: "cfg-1"}}})
+		case r.Method == http.MethodDelete && r.URL.Path == "/tasks/task-rest/pushNotificationConfigs/cfg-1":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/extendedAgentCard":
+			writeJSON(t, w, AgentCardResponse{Name: "REST Agent"})
+		default:
+			t.Fatalf("unexpected REST request %s %s", r.Method, r.URL.RequestURI())
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewA2AClient(server.URL, WithA2AToken("ol_public"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp, err := client.SendMessageREST(context.Background(), NewA2ATextMessageParams("msg-rest", "hello", nil)); err != nil || resp.Task.ID != "task-rest" {
+		t.Fatalf("SendMessageREST = %#v, %v", resp, err)
+	}
+	streamEvents := 0
+	if err := client.StreamMessageREST(context.Background(), NewA2ATextMessageParams("msg-stream", "hello", nil), func(A2AStreamEvent) error {
+		streamEvents++
+		return nil
+	}); err != nil || streamEvents != 1 {
+		t.Fatalf("StreamMessageREST events=%d err=%v", streamEvents, err)
+	}
+	historyLength := 2
+	if _, err := client.GetTaskREST(context.Background(), A2ATaskQueryParams{ID: "task-rest", HistoryLength: &historyLength}); err != nil {
+		t.Fatal(err)
+	}
+	includeArtifacts := true
+	if _, err := client.ListTasksREST(context.Background(), A2ATaskListParams{ContextID: "ctx-rest", IncludeArtifacts: &includeArtifacts}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.CancelTaskREST(context.Background(), A2ATaskQueryParams{ID: "task-rest"}); err != nil {
+		t.Fatal(err)
+	}
+	subscribeEvents := 0
+	if err := client.ResubscribeTaskREST(context.Background(), A2ATaskQueryParams{ID: "task-rest"}, func(A2AStreamEvent) error {
+		subscribeEvents++
+		return nil
+	}); err != nil || subscribeEvents != 1 {
+		t.Fatalf("ResubscribeTaskREST events=%d err=%v", subscribeEvents, err)
+	}
+	push := A2ATaskPushConfigParams{ID: "task-rest", PushNotificationConfigID: "cfg-1", PushNotificationConfig: A2APushNotificationConfig{URL: "https://caller.example/a2a/events"}}
+	if _, err := client.SetTaskPushNotificationConfigREST(context.Background(), push); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.GetTaskPushNotificationConfigREST(context.Background(), push); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.ListTaskPushNotificationConfigsREST(context.Background(), push); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.DeleteTaskPushNotificationConfigREST(context.Background(), push); err != nil {
+		t.Fatal(err)
+	}
+	if card, err := client.GetExtendedAgentCardREST(context.Background()); err != nil || card.Name != "REST Agent" {
+		t.Fatalf("GetExtendedAgentCardREST = %#v, %v", card, err)
+	}
+	if len(seen) != 11 {
+		t.Fatalf("REST request count = %d: %#v", len(seen), seen)
+	}
+}
+
 func TestA2AClientSendMessageResponseSupportsMessagePayload(t *testing.T) {
 	var received A2AJSONRPCRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
