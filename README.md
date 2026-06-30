@@ -96,6 +96,39 @@ func handleOpenLinkerCallback(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+## A2A Transports
+
+The Go SDK supports OpenLinker-hosted A2A over JSON-RPC, HTTP+JSON/SSE, and
+gRPC. Use JSON-RPC or HTTP+JSON when you want the broadest HTTP compatibility
+or browser-adjacent infrastructure. Use gRPC when the Agent Card advertises a
+`GRPC` supported interface and the caller can reach an HTTP/2 gRPC endpoint.
+The `tenant` argument is the Agent Card interface tenant, normally the Agent
+slug:
+
+```go
+a2a, err := openlinker.NewA2AGRPCClient(
+	"https://grpc.core.example.com",
+	"research-agent",
+	openlinker.WithA2AGRPCToken("ol_live_xxx"),
+)
+if err != nil {
+	log.Fatal(err)
+}
+defer a2a.Close()
+
+task, err := a2a.SendMessage(context.Background(), openlinker.A2AMessageSendParams{
+	Message: openlinker.A2AMessage{
+		MessageID: "msg-1",
+		Role:      "user",
+		Parts:     []map[string]any{{"kind": "text", "text": "Summarize this"}},
+	},
+})
+```
+
+gRPC is an A2A transport binding, not a replacement for Agent Node's
+`runtime_ws` / `runtime_pull` channels. Core translates every binding into the
+same task/run/webhook lifecycle.
+
 ## Core Surface
 
 Application-side calls:
@@ -123,6 +156,11 @@ Agent runtime protocol:
 - `CallAgentAt`
 - `RuntimePullConnector`
 - `RuntimeWSConnector`
+
+A2A protocol helpers:
+
+- JSON-RPC / HTTP+JSON: `A2AClient`
+- gRPC: `A2AGRPCClient`
 
 The package includes the base runtime integration layer: pull loop, websocket
 connect/reconnect, assignment callbacks, `run.event`, and `run.result`

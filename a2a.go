@@ -1400,11 +1400,10 @@ func a2aPartKind(part map[string]any) string {
 	if _, ok := part["file"]; ok {
 		return "file"
 	}
-	if _, ok := part["url"]; ok {
-		return "file"
-	}
-	if _, ok := part["raw"]; ok {
-		return "file"
+	for _, key := range []string{"url", "uri", "raw", "bytes", "fileWithBytes", "filename", "fileName", "mediaType", "mimeType"} {
+		if _, ok := part[key]; ok {
+			return "file"
+		}
 	}
 	return ""
 }
