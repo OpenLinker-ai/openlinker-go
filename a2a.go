@@ -685,7 +685,7 @@ func (c *A2AClient) doREST(ctx context.Context, method, path string, query url.V
 	if out == nil || resp.StatusCode == http.StatusNoContent {
 		return nil
 	}
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := readLimitedResponseBody(resp.Body)
 	if err != nil {
 		return err
 	}
@@ -860,7 +860,7 @@ func (c *A2AClient) doJSONRPC(ctx context.Context, method string, params any, ac
 		return nil, parseA2AHTTPError(resp)
 	}
 	var response A2AJSONRPCResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+	if err := decodeJSONResponse(resp.Body, &response); err != nil {
 		return nil, fmt.Errorf("openlinker: decode A2A JSON-RPC response: %w", err)
 	}
 	return &response, nil
@@ -918,7 +918,7 @@ func (c *A2AClient) stream(ctx context.Context, method string, params any, handl
 }
 
 func parseA2AHTTPError(resp *http.Response) error {
-	raw, _ := io.ReadAll(resp.Body)
+	raw := readLimitedErrorResponseBody(resp.Body)
 	if len(raw) > 0 {
 		var rpc A2AJSONRPCResponse
 		if err := json.Unmarshal(raw, &rpc); err == nil && rpc.Error != nil {

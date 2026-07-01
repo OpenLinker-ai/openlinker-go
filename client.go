@@ -15,7 +15,10 @@ import (
 	"time"
 )
 
-const defaultSDKAgent = "openlinker-go/0.1.3"
+const (
+	defaultSDKAgent      = "openlinker-go/0.1.3"
+	maxResponseBodyBytes = int64(4 << 20)
+)
 
 type Client struct {
 	baseURL      *url.URL
@@ -299,7 +302,7 @@ func (c *Client) ClaimRuntimeRunDetailed(ctx context.Context, params ClaimRuntim
 		return nil, parseError(resp)
 	}
 	var out RuntimePullRunResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := decodeJSONResponse(resp.Body, &out); err != nil {
 		return nil, fmt.Errorf("openlinker: decode response: %w", err)
 	}
 	return &ClaimRuntimeRunResult{Run: &out}, nil
@@ -341,7 +344,7 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 	if resp.StatusCode == http.StatusNoContent || out == nil {
 		return nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	if err := decodeJSONResponse(resp.Body, out); err != nil {
 		return fmt.Errorf("openlinker: decode response: %w", err)
 	}
 	return nil
@@ -359,7 +362,7 @@ func (c *Client) doRuntime(ctx context.Context, method, path string, query url.V
 	if resp.StatusCode == http.StatusNoContent || out == nil {
 		return nil
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+	if err := decodeJSONResponse(resp.Body, out); err != nil {
 		return fmt.Errorf("openlinker: decode response: %w", err)
 	}
 	return nil
@@ -424,7 +427,7 @@ func (c *Client) endpoint(path string, query url.Values) string {
 }
 
 func parseError(resp *http.Response) error {
-	raw, _ := io.ReadAll(resp.Body)
+	raw := readLimitedErrorResponseBody(resp.Body)
 	var parsed errorResponse
 	_ = json.Unmarshal(raw, &parsed)
 
@@ -445,6 +448,43 @@ func parseError(resp *http.Response) error {
 		RetryAfter:   retryAfter(resp.Header),
 		ResponseBody: raw,
 	}
+}
+
+func decodeJSONResponse(body io.Reader, out any) error {
+	raw, err := readLimitedResponseBody(body)
+	if err != nil {
+		return err
+	}
+	if len(raw) == 0 {
+		return nil
+	}
+	if target, ok := out.(*json.RawMessage); ok {
+		*target = append((*target)[:0], raw...)
+		return nil
+	}
+	return json.Unmarshal(raw, out)
+}
+
+func readLimitedResponseBody(body io.Reader) ([]byte, error) {
+	raw, err := io.ReadAll(io.LimitReader(body, maxResponseBodyBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > maxResponseBodyBytes {
+		return nil, fmt.Errorf("openlinker: response body exceeds %d bytes", maxResponseBodyBytes)
+	}
+	return raw, nil
+}
+
+func readLimitedErrorResponseBody(body io.Reader) []byte {
+	raw, err := io.ReadAll(io.LimitReader(body, maxResponseBodyBytes+1))
+	if err != nil {
+		return nil
+	}
+	if int64(len(raw)) > maxResponseBodyBytes {
+		return raw[:maxResponseBodyBytes]
+	}
+	return raw
 }
 
 func isAbsoluteURL(raw string) bool {

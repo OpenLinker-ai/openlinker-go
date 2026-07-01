@@ -58,6 +58,25 @@ func TestListAgentsBuildsCoreURLAndAuthHeader(t *testing.T) {
 	}
 }
 
+func TestClientRejectsOversizedResponseBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[`))
+		_, _ = w.Write([]byte(strings.Repeat(`"x",`, int(maxResponseBodyBytes/4))))
+		_, _ = w.Write([]byte(`"tail"]}`))
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.ListAgents(context.Background(), ListAgentsParams{})
+	if err == nil || !strings.Contains(err.Error(), "response body exceeds") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestRunAgentEncodesRequestBody(t *testing.T) {
 	var got map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
