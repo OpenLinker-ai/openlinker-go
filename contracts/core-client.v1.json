@@ -1,0 +1,105 @@
+{
+  "name": "openlinker-core-client",
+  "version": "v1",
+  "package": "@openlinker/sdk",
+  "scope": "core",
+  "rules": {
+    "single_package_first": true,
+    "forbidden_path_prefixes": [
+      "/api/v1/cloud",
+      "/api/v1/tasks",
+      "/api/v1/task-templates",
+      "/api/v1/workflows",
+      "/api/v1/workflow-runs",
+      "/api/v1/billing",
+      "/api/v1/wallet",
+      "/api/v1/stripe"
+    ]
+  },
+  "endpoints": [
+    {
+      "client_method": "listAgents",
+      "http_method": "GET",
+      "path": "/api/v1/agents",
+      "auth": "none",
+      "source": "openlinker-core/pkg/agent/market_handler.go"
+    },
+    {
+      "client_method": "getAgent",
+      "http_method": "GET",
+      "path": "/api/v1/agents/{slug}",
+      "auth": "none",
+      "source": "openlinker-core/pkg/agent/market_handler.go"
+    },
+    {
+      "client_method": "getAgentCard",
+      "http_method": "GET",
+      "path": "/api/v1/agents/{slug}/agent-card.json",
+      "auth": "none",
+      "source": "openlinker-core/pkg/agent/market_handler.go"
+    },
+    {
+      "client_method": "getAgentCard",
+      "http_method": "GET",
+      "path": "/api/v1/agents/{slug}/agent-card.extended.json",
+      "auth": "none",
+      "source": "openlinker-core/pkg/agent/market_handler.go"
+    },
+    {
+      "client_method": "runAgent",
+      "http_method": "POST",
+      "path": "/api/v1/run",
+      "auth": "access_token",
+      "required_scope": "agents:run",
+      "source": "openlinker-core/pkg/runtime/handler.go"
+    },
+    {
+      "client_method": "startAgentRun",
+      "http_method": "POST",
+      "path": "/api/v1/runs",
+      "auth": "access_token",
+      "required_scope": "agents:run",
+      "source": "openlinker-core/pkg/runtime/handler.go"
+    },
+    {
+      "client_method": "getRun",
+      "http_method": "GET",
+      "path": "/api/v1/runs/{id}",
+      "auth": "access_token",
+      "required_scope": "runs:read",
+      "source": "openlinker-core/pkg/runtime/handler.go"
+    },
+    {
+      "client_method": "listRunEvents",
+      "http_method": "GET",
+      "path": "/api/v1/runs/{id}/events",
+      "auth": "access_token",
+      "required_scope": "runs:read",
+      "source": "openlinker-core/pkg/runtime/handler.go"
+    },
+    {
+      "client_method": "listRunArtifacts",
+      "http_method": "GET",
+      "path": "/api/v1/runs/{id}/artifacts",
+      "auth": "access_token",
+      "required_scope": "runs:read",
+      "source": "openlinker-core/pkg/runtime/handler.go"
+    },
+    {
+      "client_method": "listRunMessages",
+      "http_method": "GET",
+      "path": "/api/v1/runs/{id}/messages",
+      "auth": "access_token",
+      "required_scope": "runs:read",
+      "source": "openlinker-core/pkg/runtime/handler.go"
+    },
+    {
+      "client_method": "streamRunEvents",
+      "http_method": "GET",
+      "path": "/api/v1/runs/{id}/stream",
+      "auth": "access_token",
+      "required_scope": "runs:read",
+      "source": "openlinker-core/pkg/runtime/handler.go"
+    }
+  ]
+}
