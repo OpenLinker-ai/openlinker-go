@@ -152,6 +152,26 @@ The SDK includes the base Agent runtime integration layer:
 - `CallAgentAt`
 - `RuntimePullConnector`
 - `RuntimeWSConnector`
+- `Native`
+
+For native Go workers, `WithAgent` wraps the connector lifecycle and default
+result mapping. Existing Agent code only needs to implement a minimal text
+runner:
+
+```go
+type MyAgent struct{}
+
+func (MyAgent) Run(ctx context.Context, input string) (string, error) {
+	return "hello " + input, nil
+}
+
+err := openlinker.WithAgent(MyAgent{}).Run(context.Background())
+```
+
+Use `Native` when you need full control over assignment handling and custom
+result mapping. By default both runners read `OPENLINKER_API_BASE`,
+`OPENLINKER_RUNTIME_TOKEN`, `OPENLINKER_WORKER_CONNECTOR`,
+`OPENLINKER_WORKER_PULL_WAIT`, and `OPENLINKER_WORKER_MAX_RUNS`.
 
 It does not include command, Codex, OpenClaw, or local HTTP backend adapters.
 Use `openlinker-agent-node` for those process-level integrations.
