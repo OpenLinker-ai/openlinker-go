@@ -14,6 +14,26 @@ commit，并阅读 [CHANGELOG.md](./CHANGELOG.md)。
 
 本 SDK 不包含钱包、扣费、Stripe、提现、商业 Dashboard 或具体本地 adapter 实现。
 
+## 开源架构图
+
+Go SDK 是调用方侧和服务端集成 library。它封装 Core-owned HTTP、A2A、callback、gRPC
+和 runtime endpoint；进程级本地 adapter 属于 `openlinker-agent-node`。
+
+```mermaid
+flowchart LR
+  Service["Go service / CLI / backend"] --> SDK["openlinker-go"]
+  SDK -->|"REST client"| Core["openlinker-core<br/>registry / runs / events"]
+  SDK -->|"A2A JSON-RPC / HTTP+JSON / gRPC"| Core
+  SDK -->|"runtime connector primitives"| Runtime["Agent runtime process"]
+  Runtime -->|"heartbeat / claim / result"| Core
+
+  HostedBridge["Hosted Bridge<br/>可选部署适配层"] -.->|"同一 Core API contract"| Core
+
+  Core -->|"direct_http"| HTTPAgent["公网 HTTPS Agent"]
+  Core -->|"mcp_server"| MCPAgent["远程 MCP / JSON-RPC server"]
+  Core -->|"runtime_ws / runtime_pull"| AgentNode["openlinker-agent-node"]
+```
+
 ## 安装
 
 ```bash

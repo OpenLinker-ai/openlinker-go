@@ -23,6 +23,27 @@ go get github.com/OpenLinker-ai/openlinker-go
 For local development inside the parent OpenLinker workspace, use this package
 directory directly.
 
+## Open-source Architecture
+
+The Go SDK is a caller-side and service-side integration library. It wraps
+Core-owned HTTP, A2A, callback, gRPC, and runtime endpoints; process-level local
+adapters belong in `openlinker-agent-node`.
+
+```mermaid
+flowchart LR
+  Service["Go service / CLI / backend"] --> SDK["openlinker-go"]
+  SDK -->|"REST client"| Core["openlinker-core<br/>registry / runs / events"]
+  SDK -->|"A2A JSON-RPC / HTTP+JSON / gRPC"| Core
+  SDK -->|"runtime connector primitives"| Runtime["Agent runtime process"]
+  Runtime -->|"heartbeat / claim / result"| Core
+
+  HostedBridge["Hosted Bridge<br/>optional deployment adapter"] -.->|"same Core API contract"| Core
+
+  Core -->|"direct_http"| HTTPAgent["Public HTTPS Agent"]
+  Core -->|"mcp_server"| MCPAgent["Remote MCP / JSON-RPC server"]
+  Core -->|"runtime_ws / runtime_pull"| AgentNode["openlinker-agent-node"]
+```
+
 ## Quick Start
 
 ```go
