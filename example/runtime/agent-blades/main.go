@@ -14,7 +14,7 @@ import (
 	"github.com/go-kratos/blades/contrib/openai"
 )
 
-const sdkAgent = "openlinker-go/example/native-llm-worker"
+const sdkAgent = "openlinker-go/example/agent-blades"
 
 func main() {
 	cfg, err := loadConfig()
@@ -22,16 +22,7 @@ func main() {
 		log.Fatalf("config error: %v", err)
 	}
 
-	model := openai.NewModel(cfg.OpenAIModel, openai.Config{
-		APIKey:  cfg.OpenAIAPIKey,
-		BaseURL: cfg.OpenAIBaseURL,
-	})
-
-	agent, err := blades.NewAgent(
-		"Chat Agent",
-		blades.WithModel(model),
-		blades.WithInstruction("You are a helpful assistant that provides detailed and accurate information."),
-	)
+	agent, err := newAgent(cfg)
 	if err != nil {
 		log.Fatalf("agent init failed: %v", err)
 	}
@@ -48,6 +39,19 @@ func main() {
 		log.Fatalf("native runtime failed: %v", err)
 	}
 	log.Print("native llm worker stopped")
+}
+
+func newAgent(cfg config) (blades.Agent, error) {
+	model := openai.NewModel(cfg.OpenAIModel, openai.Config{
+		APIKey:  cfg.OpenAIAPIKey,
+		BaseURL: cfg.OpenAIBaseURL,
+	})
+
+	return blades.NewAgent(
+		"Chat Agent",
+		blades.WithModel(model),
+		blades.WithInstruction("You are a helpful assistant that provides detailed and accurate information."),
+	)
 }
 
 type config struct {

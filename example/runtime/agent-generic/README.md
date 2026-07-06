@@ -43,6 +43,7 @@ OPENLINKER_WORKER_MAX_RUNS=1 go run .
 | --- | --- | --- |
 | `GENERIC_AGENT_NAME` | `Generic Agent` | Name used in the text response. |
 | `GENERIC_AGENT_PREFIX` | empty | If set, replies with `<prefix> <input>`. |
+| `GENERIC_AGENT_PANIC` | `false` | Set to `1` or `true` to panic inside the Agent for runtime failure testing. |
 
 ## OpenLinker Settings
 
@@ -62,5 +63,29 @@ The SDK reads the first non-empty value from `text`, `query`, `task`, or
 ```json
 {
   "text": "summarize this"
+}
+```
+
+## Panic Recovery Test
+
+Use this mode to verify that OpenLinker native runtime recovers Agent panics and
+marks the run as failed instead of crashing the worker:
+
+```bash
+OPENLINKER_WORKER_MAX_RUNS=1 \
+GENERIC_AGENT_PANIC=1 \
+go run .
+```
+
+Trigger one run from OpenLinker. The worker should stay alive until the run is
+completed, and the run result should contain:
+
+```json
+{
+  "status": "failed",
+  "error": {
+    "code": "AGENT_RUNTIME_PANIC",
+    "message": "agent panic: generic agent panic requested by GENERIC_AGENT_PANIC"
+  }
 }
 ```

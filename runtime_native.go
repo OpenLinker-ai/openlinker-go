@@ -238,14 +238,7 @@ func (r *NativeRunner) handleAssignment(
 	errCh chan<- error,
 ) {
 	started := time.Now()
-	output, err := r.Handler(ctx, NativeRun{
-		Assignment: assignment,
-		reporter: NativeReporter{
-			connector: connector,
-			runID:     assignment.RunID,
-		},
-	})
-	result := nativeRuntimeResult(output, err)
+	result := r.invokeHandler(ctx, connector, assignment)
 	result.DurationMS = nativeDurationMS(started)
 
 	completeCtx, completeCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -262,6 +255,22 @@ func (r *NativeRunner) handleAssignment(
 		stopAfterMax.Store(true)
 		cancel()
 	}
+}
+
+func (r *NativeRunner) invokeHandler(ctx context.Context, connector RuntimeConnector, assignment RuntimeAssignment) (result RuntimePullResultRequest) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			result = nativeRuntimePanicResult(recovered)
+		}
+	}()
+	output, err := r.Handler(ctx, NativeRun{
+		Assignment: assignment,
+		reporter: NativeReporter{
+			connector: connector,
+			runID:     assignment.RunID,
+		},
+	})
+	return nativeRuntimeResult(output, err)
 }
 
 func nativeRuntimeResult(output any, err error) RuntimePullResultRequest {
@@ -296,6 +305,16 @@ func nativeRuntimeResult(output any, err error) RuntimePullResultRequest {
 		Output: result.Output,
 		Events: result.Events,
 		Error:  result.Error,
+	}
+}
+
+func nativeRuntimePanicResult(recovered any) RuntimePullResultRequest {
+	return RuntimePullResultRequest{
+		Status: "failed",
+		Error: &AgentError{
+			Code:    "AGENT_RUNTIME_PANIC",
+			Message: fmt.Sprintf("agent panic: %v", recovered),
+		},
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -18,9 +19,14 @@ const sdkAgent = "openlinker-go/example/agent-generic"
 type GenericAgent struct {
 	Name   string
 	Prefix string
+	Panic  bool
 }
 
 func (a GenericAgent) Run(ctx context.Context, input string) (string, error) {
+	if a.Panic {
+		panic("generic agent panic requested by GENERIC_AGENT_PANIC")
+	}
+
 	select {
 	case <-ctx.Done():
 		return "", ctx.Err()
@@ -51,6 +57,7 @@ func main() {
 	agent := GenericAgent{
 		Name:   firstNonEmpty(os.Getenv("GENERIC_AGENT_NAME"), "Generic Agent"),
 		Prefix: strings.TrimSpace(os.Getenv("GENERIC_AGENT_PREFIX")),
+		Panic:  envBool("GENERIC_AGENT_PANIC"),
 	}
 
 	log.Printf("generic native agent starting name=%q", agent.Name)
@@ -69,4 +76,13 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func envBool(key string) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return false
+	}
+	enabled, err := strconv.ParseBool(value)
+	return err == nil && enabled
 }

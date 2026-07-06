@@ -15,4 +15,4 @@ require (
 	google.golang.org/protobuf v1.36.10 // indirect
 )
 
-replace github.com/OpenLinker-ai/openlinker-go v0.1.4 => ../openlinker-go
+replace github.com/OpenLinker-ai/openlinker-go v0.1.4 => ../../..

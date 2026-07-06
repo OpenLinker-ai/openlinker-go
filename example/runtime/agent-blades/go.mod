@@ -31,6 +31,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/OpenLinker-ai/openlinker-go v0.1.4 => ../openlinker-go
+replace github.com/OpenLinker-ai/openlinker-go v0.1.4 => ../../..
 
-replace github.com/OpenLinker-ai/openlinker-go/contrib/blades => ../openlinker-go/contrib/blades
+replace github.com/OpenLinker-ai/openlinker-go/contrib/blades => ../../../contrib/blades
