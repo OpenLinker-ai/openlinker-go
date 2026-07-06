@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  pull_request:
   push:
     tags:
       - "v*"
@@ -23,3 +24,12 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+      - name: Verify nested modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          find . -mindepth 2 -name go.mod -not -path './.git/*' -print | sort | while IFS= read -r gomod; do
+            mod="$(dirname "${gomod}")"
+            (cd "${mod}" && go test ./...)
+          done
