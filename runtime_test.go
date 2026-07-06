@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -167,6 +168,13 @@ func TestRuntimeWSConnectorHandlesAssignmentsAndSendsMessages(t *testing.T) {
 	readyCh := make(chan RuntimeWSServerMessage, 1)
 	assignedCh := make(chan RuntimeAssignment, 1)
 	messagesCh := make(chan []RuntimeWSClientMessage, 1)
+	releaseServer := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() {
+			close(releaseServer)
+		})
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/agent-runtime/ws" {
 			t.Fatalf("path = %s", r.URL.Path)
@@ -208,8 +216,10 @@ func TestRuntimeWSConnectorHandlesAssignmentsAndSendsMessages(t *testing.T) {
 			messages = append(messages, message)
 		}
 		messagesCh <- messages
+		<-releaseServer
 	}))
 	defer server.Close()
+	defer release()
 
 	client, err := NewClient(server.URL, WithAgentToken("ol_agent_ws"))
 	if err != nil {
@@ -274,6 +284,10 @@ func TestRuntimeWSConnectorHandlesAssignmentsAndSendsMessages(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for websocket messages")
 	}
+	if err := connector.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	release()
 }
 
 func TestRuntimeWSConnectorSendsHeartbeat(t *testing.T) {
