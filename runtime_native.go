@@ -74,6 +74,7 @@ type NativeResult struct {
 
 type NativeRunner struct {
 	Handler      NativeHandler
+	Runtime      *Runtime
 	Client       *Client
 	APIBase      string
 	RuntimeToken string
@@ -91,6 +92,11 @@ func Native(handler NativeHandler) *NativeRunner {
 
 func (r *NativeRunner) WithClient(client *Client) *NativeRunner {
 	r.Client = client
+	return r
+}
+
+func (r *NativeRunner) WithRuntime(runtime *Runtime) *NativeRunner {
+	r.Runtime = runtime
 	return r
 }
 
@@ -195,9 +201,12 @@ func (r *NativeRunner) Run(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (r *NativeRunner) runtimeClient() (*Client, error) {
+func (r *NativeRunner) runtimeClient() (*Runtime, error) {
+	if r.Runtime != nil {
+		return r.Runtime, nil
+	}
 	if r.Client != nil {
-		return r.Client, nil
+		return &Runtime{client: r.Client}, nil
 	}
 	apiBase := firstNativeNonEmpty(r.APIBase, os.Getenv("OPENLINKER_API_BASE"), defaultNativeAPIBase)
 	token := firstNativeNonEmpty(r.RuntimeToken, os.Getenv("OPENLINKER_RUNTIME_TOKEN"), os.Getenv("OPENLINKER_AGENT_TOKEN"))
@@ -205,23 +214,23 @@ func (r *NativeRunner) runtimeClient() (*Client, error) {
 		return nil, errors.New("openlinker: OPENLINKER_RUNTIME_TOKEN is required")
 	}
 	sdkAgent := firstNativeNonEmpty(r.SDKAgent, defaultNativeSDKAgent)
-	return NewClient(apiBase, WithRuntimeToken(token), WithSDKAgent(sdkAgent))
+	return NewRuntime(apiBase, WithRuntimeToken(token), WithSDKAgent(sdkAgent))
 }
 
 func (r *NativeRunner) effectiveMaxRuns() int {
 	return firstNativeInt(r.MaxRuns, "OPENLINKER_WORKER_MAX_RUNS", 0)
 }
 
-func (r *NativeRunner) runtimeConnector(client *Client, maxRuns int) (RuntimeConnector, error) {
+func (r *NativeRunner) runtimeConnector(runtime *Runtime, maxRuns int) (RuntimeConnector, error) {
 	mode := firstNativeNonEmpty(r.Connector, os.Getenv("OPENLINKER_WORKER_CONNECTOR"), RuntimeConnectorPull)
 	switch mode {
 	case RuntimeConnectorPull:
-		conn := NewRuntimePullConnector(client)
+		conn := NewRuntimePullConnector(runtime)
 		conn.Wait = firstNativeDuration(r.PullWait, "OPENLINKER_WORKER_PULL_WAIT", 25*time.Second)
 		conn.MaxRuns = maxRuns
 		return conn, nil
 	case RuntimeConnectorWebSocket:
-		return NewRuntimeWSConnector(client), nil
+		return NewRuntimeWSConnector(runtime), nil
 	default:
 		return nil, fmt.Errorf("openlinker: runtime connector must be %q or %q", RuntimeConnectorPull, RuntimeConnectorWebSocket)
 	}

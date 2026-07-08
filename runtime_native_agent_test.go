@@ -44,14 +44,14 @@ func TestNativeAgentRunnerCompletesPullRun(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, WithRuntimeToken("ol_agent_native"))
+	client, err := NewRuntime(server.URL, WithRuntimeToken("ol_agent_native"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = WithFunc(func(ctx context.Context, input string) (string, error) {
 		return "hello " + input, nil
 	}).
-		WithClient(client).
+		WithRuntime(client).
 		WithPullWait(time.Second).
 		WithMaxRuns(1).
 		Run(context.Background())

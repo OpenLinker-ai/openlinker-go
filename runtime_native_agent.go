@@ -27,6 +27,7 @@ type NativeAgentRunner struct {
 	sdkAgent      string
 	fallbackInput string
 
+	runtime      *Runtime
 	client       *Client
 	apiBase      string
 	runtimeToken string
@@ -68,6 +69,11 @@ func (r *NativeAgentRunner) WithFallbackInput(input string) *NativeAgentRunner {
 
 func (r *NativeAgentRunner) WithClient(client *Client) *NativeAgentRunner {
 	r.client = client
+	return r
+}
+
+func (r *NativeAgentRunner) WithRuntime(runtime *Runtime) *NativeAgentRunner {
+	r.runtime = runtime
 	return r
 }
 
@@ -124,6 +130,9 @@ func (r *NativeAgentRunner) Run(ctx context.Context) error {
 		WithErrorHandler(r.onError)
 	if r.client != nil {
 		runner.WithClient(r.client)
+	}
+	if r.runtime != nil {
+		runner.WithRuntime(r.runtime)
 	}
 	return runner.Run(ctx)
 }

@@ -44,6 +44,7 @@ type RuntimeConnector interface {
 }
 
 type RuntimePullConnector struct {
+	Runtime     *Runtime
 	Client      *Client
 	Wait        time.Duration
 	Heartbeat   time.Duration
@@ -58,8 +59,8 @@ type RuntimePullConnector struct {
 	processed int
 }
 
-func NewRuntimePullConnector(client *Client) *RuntimePullConnector {
-	return &RuntimePullConnector{Client: client}
+func NewRuntimePullConnector(runtime *Runtime) *RuntimePullConnector {
+	return &RuntimePullConnector{Runtime: runtime}
 }
 
 func (c *RuntimePullConnector) SupportsLiveEvents() bool {
@@ -119,16 +120,34 @@ func (c *RuntimePullConnector) SendRunEvent(ctx context.Context, runID string, e
 }
 
 func (c *RuntimePullConnector) CompleteRun(ctx context.Context, runID string, result RuntimePullResultRequest) error {
-	_, err := c.Client.CompleteRuntimeRun(ctx, runID, result)
+	runtime := c.runtimeClient()
+	if runtime == nil {
+		return errors.New("openlinker: runtime pull connector requires runtime")
+	}
+	_, err := runtime.CompleteRuntimeRun(ctx, runID, result)
 	return err
 }
 
 func (c *RuntimePullConnector) validate() error {
-	if c.Client == nil {
-		return errors.New("openlinker: runtime pull connector requires client")
+	runtime := c.runtimeClient()
+	if runtime == nil {
+		return errors.New("openlinker: runtime pull connector requires runtime")
 	}
-	if c.Client.runtimeAuthToken() == "" {
+	if runtime.runtimeAuthToken() == "" {
 		return errors.New("openlinker: agent token is required")
+	}
+	return nil
+}
+
+func (c *RuntimePullConnector) runtimeClient() *Runtime {
+	if c == nil {
+		return nil
+	}
+	if c.Runtime != nil {
+		return c.Runtime
+	}
+	if c.Client != nil {
+		return &Runtime{client: c.Client}
 	}
 	return nil
 }
@@ -137,11 +156,11 @@ func (c *RuntimePullConnector) loop() error {
 	lastHeartbeat := time.Time{}
 	for c.ctx.Err() == nil && (c.MaxRuns == 0 || c.processed < c.MaxRuns) {
 		if time.Since(lastHeartbeat) >= c.Heartbeat {
-			_, _ = c.Client.HeartbeatAgent(c.ctx)
+			_, _ = c.runtimeClient().HeartbeatAgent(c.ctx)
 			lastHeartbeat = time.Now()
 		}
 
-		claimResult, err := c.Client.ClaimRuntimeRunDetailed(c.ctx, ClaimRuntimeRunParams{
+		claimResult, err := c.runtimeClient().ClaimRuntimeRunDetailed(c.ctx, ClaimRuntimeRunParams{
 			WaitSeconds: int32(c.Wait.Seconds()),
 		})
 		if err == nil && claimResult != nil && claimResult.Run != nil {
@@ -187,6 +206,7 @@ type WebSocketDialer interface {
 }
 
 type RuntimeWSConnector struct {
+	Runtime      *Runtime
 	Client       *Client
 	Endpoint     string
 	Reconnect    bool
@@ -203,9 +223,9 @@ type RuntimeWSConnector struct {
 	wg       sync.WaitGroup
 }
 
-func NewRuntimeWSConnector(client *Client) *RuntimeWSConnector {
+func NewRuntimeWSConnector(runtime *Runtime) *RuntimeWSConnector {
 	return &RuntimeWSConnector{
-		Client:    client,
+		Runtime:   runtime,
 		Reconnect: true,
 	}
 }
@@ -303,11 +323,25 @@ func (c *RuntimeWSConnector) CompleteRun(ctx context.Context, runID string, resu
 }
 
 func (c *RuntimeWSConnector) validate() error {
-	if c.Client == nil {
-		return errors.New("openlinker: runtime websocket connector requires client")
+	runtime := c.runtimeClient()
+	if runtime == nil {
+		return errors.New("openlinker: runtime websocket connector requires runtime")
 	}
-	if c.Client.runtimeAuthToken() == "" {
+	if runtime.runtimeAuthToken() == "" {
 		return errors.New("openlinker: agent token is required")
+	}
+	return nil
+}
+
+func (c *RuntimeWSConnector) runtimeClient() *Runtime {
+	if c == nil {
+		return nil
+	}
+	if c.Runtime != nil {
+		return c.Runtime
+	}
+	if c.Client != nil {
+		return &Runtime{client: c.Client}
 	}
 	return nil
 }
@@ -317,11 +351,15 @@ func (c *RuntimeWSConnector) connect(ctx context.Context) error {
 	if strings.TrimSpace(endpoint) == "" {
 		endpoint = "/agent-runtime/ws"
 	}
-	wsURL, err := c.Client.webSocketEndpoint(endpoint)
+	runtime := c.runtimeClient()
+	if runtime == nil {
+		return errors.New("openlinker: runtime websocket connector requires runtime")
+	}
+	wsURL, err := runtime.webSocketEndpoint(endpoint)
 	if err != nil {
 		return err
 	}
-	header := c.Client.runtimeWebSocketHeaders()
+	header := runtime.runtimeWebSocketHeaders()
 	conn, _, err := c.Dialer.DialContext(ctx, wsURL, header)
 	if err != nil {
 		return err
