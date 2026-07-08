@@ -58,7 +58,7 @@ func TestRuntimePullConnectorAssignsAndCompletesRun(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, WithAgentToken("ol_agent_runtime"))
+	client, err := NewRuntime(server.URL, WithAgentToken("ol_agent_runtime"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestRuntimePullConnectorStopsOnEmptyClaim(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, WithAgentToken("ol_agent_empty"))
+	client, err := NewRuntime(server.URL, WithAgentToken("ol_agent_empty"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestRuntimeWSConnectorHandlesAssignmentsAndSendsMessages(t *testing.T) {
 	defer server.Close()
 	defer release()
 
-	client, err := NewClient(server.URL, WithAgentToken("ol_agent_ws"))
+	client, err := NewRuntime(server.URL, WithAgentToken("ol_agent_ws"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +315,7 @@ func TestRuntimeWSConnectorSendsHeartbeat(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, WithAgentToken("ol_agent_ws"))
+	client, err := NewRuntime(server.URL, WithAgentToken("ol_agent_ws"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +367,7 @@ func TestRuntimeWSConnectorReconnectsAfterClose(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, WithAgentToken("ol_agent_ws"))
+	client, err := NewRuntime(server.URL, WithAgentToken("ol_agent_ws"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -313,19 +313,19 @@ func TestRuntimeMethodsUseAgentTokenAndProtocolEndpoints(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, WithUserToken("ol_user_user"), WithAgentToken("ol_agent_runtime"))
+	runtime, err := NewRuntime(server.URL, WithAgentToken("ol_agent_runtime"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	heartbeat, err := client.HeartbeatAgent(context.Background())
+	heartbeat, err := runtime.HeartbeatAgent(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := client.ClaimRuntimeRun(context.Background(), ClaimRuntimeRunParams{WaitSeconds: 25})
+	claimed, err := runtime.ClaimRuntimeRun(context.Background(), ClaimRuntimeRunParams{WaitSeconds: 25})
 	if err != nil {
 		t.Fatal(err)
 	}
-	completed, err := client.CompleteRuntimeRun(context.Background(), "run-1", RuntimePullResultRequest{
+	completed, err := runtime.CompleteRuntimeRun(context.Background(), "run-1", RuntimePullResultRequest{
 		Status:     "success",
 		Output:     JSON{"ok": true},
 		Events:     []AgentEvent{{EventType: "run.message.delta", Payload: JSON{"text": "done"}}},
@@ -334,7 +334,7 @@ func TestRuntimeMethodsUseAgentTokenAndProtocolEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	child, err := client.CallAgent(context.Background(), CallAgentRequest{
+	child, err := runtime.CallAgent(context.Background(), CallAgentRequest{
 		CurrentRunID:     "run-1",
 		TargetAgentID:    "target-agent",
 		Reason:           "delegate",
@@ -353,7 +353,7 @@ func TestRuntimeMethodsUseAgentTokenAndProtocolEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	childAt, err := client.CallAgentAt(context.Background(), "/api/v1/agent-runtime/call-agent", CallAgentRequest{
+	childAt, err := runtime.CallAgentAt(context.Background(), "/api/v1/agent-runtime/call-agent", CallAgentRequest{
 		CurrentRunID:  "run-1",
 		TargetAgentID: "target-agent",
 		Input:         "child",
@@ -421,18 +421,18 @@ func TestClaimRuntimeRunReturnsNilOnNoContent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, WithAgentToken("ol_agent_runtime"))
+	runtime, err := NewRuntime(server.URL, WithAgentToken("ol_agent_runtime"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := client.ClaimRuntimeRun(context.Background(), ClaimRuntimeRunParams{})
+	claimed, err := runtime.ClaimRuntimeRun(context.Background(), ClaimRuntimeRunParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if claimed != nil {
 		t.Fatalf("claimed = %+v, want nil", claimed)
 	}
-	detailed, err := client.ClaimRuntimeRunDetailed(context.Background(), ClaimRuntimeRunParams{})
+	detailed, err := runtime.ClaimRuntimeRunDetailed(context.Background(), ClaimRuntimeRunParams{})
 	if err != nil {
 		t.Fatal(err)
 	}

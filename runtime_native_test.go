@@ -49,7 +49,7 @@ func TestNativeRunnerCompletesPullRun(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, WithRuntimeToken("ol_agent_native"))
+	client, err := NewRuntime(server.URL, WithRuntimeToken("ol_agent_native"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestNativeRunnerCompletesPullRun(t *testing.T) {
 		}
 		return JSON{"answer": "ok"}, nil
 	}).
-		WithClient(client).
+		WithRuntime(client).
 		WithConnector(RuntimeConnectorPull).
 		WithPullWait(time.Second).
 		WithMaxRuns(1).
@@ -111,14 +111,14 @@ func TestNativeRunnerCompletesPanickedRun(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, WithRuntimeToken("ol_agent_native"))
+	client, err := NewRuntime(server.URL, WithRuntimeToken("ol_agent_native"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = Native(func(ctx context.Context, run NativeRun) (any, error) {
 		panic("boom")
 	}).
-		WithClient(client).
+		WithRuntime(client).
 		WithPullWait(time.Second).
 		WithMaxRuns(1).
 		Run(context.Background())
@@ -172,14 +172,14 @@ func TestNativeRunnerCompletesFailedRun(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, WithRuntimeToken("ol_agent_native"))
+	client, err := NewRuntime(server.URL, WithRuntimeToken("ol_agent_native"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = Native(func(ctx context.Context, run NativeRun) (any, error) {
 		return nil, errors.New("boom")
 	}).
-		WithClient(client).
+		WithRuntime(client).
 		WithPullWait(time.Second).
 		WithMaxRuns(1).
 		Run(context.Background())

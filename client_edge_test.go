@@ -107,7 +107,7 @@ func TestClientEndpointAndConstructionValidation(t *testing.T) {
 			t.Fatalf("NewClient(%q) succeeded", raw)
 		}
 	}
-	client, err := NewClient("https://example.test/root/api/v1", WithHTTPClient(nil), WithUserToken(" user "), WithAgentToken(" runtime "))
+	client, err := NewClient("https://example.test/root/api/v1", WithHTTPClient(nil), WithUserToken(" user "))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,8 +119,18 @@ func TestClientEndpointAndConstructionValidation(t *testing.T) {
 	if got := client.endpoint("https://other.test/custom", query); got != "https://other.test/custom?q=hello+world" {
 		t.Fatalf("absolute endpoint = %q", got)
 	}
-	if got := client.runtimeAuthToken(); got != "runtime" {
-		t.Fatalf("agent token = %q", got)
+	if _, err := NewClient("https://example.test", WithAgentToken(" runtime ")); err == nil || !strings.Contains(err.Error(), "NewRuntime") {
+		t.Fatalf("NewClient with agent token err = %v", err)
+	}
+	runtime, err := NewRuntime("https://example.test/root/api/v1", WithRuntimeToken(" runtime "))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runtime.runtimeAuthToken(); got != "runtime" {
+		t.Fatalf("runtime token = %q", got)
+	}
+	if _, err := NewRuntime("https://example.test", WithUserToken(" user "), WithAgentToken(" runtime ")); err == nil || !strings.Contains(err.Error(), "user token") {
+		t.Fatalf("NewRuntime with user token err = %v", err)
 	}
 	defaultAgentClient, err := NewClient("https://example.test", WithSDKAgent(" "))
 	if err != nil {
@@ -135,6 +145,13 @@ func TestClientMethodsPropagateRequestErrors(t *testing.T) {
 	client, err := NewClient(
 		"https://example.test",
 		WithUserToken("ol_user_access"),
+		WithHTTPClient(sdkHTTPClient(http.StatusBadGateway, `{"error":{"code":"BROKEN","message":"bad gateway"}}`)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := NewRuntime(
+		"https://example.test",
 		WithAgentToken("ol_agent_runtime"),
 		WithHTTPClient(sdkHTTPClient(http.StatusBadGateway, `{"error":{"code":"BROKEN","message":"bad gateway"}}`)),
 	)
@@ -182,19 +199,19 @@ func TestClientMethodsPropagateRequestErrors(t *testing.T) {
 			return client.StreamRunEvents(ctx, "run", StreamRunEventsOptions{}, func(StreamRunEvent) error { return nil })
 		}},
 		{name: "heartbeat", call: func() error {
-			_, err := client.HeartbeatAgent(ctx)
+			_, err := runtime.HeartbeatAgent(ctx)
 			return err
 		}},
 		{name: "claim", call: func() error {
-			_, err := client.ClaimRuntimeRun(ctx, ClaimRuntimeRunParams{})
+			_, err := runtime.ClaimRuntimeRun(ctx, ClaimRuntimeRunParams{})
 			return err
 		}},
 		{name: "complete", call: func() error {
-			_, err := client.CompleteRuntimeRun(ctx, "run", RuntimePullResultRequest{Status: "success"})
+			_, err := runtime.CompleteRuntimeRun(ctx, "run", RuntimePullResultRequest{Status: "success"})
 			return err
 		}},
 		{name: "call agent", call: func() error {
-			_, err := client.CallAgentAt(ctx, "/agent-runtime/call-agent", CallAgentRequest{CurrentRunID: "run", TargetAgentID: "agent", Input: JSON{"q": "hi"}})
+			_, err := runtime.CallAgentAt(ctx, "/agent-runtime/call-agent", CallAgentRequest{CurrentRunID: "run", TargetAgentID: "agent", Input: JSON{"q": "hi"}})
 			return err
 		}},
 	} {
@@ -302,17 +319,17 @@ func TestRuntimeHTTPAgentTokenNoContentAndDecodeEdges(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, WithAgentToken("ol_agent_access"))
+	runtime, err := NewRuntime(server.URL, WithAgentToken("ol_agent_access"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if heartbeat, err := client.HeartbeatAgent(context.Background()); err != nil || heartbeat.AgentID != "" {
+	if heartbeat, err := runtime.HeartbeatAgent(context.Background()); err != nil || heartbeat.AgentID != "" {
 		t.Fatalf("HeartbeatAgent = %+v err=%v", heartbeat, err)
 	}
-	if child, err := client.CallAgent(context.Background(), CallAgentRequest{CurrentRunID: "run-1", TargetAgentID: "agent-2", Input: JSON{"q": "hello"}}); err != nil || child.RunID != "" {
+	if child, err := runtime.CallAgent(context.Background(), CallAgentRequest{CurrentRunID: "run-1", TargetAgentID: "agent-2", Input: JSON{"q": "hello"}}); err != nil || child.RunID != "" {
 		t.Fatalf("CallAgent no content = %+v err=%v", child, err)
 	}
-	if _, err := client.ClaimRuntimeRunDetailed(context.Background(), ClaimRuntimeRunParams{}); err == nil || !strings.Contains(err.Error(), "decode response") {
+	if _, err := runtime.ClaimRuntimeRunDetailed(context.Background(), ClaimRuntimeRunParams{}); err == nil || !strings.Contains(err.Error(), "decode response") {
 		t.Fatalf("ClaimRuntimeRunDetailed decode err = %v", err)
 	}
 	if len(auths) != 3 {
@@ -361,10 +378,10 @@ func TestRuntimeHelpersValidationAndMessageBranches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := NewRuntimePullConnector(noTokenClient).Start(context.Background(), RuntimeHandlers{}); err == nil {
+	if err := (&RuntimePullConnector{Client: noTokenClient}).Start(context.Background(), RuntimeHandlers{}); err == nil {
 		t.Fatal("runtime pull without token succeeded")
 	}
-	pull := NewRuntimePullConnector(noTokenClient)
+	pull := &RuntimePullConnector{Client: noTokenClient}
 	if pull.SupportsLiveEvents() {
 		t.Fatal("runtime pull should not support live events")
 	}
@@ -372,18 +389,18 @@ func TestRuntimeHelpersValidationAndMessageBranches(t *testing.T) {
 		t.Fatalf("pull SendRunEvent = %v", err)
 	}
 
-	client, err := NewClient("http://example.test/base", WithUserToken("access"), WithAgentToken("runtime"), WithHeader("X-Extra", "1"))
+	runtime, err := NewRuntime("http://example.test/base", WithAgentToken("runtime"), WithHeader("X-Extra", "1"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	headers := client.runtimeWebSocketHeaders()
+	headers := runtime.runtimeWebSocketHeaders()
 	if headers.Get("Authorization") != "Bearer runtime" || headers.Get("X-Extra") != "1" {
 		t.Fatalf("runtime ws headers = %#v", headers)
 	}
-	if got, err := client.webSocketEndpoint("/agent-runtime/ws"); err != nil || got != "ws://example.test/base/api/v1/agent-runtime/ws" {
+	if got, err := runtime.webSocketEndpoint("/agent-runtime/ws"); err != nil || got != "ws://example.test/base/api/v1/agent-runtime/ws" {
 		t.Fatalf("webSocketEndpoint http = %q err=%v", got, err)
 	}
-	if got, err := client.webSocketEndpoint("wss://agents.example/ws"); err != nil || got != "wss://agents.example/ws" {
+	if got, err := runtime.webSocketEndpoint("wss://agents.example/ws"); err != nil || got != "wss://agents.example/ws" {
 		t.Fatalf("webSocketEndpoint absolute = %q err=%v", got, err)
 	}
 	ftpClient, err := NewClient("ftp://example.test")
@@ -394,14 +411,14 @@ func TestRuntimeHelpersValidationAndMessageBranches(t *testing.T) {
 		t.Fatal("unsupported websocket scheme succeeded")
 	}
 
-	ws := NewRuntimeWSConnector(client)
+	ws := NewRuntimeWSConnector(runtime)
 	if !ws.SupportsLiveEvents() {
 		t.Fatal("runtime ws should support live events")
 	}
 	if err := NewRuntimeWSConnector(nil).Start(context.Background(), RuntimeHandlers{}); err == nil {
 		t.Fatal("runtime ws without client succeeded")
 	}
-	if err := NewRuntimeWSConnector(noTokenClient).Start(context.Background(), RuntimeHandlers{}); err == nil {
+	if err := (&RuntimeWSConnector{Client: noTokenClient}).Start(context.Background(), RuntimeHandlers{}); err == nil {
 		t.Fatal("runtime ws without token succeeded")
 	}
 	if err := ws.SendRunEvent(context.Background(), "run-1", AgentEvent{}); err == nil {
@@ -472,7 +489,7 @@ func TestRuntimePullConnectorRetriesRateLimitBeforeAssignment(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, WithAgentToken("ol_agent_retry"))
+	client, err := NewRuntime(server.URL, WithAgentToken("ol_agent_retry"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +544,7 @@ func TestRuntimePullConnectorReportsClaimErrorsThenStopsOnEmpty(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewClient(server.URL, WithAgentToken("ol_agent_claim_error"))
+	client, err := NewRuntime(server.URL, WithAgentToken("ol_agent_claim_error"))
 	if err != nil {
 		t.Fatal(err)
 	}
