@@ -198,6 +198,7 @@ defer a2a.Close()
 gRPC is an A2A transport binding. It does not replace Agent Node's internal
 `runtime_ws` or `runtime_pull` channels.
 
+
 ## Core Surface
 
 Application-side calls:

@@ -7,8 +7,12 @@
 bin/
 coverage.out
 *.cover.out
+example/runtime/agent-skill/skills/openlinker-cli/scripts/openlinker
+example/skill/openlinker-cli-for-blades/scripts/openlinker
+example/skill/openlinker-cli-for-generic/cli/openlinker
 
 # Editor / OS
 .DS_Store
+._*
 .idea/
 .vscode/

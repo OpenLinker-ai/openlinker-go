@@ -197,6 +197,15 @@ func (c *Client) ListRunEvents(ctx context.Context, runID string, params ListRun
 	return &out, nil
 }
 
+func (c *Client) ListRunChildren(ctx context.Context, runID string) (*ListRunChildrenResponse, error) {
+	var out ListRunChildrenResponse
+	path := "/runs/" + url.PathEscape(runID) + "/children"
+	if err := c.do(ctx, http.MethodGet, path, nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *Client) ListRunArtifacts(ctx context.Context, runID string) (*ListItemsResponse[RunArtifactResponse], error) {
 	var out ListItemsResponse[RunArtifactResponse]
 	path := "/runs/" + url.PathEscape(runID) + "/artifacts"

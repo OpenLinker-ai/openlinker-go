@@ -191,6 +191,15 @@ type ListRunEventsResponse struct {
 	Events []RunEventResponse `json:"events"`
 }
 
+type RunChildResponse struct {
+	ChildRunID string `json:"child_run_id"`
+	Status     string `json:"status"`
+}
+
+type ListRunChildrenResponse struct {
+	Items []RunChildResponse `json:"items"`
+}
+
 type RunEventResponse struct {
 	EventID     string `json:"event_id"`
 	RunID       string `json:"run_id"`

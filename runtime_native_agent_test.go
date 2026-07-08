@@ -72,3 +72,44 @@ func TestNativeAgentRunnerCompletesPullRun(t *testing.T) {
 		t.Fatal("timed out waiting for result")
 	}
 }
+
+func TestNativeAgentRunnerInjectsNativeRunContext(t *testing.T) {
+	var seenRun NativeRun
+	var seen bool
+	runner := WithFunc(func(ctx context.Context, input string) (string, error) {
+		seenRun, seen = NativeRunFromContext(ctx)
+		return "ok", nil
+	})
+
+	out, err := runner.handleRun(context.Background(), NativeRun{
+		Assignment: RuntimeAssignment{
+			RunID:   "run-context",
+			AgentID: "agent-context",
+			Input:   JSON{"text": "hello"},
+			A2A: &AgentA2AContext{
+				TraceID:           "trace-context",
+				ProtocolContextID: "ctx-context",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !seen {
+		t.Fatal("NativeRunFromContext() ok = false, want true")
+	}
+	if seenRun.Assignment.RunID != "run-context" {
+		t.Fatalf("run_id = %q", seenRun.Assignment.RunID)
+	}
+	if seenRun.Assignment.AgentID != "agent-context" {
+		t.Fatalf("agent_id = %q", seenRun.Assignment.AgentID)
+	}
+	if seenRun.Assignment.A2A == nil || seenRun.Assignment.A2A.TraceID != "trace-context" {
+		t.Fatalf("a2a = %#v", seenRun.Assignment.A2A)
+	}
+
+	result := out.(NativeResult)
+	if result.Status != "success" {
+		t.Fatalf("status = %q", result.Status)
+	}
+}
