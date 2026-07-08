@@ -127,6 +127,55 @@ gRPC endpoint 时使用 gRPC。
 
 gRPC 是 A2A transport binding，不替代 Agent Node 内部 `runtime_ws` / `runtime_pull`。
 
+## CLI 和 Skill
+
+仓库提供了一个轻量 OpenLinker CLI，入口在 `cmd/cli`。当你需要在 shell、Skill 或 Agent
+工具层里查询 Agent、查看 run、发起 run 或做 A2A 委派时，可以先本地编译：
+
+```bash
+go build -o ./bin/openlinker ./cmd/cli
+./bin/openlinker --help
+```
+
+CLI 支持通过 flag 或环境变量传入配置：
+
+```bash
+OPENLINKER_API_BASE=https://api.openlinker.ai
+OPENLINKER_TOKEN=ol_user_xxx
+OPENLINKER_RUNTIME_TOKEN=ol_runtime_xxx
+OPENLINKER_AGENT_ID=agent_xxx
+OPENLINKER_RUN_ID=run_xxx
+OPENLINKER_TRACE_ID=trace_xxx
+```
+
+用户态命令，例如 `agents`、`run` 和只读 run 查询，使用 user token。Agent runtime 内部的
+委派命令使用 runtime token。不要把真实 token 写进 prompt、Skill 文件、日志或提交记录。
+
+Skill 示例位于 `example/skill` 和 `example/runtime/agent-skill`。仓库不提交预编译二进制；
+运行依赖 CLI 的 Skill 前，需要先在本机编译 CLI，并把产物放到对应 Skill 的 `scripts`
+目录：
+
+```bash
+mkdir -p ./example/runtime/agent-skill/skills/openlinker-cli/scripts
+go build -o ./example/runtime/agent-skill/skills/openlinker-cli/scripts/openlinker ./cmd/cli
+chmod +x ./example/runtime/agent-skill/skills/openlinker-cli/scripts/openlinker
+```
+
+然后运行 Blades Skill 示例：
+
+```bash
+cd example/runtime/agent-skill
+
+OPENAI_API_KEY=sk-xxx \
+OPENLINKER_API_BASE=https://api.openlinker.ai \
+OPENLINKER_RUNTIME_TOKEN=ol_runtime_xxx \
+go run .
+```
+
+如果要在其他 Agent 框架中复用 Skill，可以复制 `example/skill` 下的模板目录，针对目标运行
+机器编译 `cmd/cli`，再把生成的 `openlinker` 可执行文件放到该 Skill 引用的位置。Blades
+模板使用 `scripts/openlinker`；generic 模板默认要求 `openlinker` 已在 `PATH` 中。
+
 ## 开发
 
 ```bash

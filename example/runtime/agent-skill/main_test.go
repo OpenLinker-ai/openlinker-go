@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -28,24 +27,25 @@ func TestEmbeddedOpenLinkerSkillLoadsScript(t *testing.T) {
 	if !ok {
 		t.Fatal("skill does not expose resources")
 	}
-	script, ok := resourcesProvider.Resources().GetScript("openlinker")
-	if !ok {
-		t.Fatal("scripts/openlinker was not loaded as a skill script")
-	}
-	if len(script) == 0 {
-		t.Fatal("scripts/openlinker is empty")
+	if script, ok := resourcesProvider.Resources().GetScript("openlinker"); ok && len(script) == 0 {
+		t.Fatal("scripts/openlinker is empty when present")
 	}
 }
 
 func TestOpenLinkerSkillScriptContextCommand(t *testing.T) {
-	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
-		t.Skip("embedded openlinker CLI binary is currently darwin/arm64")
-	}
-
 	loaded, err := bladesSkills.NewFromEmbed(skillFS)
 	if err != nil {
 		t.Fatal(err)
 	}
+	skill := findSkill(t, loaded, "openlinker-cli")
+	resourcesProvider, ok := skill.(bladesSkills.ResourcesProvider)
+	if !ok {
+		t.Fatal("skill does not expose resources")
+	}
+	if _, ok := resourcesProvider.Resources().GetScript("openlinker"); !ok {
+		t.Skip("openlinker CLI binary is not embedded; build it into skills/openlinker-cli/scripts/openlinker to run this test")
+	}
+
 	toolset, err := bladesSkills.NewToolset(loaded)
 	if err != nil {
 		t.Fatal(err)
