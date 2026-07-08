@@ -140,7 +140,7 @@ func (r *NativeAgentRunner) handleRun(ctx context.Context, run NativeRun) (any, 
 	}
 	_ = run.SendEvent(ctx, progress)
 
-	answer, err := r.agent.Run(ctx, text)
+	answer, err := r.agent.Run(ContextWithNativeRun(ctx, run), text)
 	if err != nil {
 		return NativeResult{
 			Status: "failed",
