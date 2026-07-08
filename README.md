@@ -198,59 +198,6 @@ defer a2a.Close()
 gRPC is an A2A transport binding. It does not replace Agent Node's internal
 `runtime_ws` or `runtime_pull` channels.
 
-## CLI and Skills
-
-The repository includes a small OpenLinker CLI in `cmd/cli`. Build it locally
-when you want shell access to Agent discovery, run inspection, or A2A
-delegation:
-
-```bash
-go build -o ./bin/openlinker ./cmd/cli
-./bin/openlinker --help
-```
-
-The CLI reads configuration from flags or environment variables:
-
-```bash
-OPENLINKER_API_BASE=https://api.openlinker.ai
-OPENLINKER_TOKEN=ol_user_xxx
-OPENLINKER_RUNTIME_TOKEN=ol_runtime_xxx
-OPENLINKER_AGENT_ID=agent_xxx
-OPENLINKER_RUN_ID=run_xxx
-OPENLINKER_TRACE_ID=trace_xxx
-```
-
-Use a user token for user-context commands such as `agents`, `run`, and
-read-only run inspection. Use a runtime token for runtime-context delegation
-from an Agent process.
-
-Skill examples live in `example/skill` and `example/runtime/agent-skill`. The
-repository does not commit prebuilt binaries. Before running a skill that calls
-the CLI, build the CLI and copy the binary into the skill's `scripts`
-directory:
-
-```bash
-mkdir -p ./example/runtime/agent-skill/skills/openlinker-cli/scripts
-go build -o ./example/runtime/agent-skill/skills/openlinker-cli/scripts/openlinker ./cmd/cli
-chmod +x ./example/runtime/agent-skill/skills/openlinker-cli/scripts/openlinker
-```
-
-Then run the Blades skill example:
-
-```bash
-cd example/runtime/agent-skill
-
-OPENAI_API_KEY=sk-xxx \
-OPENLINKER_API_BASE=https://api.openlinker.ai \
-OPENLINKER_RUNTIME_TOKEN=ol_runtime_xxx \
-go run .
-```
-
-For reusable skill templates, copy one of the directories under
-`example/skill`, build `cmd/cli` for the target machine, and place the resulting
-`openlinker` executable at the path referenced by that skill before loading it
-in your Agent framework. The Blades template uses `scripts/openlinker`; the
-generic template expects `openlinker` to be available on `PATH`.
 
 ## Core Surface
 
