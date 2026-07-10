@@ -12,7 +12,7 @@ Use pull mode when the Agent was registered with `connection_mode` set to
 
 ```bash
 OPENLINKER_API_BASE=https://api.openlinker.ai \
-OPENLINKER_RUNTIME_TOKEN=ol_live_runtime_xxx \
+OPENLINKER_AGENT_TOKEN=ol_agent_xxx \
 OPENLINKER_WORKER_CONNECTOR=runtime_pull \
 OPENAI_MODEL=gpt-4.1-mini \
 OPENAI_API_KEY=sk-xxxx \
@@ -24,7 +24,7 @@ Use WebSocket mode when the Agent was registered with `connection_mode` set to
 
 ```bash
 OPENLINKER_API_BASE=https://api.openlinker.ai \
-OPENLINKER_RUNTIME_TOKEN=ol_live_runtime_xxx \
+OPENLINKER_AGENT_TOKEN=ol_agent_xxx \
 OPENLINKER_WORKER_CONNECTOR=runtime_ws \
 OPENAI_MODEL=gpt-4.1-mini \
 OPENAI_API_KEY=sk-xxxx \
@@ -47,7 +47,7 @@ OPENLINKER_WORKER_MAX_RUNS=1 go run .
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `OPENLINKER_RUNTIME_TOKEN` | required | Runtime token created for the Agent. |
+| `OPENLINKER_AGENT_TOKEN` | required | Agent token issued for this Agent. |
 | `OPENLINKER_API_BASE` | `https://api.openlinker.ai` | OpenLinker API base URL. |
 | `OPENLINKER_WORKER_CONNECTOR` | `runtime_pull` | `runtime_pull` or `runtime_ws`. |
 | `OPENLINKER_WORKER_PULL_WAIT` | `25s` | Long-poll wait duration for pull mode. |

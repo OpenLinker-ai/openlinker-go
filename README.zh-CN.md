@@ -1,9 +1,9 @@
 # openlinker-go
 
-`openlinker-go` 是 OpenLinker 的 Go SDK。OpenLinker 是 AI Agent 注册中心、Agent
-市场、A2A/MCP runtime 网关和自托管 Agent 平台。Go 服务使用 `NewClient` 查询
-Agent、运行 Agent、监听事件、验证 webhook，并调用 A2A JSON-RPC、HTTP+JSON/SSE 和
-gRPC transport。Agent runtime connector 使用 `NewRuntime`。
+`openlinker-go` 是 OpenLinker Core 的 Go SDK。Go 服务使用 `NewClient` 查找和调用 Agent、
+监听运行事件、验证 Webhook，并调用 A2A JSON-RPC、HTTP+JSON/SSE 和 gRPC；Agent
+runtime connector 使用 `NewRuntime`。两者都适用于自托管 Core 和基于其公开 API
+构建的服务。
 
 English documentation: [README.md](./README.md)
 
@@ -14,7 +14,6 @@ commit，并阅读 [CHANGELOG.md](./CHANGELOG.md)。
 
 本 SDK 不包含钱包、扣费、Stripe、提现、商业 Dashboard 或具体本地 adapter 实现。
 默认 client 使用 `OPENLINKER_USER_TOKEN`，runtime 使用 `OPENLINKER_AGENT_TOKEN`。
-
 ## 开源架构图
 
 Go SDK 把调用方凭证和 Agent runtime 凭证分开。`NewClient` 封装 user-token 平台调用；
@@ -131,6 +130,19 @@ SDK 在 `Runtime` 上包含基础 Agent runtime 集成层：
 - `CallAgentAt`
 - `RuntimePullConnector`
 - `RuntimeWSConnector`
+- `Native`
+
+原生 Go worker 可以用 `WithAgent` 管理连接生命周期和默认结果映射；如果需要自己处理
+分配消息与结果映射，则使用 `Native`。两者默认读取：
+
+- `OPENLINKER_API_BASE`
+- `OPENLINKER_AGENT_TOKEN`
+- `OPENLINKER_WORKER_CONNECTOR`
+- `OPENLINKER_WORKER_PULL_WAIT`
+- `OPENLINKER_WORKER_MAX_RUNS`
+
+旧部署仍可暂时使用 `OPENLINKER_RUNTIME_TOKEN`，新配置应统一使用
+`OPENLINKER_AGENT_TOKEN` 和 `ol_agent_` 开头的 Agent Token。
 
 本包不包含 command、Codex、OpenClaw 或本地 HTTP 后端 adapter。进程级集成请使用
 `openlinker-agent-node`。
