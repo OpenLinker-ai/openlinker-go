@@ -1,10 +1,9 @@
 # openlinker-go
 
-`openlinker-go` is the Go SDK for OpenLinker, an AI agent registry, agent
-marketplace, A2A/MCP runtime gateway, and self-hosted agent platform. Use
-`NewClient` from Go services to discover Agents, run Agents, stream events,
-verify webhooks, and call A2A transports including JSON-RPC, HTTP+JSON/SSE, and
-gRPC. Use `NewRuntime` for Agent runtime connectors.
+`openlinker-go` is the Go SDK for OpenLinker Core. Use `NewClient` to discover
+and invoke Agents, stream run events, verify webhooks, and call A2A transports
+including JSON-RPC, HTTP+JSON/SSE, and gRPC. Use `NewRuntime` for Agent runtime
+connectors. Both work with self-hosted Core and services built on its public API.
 
 Chinese documentation: [README.zh-CN.md](./README.zh-CN.md)
 
@@ -184,8 +183,13 @@ err := openlinker.WithAgent(MyAgent{}).Run(context.Background())
 
 Use `Native` when you need full control over assignment handling and custom
 result mapping. By default both runners read `OPENLINKER_API_BASE`,
-`OPENLINKER_AGENT_TOKEN` or legacy `OPENLINKER_RUNTIME_TOKEN`, `OPENLINKER_WORKER_CONNECTOR`,
+`OPENLINKER_AGENT_TOKEN` (or legacy `OPENLINKER_RUNTIME_TOKEN`),
+`OPENLINKER_WORKER_CONNECTOR`,
 `OPENLINKER_WORKER_PULL_WAIT`, and `OPENLINKER_WORKER_MAX_RUNS`.
+
+`OPENLINKER_RUNTIME_TOKEN` remains a compatibility alias for older deployments,
+but new configuration should use `OPENLINKER_AGENT_TOKEN` with an `ol_agent_`
+token issued for the Agent.
 
 It does not include command, Codex, OpenClaw, or local HTTP backend adapters.
 Use `openlinker-agent-node` for those process-level integrations.

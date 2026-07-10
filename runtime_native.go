@@ -209,9 +209,9 @@ func (r *NativeRunner) runtimeClient() (*Runtime, error) {
 		return &Runtime{client: r.Client}, nil
 	}
 	apiBase := firstNativeNonEmpty(r.APIBase, os.Getenv("OPENLINKER_API_BASE"), defaultNativeAPIBase)
-	token := firstNativeNonEmpty(r.RuntimeToken, os.Getenv("OPENLINKER_RUNTIME_TOKEN"), os.Getenv("OPENLINKER_AGENT_TOKEN"))
+	token := firstNativeNonEmpty(r.RuntimeToken, os.Getenv("OPENLINKER_AGENT_TOKEN"), os.Getenv("OPENLINKER_RUNTIME_TOKEN"))
 	if token == "" {
-		return nil, errors.New("openlinker: OPENLINKER_RUNTIME_TOKEN is required")
+		return nil, errors.New("openlinker: OPENLINKER_AGENT_TOKEN is required")
 	}
 	sdkAgent := firstNativeNonEmpty(r.SDKAgent, defaultNativeSDKAgent)
 	return NewRuntime(apiBase, WithRuntimeToken(token), WithSDKAgent(sdkAgent))
