@@ -106,6 +106,10 @@ err = client.StreamRunEvents(context.Background(), result.RunID, func(event open
 })
 ```
 
+读取已保留的事件历史时，`ListRunEvents` 返回 `Items` 和 `Meta`。元数据会明确给出
+请求游标、实际游标、保留缺口、可为空的可用序号边界、终态，以及本页是否已经覆盖
+完整事件流。
+
 ## Callback
 
 平台托管 callback 复用 Core run event stream，不需要公网 callback URL。外部 webhook

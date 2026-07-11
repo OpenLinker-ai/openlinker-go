@@ -13,6 +13,9 @@ runtime connector, callback, and A2A contracts are declared stable.
   `RunAgent` and `StartAgentRun`. The SDK generates a safe random key when the
   caller does not provide one and exposes Core replay results through
   `RunResponse.Replayed`.
+- Aligned `ListRunEvents` with Core's retained event-page contract. Responses
+  now expose `Items` and typed retention metadata; the legacy `Events` field
+  has been removed.
 
 ### Documentation
 

@@ -23,6 +23,7 @@ func TestClientResourceMethodsUseHeadersAndPaths(t *testing.T) {
 		Query  url.Values
 	}
 	var calls []requestCall
+	latestEventSequence := int32(4)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls = append(calls, requestCall{
 			Method: r.Method,
@@ -42,7 +43,19 @@ func TestClientResourceMethodsUseHeadersAndPaths(t *testing.T) {
 		case "/api/v1/runs":
 			writeJSON(t, w, RunResponse{RunID: "run-started", Status: "queued"})
 		case "/api/v1/runs/run-1/events":
-			writeJSON(t, w, ListRunEventsResponse{Events: []RunEventResponse{{EventID: "evt-1", Sequence: 4}}})
+			writeJSON(t, w, ListRunEventsResponse{
+				Items: []RunEventResponse{{EventID: "evt-1", Sequence: 4}},
+				Meta: RunEventPageMeta{
+					RequestedAfterSequence:    3,
+					EffectiveAfterSequence:    3,
+					RetainedThroughSequence:   2,
+					EarliestAvailableSequence: nil,
+					LatestAvailableSequence:   &latestEventSequence,
+					RetentionGap:              false,
+					Terminal:                  true,
+					StreamComplete:            true,
+				},
+			})
 		case "/api/v1/runs/run-1/artifacts":
 			writeJSON(t, w, ListItemsResponse[RunArtifactResponse]{Items: []RunArtifactResponse{{ID: "artifact-1", RunID: "run-1"}}})
 		case "/api/v1/runs/run-1/messages":
@@ -75,7 +88,12 @@ func TestClientResourceMethodsUseHeadersAndPaths(t *testing.T) {
 	if run, err := client.StartAgentRun(ctx, RunAgentRequest{AgentID: "agent-1", Input: "hello"}); err != nil || run.RunID != "run-started" {
 		t.Fatalf("StartAgentRun = %+v err=%v", run, err)
 	}
-	if events, err := client.ListRunEvents(ctx, "run-1", ListRunEventsParams{AfterSequence: 3, Limit: 4}); err != nil || len(events.Events) != 1 {
+	if events, err := client.ListRunEvents(ctx, "run-1", ListRunEventsParams{AfterSequence: 3, Limit: 4}); err != nil ||
+		len(events.Items) != 1 || events.Items[0].EventID != "evt-1" ||
+		events.Meta.RequestedAfterSequence != 3 || events.Meta.EffectiveAfterSequence != 3 ||
+		events.Meta.RetainedThroughSequence != 2 || events.Meta.EarliestAvailableSequence != nil ||
+		events.Meta.LatestAvailableSequence == nil || *events.Meta.LatestAvailableSequence != 4 ||
+		events.Meta.RetentionGap || !events.Meta.Terminal || !events.Meta.StreamComplete {
 		t.Fatalf("ListRunEvents = %+v err=%v", events, err)
 	}
 	if artifacts, err := client.ListRunArtifacts(ctx, "run-1"); err != nil || len(artifacts.Items) != 1 {

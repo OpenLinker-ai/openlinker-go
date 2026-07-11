@@ -113,9 +113,9 @@ type AgentCardResponse struct {
 }
 
 type RunAgentRequest struct {
-	AgentID                string              `json:"agent_id"`
-	Input                  any                 `json:"input"`
-	Metadata               any                 `json:"metadata,omitempty"`
+	AgentID  string `json:"agent_id"`
+	Input    any    `json:"input"`
+	Metadata any    `json:"metadata,omitempty"`
 	// IdempotencyKey identifies one run-creation intent across retries. When it
 	// is empty, the SDK generates a new key for this method invocation.
 	IdempotencyKey         string              `json:"-"`
@@ -167,8 +167,8 @@ type TaskCallbackSubscription struct {
 }
 
 type RunResponse struct {
-	RunID               string                    `json:"run_id"`
-	Status              string                    `json:"status"`
+	RunID  string `json:"run_id"`
+	Status string `json:"status"`
 	// Replayed is true when Core returned a run created by an earlier request
 	// with the same idempotency key and semantic input.
 	Replayed            bool                      `json:"replayed"`
@@ -194,7 +194,21 @@ type ListRunEventsParams struct {
 }
 
 type ListRunEventsResponse struct {
-	Events []RunEventResponse `json:"events"`
+	Items []RunEventResponse `json:"items"`
+	Meta  RunEventPageMeta   `json:"meta"`
+}
+
+// RunEventPageMeta describes the durable event-retention boundary for a page.
+// A nil available-sequence bound is encoded by Core as JSON null.
+type RunEventPageMeta struct {
+	RequestedAfterSequence    int32  `json:"requested_after_sequence"`
+	EffectiveAfterSequence    int32  `json:"effective_after_sequence"`
+	RetainedThroughSequence   int32  `json:"retained_through_sequence"`
+	EarliestAvailableSequence *int32 `json:"earliest_available_sequence"`
+	LatestAvailableSequence   *int32 `json:"latest_available_sequence"`
+	RetentionGap              bool   `json:"retention_gap"`
+	Terminal                  bool   `json:"terminal"`
+	StreamComplete            bool   `json:"stream_complete"`
 }
 
 type RunChildResponse struct {

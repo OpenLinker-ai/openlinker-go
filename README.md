@@ -109,6 +109,11 @@ err = client.StreamRunEvents(context.Background(), result.RunID, func(event open
 })
 ```
 
+For retained event history, `ListRunEvents` returns `Items` plus `Meta`. The
+metadata reports the requested and effective cursors, retention gaps, nullable
+available-sequence bounds, terminal state, and whether the returned page
+completes the stream.
+
 ## Callbacks
 
 Platform-hosted callbacks reuse the Core run event stream and do not require a
