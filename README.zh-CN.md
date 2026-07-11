@@ -84,11 +84,18 @@ func main() {
 启动 run 并读取结果：
 
 ```go
+runIntentID := "replace-with-an-application-generated-intent-id"
 result, err := client.RunAgent(context.Background(), openlinker.RunAgentRequest{
-	AgentID: agents.Items[0].ID,
-	Input:   openlinker.JSON{"query": "Summarize this dataset"},
+	AgentID:        agents.Items[0].ID,
+	Input:          openlinker.JSON{"query": "Summarize this dataset"},
+	IdempotencyKey: runIntentID, // 同一次运行意图重试时复用。
 })
 ```
+
+`RunAgent` 和 `StartAgentRun` 始终发送 `Idempotency-Key`。字段为空时，SDK
+会为本次方法调用生成密码学随机 key；如果重试可能跨方法调用或进程，请显式设置
+`IdempotencyKey`，并且只在同一运行意图中复用。`result.Replayed` 表示 Core
+返回的是已经存在的 Run。
 
 监听 run 事件：
 

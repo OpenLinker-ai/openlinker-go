@@ -19,8 +19,11 @@ func TestCoreClientV1ContractMapsToImplementedMethods(t *testing.T) {
 			ForbiddenPathPrefixes []string `json:"forbidden_path_prefixes"`
 		} `json:"rules"`
 		Endpoints []struct {
-			ClientMethod string `json:"client_method"`
-			Path         string `json:"path"`
+			ClientMethod    string   `json:"client_method"`
+			Path            string   `json:"path"`
+			RequiredHeaders []string `json:"required_headers"`
+			SuccessStatuses []int    `json:"success_statuses"`
+			ResponseHeaders []string `json:"response_headers"`
 		} `json:"endpoints"`
 	}
 	if err := json.Unmarshal(raw, &contract); err != nil {
@@ -46,6 +49,19 @@ func TestCoreClientV1ContractMapsToImplementedMethods(t *testing.T) {
 		methodName := exportedMethodName(endpoint.ClientMethod)
 		if _, ok := clientType.MethodByName(methodName); !ok {
 			t.Fatalf("Client missing contract method %s", endpoint.ClientMethod)
+		}
+		if endpoint.ClientMethod == "runAgent" || endpoint.ClientMethod == "startAgentRun" {
+			if !slices.Contains(endpoint.RequiredHeaders, "Idempotency-Key") {
+				t.Fatalf("%s contract missing Idempotency-Key", endpoint.ClientMethod)
+			}
+			if !slices.Equal(endpoint.SuccessStatuses, []int{200, 201, 202}) {
+				t.Fatalf("%s success statuses = %#v", endpoint.ClientMethod, endpoint.SuccessStatuses)
+			}
+			for _, header := range []string{"Location", "Idempotency-Replayed"} {
+				if !slices.Contains(endpoint.ResponseHeaders, header) {
+					t.Fatalf("%s contract missing response header %s", endpoint.ClientMethod, header)
+				}
+			}
 		}
 	}
 }

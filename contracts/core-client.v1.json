@@ -51,6 +51,18 @@
       "path": "/api/v1/run",
       "auth": "access_token",
       "required_scope": "agents:run",
+      "required_headers": [
+        "Idempotency-Key"
+      ],
+      "success_statuses": [
+        200,
+        201,
+        202
+      ],
+      "response_headers": [
+        "Location",
+        "Idempotency-Replayed"
+      ],
       "source": "openlinker-core/pkg/runtime/handler.go"
     },
     {
@@ -59,6 +71,18 @@
       "path": "/api/v1/runs",
       "auth": "access_token",
       "required_scope": "agents:run",
+      "required_headers": [
+        "Idempotency-Key"
+      ],
+      "success_statuses": [
+        200,
+        201,
+        202
+      ],
+      "response_headers": [
+        "Location",
+        "Idempotency-Replayed"
+      ],
       "source": "openlinker-core/pkg/runtime/handler.go"
     },
     {

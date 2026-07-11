@@ -7,6 +7,13 @@ runtime connector, callback, and A2A contracts are declared stable.
 
 ## Unreleased
 
+### Changed
+
+- Made Core run creation idempotent by sending `Idempotency-Key` from
+  `RunAgent` and `StartAgentRun`. The SDK generates a safe random key when the
+  caller does not provide one and exposes Core replay results through
+  `RunResponse.Replayed`.
+
 ### Documentation
 
 - Split Chinese documentation into dedicated `*.zh-CN.md` files and kept the

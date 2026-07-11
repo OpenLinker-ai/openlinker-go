@@ -154,11 +154,7 @@ func (c *Client) GetAgentCard(ctx context.Context, slug string, extended bool) (
 }
 
 func (c *Client) RunAgent(ctx context.Context, req RunAgentRequest) (*RunResponse, error) {
-	var out RunResponse
-	if err := c.do(ctx, http.MethodPost, "/run", nil, req, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
+	return c.createRun(ctx, "/run", req)
 }
 
 func (c *Client) RunAgentWithCallbacks(ctx context.Context, req RunAgentRequest, opts PlatformCallbackOptions) (*RunResponse, error) {
@@ -169,13 +165,42 @@ func (c *Client) RunAgentWithCallbacks(ctx context.Context, req RunAgentRequest,
 	if _, err := c.streamPlatformCallbacks(ctx, started.RunID, opts, true); err != nil {
 		return nil, err
 	}
-	return c.GetRun(ctx, started.RunID)
+	result, err := c.GetRun(ctx, started.RunID)
+	if err != nil {
+		return nil, err
+	}
+	result.Replayed = result.Replayed || started.Replayed
+	return result, nil
 }
 
 func (c *Client) StartAgentRun(ctx context.Context, req RunAgentRequest) (*RunResponse, error) {
-	var out RunResponse
-	if err := c.do(ctx, http.MethodPost, "/runs", nil, req, &out); err != nil {
+	return c.createRun(ctx, "/runs", req)
+}
+
+func (c *Client) createRun(ctx context.Context, path string, req RunAgentRequest) (*RunResponse, error) {
+	key, err := resolveRunIdempotencyKey(req.IdempotencyKey)
+	if err != nil {
 		return nil, err
+	}
+	headers := make(http.Header)
+	headers.Set("Idempotency-Key", key)
+	resp, err := c.newRequestWithHeaders(ctx, http.MethodPost, path, nil, req, "application/json", headers)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, parseError(resp)
+	}
+
+	var out RunResponse
+	if resp.StatusCode != http.StatusNoContent {
+		if err := decodeJSONResponse(resp.Body, &out); err != nil {
+			return nil, fmt.Errorf("openlinker: decode response: %w", err)
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(resp.Header.Get("Idempotency-Replayed")), "true") {
+		out.Replayed = true
 	}
 	return &out, nil
 }
@@ -402,6 +427,10 @@ func (c *Client) newRequest(ctx context.Context, method, path string, query url.
 	return c.newRequestWithToken(ctx, method, path, query, body, accept, c.userToken)
 }
 
+func (c *Client) newRequestWithHeaders(ctx context.Context, method, path string, query url.Values, body any, accept string, headers http.Header) (*http.Response, error) {
+	return c.newRequestWithTokenAndHeaders(ctx, method, path, query, body, accept, c.userToken, headers)
+}
+
 func (c *Client) newRuntimeRequest(ctx context.Context, method, path string, query url.Values, body any, accept string) (*http.Response, error) {
 	if err := c.requireRuntime(); err != nil {
 		return nil, err
@@ -423,6 +452,10 @@ func (c *Client) requireRuntime() error {
 }
 
 func (c *Client) newRequestWithToken(ctx context.Context, method, path string, query url.Values, body any, accept, token string) (*http.Response, error) {
+	return c.newRequestWithTokenAndHeaders(ctx, method, path, query, body, accept, token, nil)
+}
+
+func (c *Client) newRequestWithTokenAndHeaders(ctx context.Context, method, path string, query url.Values, body any, accept, token string, headers http.Header) (*http.Response, error) {
 	var bodyReader io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -445,6 +478,12 @@ func (c *Client) newRequestWithToken(ctx context.Context, method, path string, q
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	for key, values := range c.headers {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
+	for key, values := range headers {
+		req.Header.Del(key)
 		for _, value := range values {
 			req.Header.Add(key, value)
 		}

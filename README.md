@@ -82,15 +82,23 @@ func main() {
 Start a run and read the result:
 
 ```go
+runIntentID := "replace-with-an-application-generated-intent-id"
 result, err := client.RunAgent(context.Background(), openlinker.RunAgentRequest{
-	AgentID: agents.Items[0].ID,
-	Input:   openlinker.JSON{"query": "Summarize this dataset"},
+	AgentID:        agents.Items[0].ID,
+	Input:          openlinker.JSON{"query": "Summarize this dataset"},
+	IdempotencyKey: runIntentID, // Reuse for retries of this same run intent.
 })
 if err != nil {
 	log.Fatal(err)
 }
 fmt.Println(result.Status)
 ```
+
+`RunAgent` and `StartAgentRun` always send `Idempotency-Key`. If the field is
+empty, the SDK generates a cryptographically random key for that method call.
+Set `IdempotencyKey` when a retry may happen in a later invocation or process,
+and reuse it only for the same run intent. `result.Replayed` reports whether
+Core returned the existing run.
 
 Stream run events:
 

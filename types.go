@@ -116,6 +116,9 @@ type RunAgentRequest struct {
 	AgentID                string              `json:"agent_id"`
 	Input                  any                 `json:"input"`
 	Metadata               any                 `json:"metadata,omitempty"`
+	// IdempotencyKey identifies one run-creation intent across retries. When it
+	// is empty, the SDK generates a new key for this method invocation.
+	IdempotencyKey         string              `json:"-"`
 	A2AContext             *RunA2AContext      `json:"a2a_context,omitempty"`
 	TaskCallback           *TaskCallbackConfig `json:"task_callback,omitempty"`
 	PushNotification       *TaskCallbackConfig `json:"push_notification,omitempty"`
@@ -166,6 +169,9 @@ type TaskCallbackSubscription struct {
 type RunResponse struct {
 	RunID               string                    `json:"run_id"`
 	Status              string                    `json:"status"`
+	// Replayed is true when Core returned a run created by an earlier request
+	// with the same idempotency key and semantic input.
+	Replayed            bool                      `json:"replayed"`
 	Output              any                       `json:"output,omitempty"`
 	ErrorCode           string                    `json:"error_code,omitempty"`
 	ErrorMessage        string                    `json:"error_message,omitempty"`
