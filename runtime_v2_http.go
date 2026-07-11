@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -80,6 +82,9 @@ func (r *Runtime) ClaimRuntimeV2Run(
 	if err := validateRuntimeV2Assignment(assigned); err != nil {
 		return nil, err
 	}
+	if assigned.AttemptIdentity.RuntimeSessionID != request.RuntimeSessionID {
+		return nil, errors.New("openlinker: runtime v2 claim returned an assignment for another session")
+	}
 	return &assigned, nil
 }
 
@@ -114,8 +119,9 @@ func (r *Runtime) RejectRuntimeV2Assignment(
 	if _, err := r.doRuntimeV2(ctx, http.MethodPost, path, nil, request, &rejected); err != nil {
 		return nil, err
 	}
-	if rejected.AttemptIdentity != request.AttemptIdentity {
-		return nil, errors.New("openlinker: runtime v2 rejection identity mismatch")
+	if rejected.AttemptIdentity != request.AttemptIdentity ||
+		!runtimeV2AssignmentRejectOutcome(rejected.Outcome) || !runtimeV2DispatchState(rejected.DispatchState) {
+		return nil, errors.New("openlinker: invalid runtime v2 assignment rejection response")
 	}
 	return &rejected, nil
 }
@@ -135,6 +141,11 @@ func (r *Runtime) RenewRuntimeV2Lease(
 	}
 	if renewed.AttemptIdentity != request.AttemptIdentity || renewed.LeaseExpiresAt.IsZero() {
 		return nil, errors.New("openlinker: invalid runtime v2 lease response")
+	}
+	if renewed.PendingCommand != nil {
+		if _, err := DecodeRuntimeV2PendingCommand(*renewed.PendingCommand); err != nil {
+			return nil, fmt.Errorf("openlinker: invalid runtime v2 pending command: %w", err)
+		}
 	}
 	return &renewed, nil
 }
@@ -169,8 +180,11 @@ func (r *Runtime) FinalizeRuntimeV2Result(
 	if _, err := r.doRuntimeV2(ctx, http.MethodPost, path, nil, request, &ack); err != nil {
 		return nil, err
 	}
-	if ack.ResultID != request.ResultID || ack.RunStatus == "" || ack.DispatchState == "" || ack.Classification == "" {
+	if ack.ResultID != request.ResultID {
 		return nil, errors.New("openlinker: runtime v2 result acknowledgement mismatch")
+	}
+	if err := validateRuntimeV2ResultAck(ack); err != nil {
+		return nil, err
 	}
 	return &ack, nil
 }
@@ -190,8 +204,58 @@ func (r *Runtime) ResumeRuntimeV2Runs(ctx context.Context, request RuntimeV2Resu
 		if response.Decisions[index].AttemptIdentity != request.Attempts[index].AttemptIdentity {
 			return nil, errors.New("openlinker: runtime v2 resume response order mismatch")
 		}
+		if err := validateRuntimeV2ResumeDecision(response.Decisions[index]); err != nil {
+			return nil, err
+		}
 	}
 	return &response, nil
+}
+
+func (r *Runtime) PollRuntimeV2Commands(
+	ctx context.Context,
+	runtimeSessionID string,
+	waitSeconds int,
+) (*RuntimeV2CommandsResponse, error) {
+	if !runtimeV2UUID(runtimeSessionID) || waitSeconds < 0 || waitSeconds > RuntimeV2MaxPullWaitSeconds {
+		return nil, errors.New("openlinker: invalid runtime v2 command poll")
+	}
+	query := make(url.Values)
+	query.Set("runtime_session_id", runtimeSessionID)
+	query.Set("wait", strconv.Itoa(waitSeconds))
+	var response RuntimeV2CommandsResponse
+	if _, err := r.doRuntimeV2(ctx, http.MethodGet, "/agent-runtime/v2/commands", query, nil, &response); err != nil {
+		return nil, err
+	}
+	if response.Commands == nil || response.DatabaseTime.IsZero() {
+		return nil, errors.New("openlinker: invalid runtime v2 commands response")
+	}
+	for _, command := range response.Commands {
+		if _, err := DecodeRuntimeV2PendingCommand(command); err != nil {
+			return nil, fmt.Errorf("openlinker: invalid runtime v2 command: %w", err)
+		}
+	}
+	return &response, nil
+}
+
+func (r *Runtime) AckRuntimeV2Cancel(
+	ctx context.Context,
+	request RuntimeV2RunCancelAckPayload,
+) (*RuntimeV2RunCancellationState, error) {
+	if err := validateRuntimeV2CancelAck(request); err != nil {
+		return nil, err
+	}
+	var state RuntimeV2RunCancellationState
+	path := runtimeV2RunPath(request.AttemptIdentity.RunID, "cancel-ack")
+	if _, err := r.doRuntimeV2(ctx, http.MethodPost, path, nil, request, &state); err != nil {
+		return nil, err
+	}
+	if state.CancellationID != request.CancellationID {
+		return nil, errors.New("openlinker: runtime v2 cancellation acknowledgement mismatch")
+	}
+	if err := validateRuntimeV2CancellationState(state); err != nil {
+		return nil, err
+	}
+	return &state, nil
 }
 
 func (r *Runtime) doRuntimeV2(
@@ -209,7 +273,7 @@ func (r *Runtime) doRuntimeV2(
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return response.StatusCode, parseError(response)
+		return response.StatusCode, parseRuntimeV2Error(response)
 	}
 	if response.StatusCode == http.StatusNoContent {
 		return response.StatusCode, nil
@@ -221,6 +285,32 @@ func (r *Runtime) doRuntimeV2(
 		return response.StatusCode, fmt.Errorf("openlinker: decode runtime v2 response: %w", err)
 	}
 	return response.StatusCode, nil
+}
+
+func parseRuntimeV2Error(response *http.Response) error {
+	raw, err := io.ReadAll(io.LimitReader(response.Body, RuntimeV2MaxMessageBytes+1))
+	if err != nil {
+		return fmt.Errorf("openlinker: read runtime v2 error response: %w", err)
+	}
+	if int64(len(raw)) > RuntimeV2MaxMessageBytes || len(bytes.TrimSpace(raw)) == 0 {
+		return errors.New("openlinker: runtime v2 error response is empty or too large")
+	}
+	var envelope RuntimeV2ErrorEnvelope
+	if err := decodeRuntimeV2Response(bytes.NewReader(raw), &envelope); err != nil {
+		return fmt.Errorf("openlinker: decode runtime v2 error response: %w", err)
+	}
+	if err := validateRuntimeV2ErrorBody(envelope.Error); err != nil {
+		return err
+	}
+	return &Error{
+		StatusCode:   response.StatusCode,
+		Code:         envelope.Error.Code,
+		Message:      envelope.Error.Message,
+		Details:      envelope.Error,
+		RequestID:    firstHeader(response.Header, "X-Request-Id", "X-Correlation-Id"),
+		RetryAfter:   retryAfter(response.Header),
+		ResponseBody: raw,
+	}
 }
 
 func decodeRuntimeV2Response(body io.Reader, out any) error {
@@ -275,7 +365,9 @@ func validateRuntimeV2Assignment(value RuntimeV2RunAssignedPayload) error {
 		return err
 	}
 	if value.OfferNo < 1 || value.OfferExpiresAt.IsZero() || value.AttemptDeadlineAt.IsZero() ||
-		value.RunDeadlineAt.IsZero() || value.Input == nil || value.NodeEnvelope == "" || value.AgentInvocationToken == "" {
+		value.RunDeadlineAt.IsZero() || value.Input == nil ||
+		!runtimeV2InvocationCapability(value.NodeEnvelope, "ol_ctx_v2.") ||
+		!runtimeV2InvocationCapability(value.AgentInvocationToken, "ol_inv_v2.") {
 		return errors.New("openlinker: invalid runtime v2 assignment")
 	}
 	return nil
@@ -294,8 +386,12 @@ func validateRuntimeV2Event(value RuntimeV2RunEventPayload) error {
 	if err := validateRuntimeV2AttemptIdentity(value.AttemptIdentity); err != nil {
 		return err
 	}
-	if !runtimeV2UUID(value.ClientEventID) || value.ClientEventSeq < 1 || !runtimeV2Text(value.EventType, 120) || value.Payload == nil {
+	if !runtimeV2UUID(value.ClientEventID) || value.ClientEventSeq < 1 ||
+		!runtimeV2EventTypePattern.MatchString(value.EventType) || value.Payload == nil {
 		return errors.New("openlinker: invalid runtime v2 Event")
+	}
+	if _, reserved := runtimeV2CoreOwnedEventTypes[value.EventType]; reserved {
+		return errors.New("openlinker: runtime v2 Event type is reserved by Core")
 	}
 	return nil
 }
@@ -304,7 +400,7 @@ func validateRuntimeV2Result(value RuntimeV2RunResultPayload) error {
 	if err := validateRuntimeV2AttemptIdentity(value.AttemptIdentity); err != nil {
 		return err
 	}
-	if !runtimeV2UUID(value.ResultID) || value.DurationMS < 0 || value.FinalClientEventSeq < 0 {
+	if !runtimeV2UUID(value.ResultID) || value.DurationMS < 0 || value.DurationMS > math.MaxInt32 || value.FinalClientEventSeq < 0 {
 		return errors.New("openlinker: invalid runtime v2 Result")
 	}
 	switch value.Status {
@@ -318,6 +414,214 @@ func validateRuntimeV2Result(value RuntimeV2RunResultPayload) error {
 		}
 	default:
 		return errors.New("openlinker: invalid runtime v2 Result status")
+	}
+	return nil
+}
+
+var runtimeV2EventTypePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$`)
+
+var runtimeV2CoreOwnedEventTypes = map[string]struct{}{
+	"run.completed":  {},
+	"run.failed":     {},
+	"run.canceled":   {},
+	"run.stream.gap": {},
+}
+
+func validateRuntimeV2ResultAck(value RuntimeV2RunResultAckPayload) error {
+	if !runtimeV2UUID(value.ResultID) || !runtimeV2ResultClassification(value.Classification) ||
+		!runtimeV2RunStatus(value.RunStatus) || !runtimeV2DispatchState(value.DispatchState) ||
+		(value.NextAttemptAt != nil && value.NextAttemptAt.IsZero()) {
+		return errors.New("openlinker: invalid runtime v2 result acknowledgement")
+	}
+	hasNextAttempt := value.NextAttemptAt != nil
+	switch value.Classification {
+	case RuntimeV2ResultSuccess:
+		if value.RunStatus != RuntimeV2RunSuccess || value.DispatchState != RuntimeV2DispatchTerminal || hasNextAttempt {
+			return errors.New("openlinker: inconsistent runtime v2 success acknowledgement")
+		}
+	case RuntimeV2ResultNonRetryableFailure:
+		if value.RunStatus != RuntimeV2RunFailed || value.DispatchState != RuntimeV2DispatchTerminal || hasNextAttempt {
+			return errors.New("openlinker: inconsistent runtime v2 failure acknowledgement")
+		}
+	case RuntimeV2ResultTimeout:
+		if value.RunStatus != RuntimeV2RunTimeout || value.DispatchState != RuntimeV2DispatchTerminal || hasNextAttempt {
+			return errors.New("openlinker: inconsistent runtime v2 timeout acknowledgement")
+		}
+	case RuntimeV2ResultCanceled:
+		if value.RunStatus != RuntimeV2RunCanceled || value.DispatchState != RuntimeV2DispatchTerminal || hasNextAttempt {
+			return errors.New("openlinker: inconsistent runtime v2 cancellation acknowledgement")
+		}
+	case RuntimeV2ResultDeadLetter:
+		if value.RunStatus != RuntimeV2RunFailed || value.DispatchState != RuntimeV2DispatchDeadLetter || hasNextAttempt {
+			return errors.New("openlinker: inconsistent runtime v2 dead-letter acknowledgement")
+		}
+	case RuntimeV2ResultRetryableFailure:
+		if value.RunStatus != RuntimeV2RunRunning {
+			return errors.New("openlinker: inconsistent runtime v2 retry acknowledgement")
+		}
+		switch value.DispatchState {
+		case RuntimeV2DispatchRetryWait:
+			if !hasNextAttempt {
+				return errors.New("openlinker: retry_wait acknowledgement requires next_attempt_at")
+			}
+		case RuntimeV2DispatchPending, RuntimeV2DispatchOffered, RuntimeV2DispatchExecuting:
+			if hasNextAttempt {
+				return errors.New("openlinker: progressed retry acknowledgement cannot retain next_attempt_at")
+			}
+		default:
+			return errors.New("openlinker: inconsistent runtime v2 retry dispatch state")
+		}
+	}
+	return nil
+}
+
+func validateRuntimeV2ResumeDecision(value RuntimeV2ResumeAcceptedPayload) error {
+	if err := validateRuntimeV2AttemptIdentity(value.AttemptIdentity); err != nil {
+		return err
+	}
+	if value.LeaseExpiresAt != nil && value.LeaseExpiresAt.IsZero() {
+		return errors.New("openlinker: invalid runtime v2 resumed lease expiry")
+	}
+	seen := make(map[RuntimeV2ResumeAction]struct{}, len(value.AllowedActions))
+	for _, action := range value.AllowedActions {
+		if !runtimeV2ResumeAction(action) {
+			return errors.New("openlinker: invalid runtime v2 resume action")
+		}
+		if _, duplicate := seen[action]; duplicate {
+			return errors.New("openlinker: duplicate runtime v2 resume action")
+		}
+		seen[action] = struct{}{}
+	}
+	has := func(action RuntimeV2ResumeAction) bool {
+		_, ok := seen[action]
+		return ok
+	}
+	switch value.Decision {
+	case RuntimeV2ResumeContinue:
+		if value.LeaseExpiresAt == nil || len(seen) != 3 ||
+			!has(RuntimeV2ActionContinueExecution) || !has(RuntimeV2ActionUploadEvents) || !has(RuntimeV2ActionUploadResult) {
+			return errors.New("openlinker: invalid continue_execution resume decision")
+		}
+	case RuntimeV2ResumeUploadSpool:
+		if value.LeaseExpiresAt != nil || len(seen) == 0 || len(seen) > 2 ||
+			has(RuntimeV2ActionContinueExecution) || has(RuntimeV2ActionStopExecution) || has(RuntimeV2ActionClearSpool) {
+			return errors.New("openlinker: invalid upload_spool_only resume decision")
+		}
+	case RuntimeV2ResumeResultAcked:
+		if value.LeaseExpiresAt != nil || len(seen) != 1 || !has(RuntimeV2ActionClearSpool) {
+			return errors.New("openlinker: invalid result_already_acked resume decision")
+		}
+	case RuntimeV2ResumeRevoked:
+		if value.LeaseExpiresAt != nil || len(seen) != 2 ||
+			!has(RuntimeV2ActionStopExecution) || !has(RuntimeV2ActionClearSpool) {
+			return errors.New("openlinker: invalid lease_revoked resume decision")
+		}
+	default:
+		return errors.New("openlinker: invalid runtime v2 resume decision")
+	}
+	return nil
+}
+
+func DecodeRuntimeV2PendingCommand(command RuntimeV2PendingCommand) (RuntimeV2DecodedPendingCommand, error) {
+	decoded := RuntimeV2DecodedPendingCommand{Type: command.Type}
+	switch command.Type {
+	case RuntimeV2RunCancel:
+		var payload RuntimeV2RunCancelPayload
+		if err := decodeRuntimeV2Response(bytes.NewReader(command.Payload), &payload); err != nil {
+			return RuntimeV2DecodedPendingCommand{}, err
+		}
+		if err := validateRuntimeV2Cancel(payload); err != nil {
+			return RuntimeV2DecodedPendingCommand{}, err
+		}
+		decoded.Cancel = &payload
+	case RuntimeV2Drain:
+		var payload RuntimeV2DrainPayload
+		if err := decodeRuntimeV2Response(bytes.NewReader(command.Payload), &payload); err != nil {
+			return RuntimeV2DecodedPendingCommand{}, err
+		}
+		if payload.DeadlineAt.IsZero() || !runtimeV2Text(payload.ReasonCode, 120) || payload.Capacity < 0 || payload.Inflight < 0 {
+			return RuntimeV2DecodedPendingCommand{}, errors.New("openlinker: invalid runtime v2 drain command")
+		}
+		decoded.Drain = &payload
+	case RuntimeV2LeaseRevoked:
+		var payload RuntimeV2RunLeaseRevokedPayload
+		if err := decodeRuntimeV2Response(bytes.NewReader(command.Payload), &payload); err != nil {
+			return RuntimeV2DecodedPendingCommand{}, err
+		}
+		if err := validateRuntimeV2AttemptIdentity(payload.AttemptIdentity); err != nil ||
+			!runtimeV2Text(payload.ReasonCode, 120) || !runtimeV2DispatchState(payload.DispatchState) ||
+			!runtimeV2RunStatus(payload.RunStatus) {
+			return RuntimeV2DecodedPendingCommand{}, errors.New("openlinker: invalid runtime v2 lease revocation command")
+		}
+		decoded.Revoke = &payload
+	default:
+		return RuntimeV2DecodedPendingCommand{}, errors.New("openlinker: unknown runtime v2 command type")
+	}
+	return decoded, nil
+}
+
+func (command RuntimeV2PendingCommand) Decode() (RuntimeV2DecodedPendingCommand, error) {
+	return DecodeRuntimeV2PendingCommand(command)
+}
+
+func validateRuntimeV2Cancel(value RuntimeV2RunCancelPayload) error {
+	if !runtimeV2UUID(value.CancellationID) || !runtimeV2Text(value.ReasonCode, 120) || value.DeadlineAt.IsZero() {
+		return errors.New("openlinker: invalid runtime v2 cancellation command")
+	}
+	return validateRuntimeV2AttemptIdentity(value.AttemptIdentity)
+}
+
+func validateRuntimeV2CancelAck(value RuntimeV2RunCancelAckPayload) error {
+	if !runtimeV2UUID(value.CancellationID) {
+		return errors.New("openlinker: invalid runtime v2 cancellation acknowledgement")
+	}
+	if err := validateRuntimeV2AttemptIdentity(value.AttemptIdentity); err != nil {
+		return err
+	}
+	switch value.CancelState {
+	case RuntimeV2CancelDelivered, RuntimeV2CancelStopping, RuntimeV2CancelStopped:
+		if value.ErrorCode != "" {
+			return errors.New("openlinker: successful runtime v2 cancellation acknowledgement cannot include error_code")
+		}
+	case RuntimeV2CancelUnsupported, RuntimeV2CancelFailed:
+		if !runtimeV2Text(value.ErrorCode, 120) {
+			return errors.New("openlinker: failed runtime v2 cancellation acknowledgement requires error_code")
+		}
+	default:
+		return errors.New("openlinker: invalid runtime v2 cancellation acknowledgement state")
+	}
+	return nil
+}
+
+func validateRuntimeV2CancellationState(value RuntimeV2RunCancellationState) error {
+	if !runtimeV2UUID(value.CancellationID) || !runtimeV2CancelState(value.CancelState) || value.UpdatedAt.IsZero() {
+		return errors.New("openlinker: invalid runtime v2 cancellation state")
+	}
+	switch value.CancelState {
+	case RuntimeV2CancelRequested, RuntimeV2CancelDelivered, RuntimeV2CancelStopping, RuntimeV2CancelStopped:
+		if value.ErrorCode != "" {
+			return errors.New("openlinker: successful runtime v2 cancellation state cannot include error_code")
+		}
+	case RuntimeV2CancelUnsupported, RuntimeV2CancelFailed, RuntimeV2CancelUnconfirmed:
+		if !runtimeV2Text(value.ErrorCode, 120) {
+			return errors.New("openlinker: failed runtime v2 cancellation state requires error_code")
+		}
+	}
+	return nil
+}
+
+func validateRuntimeV2ErrorBody(value RuntimeV2ErrorBody) error {
+	if !runtimeV2ErrorCode(value.Code) || !runtimeV2Text(value.Message, 500) ||
+		(value.CurrentRunStatus != "" && !runtimeV2RunStatus(value.CurrentRunStatus)) ||
+		(value.CurrentDispatchState != "" && !runtimeV2DispatchState(value.CurrentDispatchState)) {
+		return errors.New("openlinker: invalid runtime v2 error envelope")
+	}
+	previous := int64(0)
+	for _, eventRange := range value.MissingEventRanges {
+		if eventRange.Start < 1 || eventRange.End < eventRange.Start || eventRange.Start <= previous {
+			return errors.New("openlinker: invalid runtime v2 error event ranges")
+		}
+		previous = eventRange.End
 	}
 	return nil
 }
@@ -369,6 +673,75 @@ func runtimeV2RejectReason(reason RuntimeV2AssignmentRejectReason) bool {
 	switch reason {
 	case RuntimeV2RejectNodeAtCapacity, RuntimeV2RejectNodeDraining,
 		RuntimeV2RejectClientUpgradeRequired, RuntimeV2RejectRequiredFeatureMissing:
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeV2AssignmentRejectOutcome(outcome RuntimeV2AssignmentRejectOutcome) bool {
+	return outcome == RuntimeV2OfferRejected || outcome == RuntimeV2AssignmentLeaseRevoked
+}
+
+func runtimeV2ResultClassification(classification RuntimeV2ResultClassification) bool {
+	switch classification {
+	case RuntimeV2ResultSuccess, RuntimeV2ResultRetryableFailure, RuntimeV2ResultNonRetryableFailure,
+		RuntimeV2ResultTimeout, RuntimeV2ResultCanceled, RuntimeV2ResultDeadLetter:
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeV2RunStatus(status RuntimeV2RunStatus) bool {
+	switch status {
+	case RuntimeV2RunRunning, RuntimeV2RunSuccess, RuntimeV2RunFailed, RuntimeV2RunTimeout, RuntimeV2RunCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeV2DispatchState(state RuntimeV2DispatchState) bool {
+	switch state {
+	case RuntimeV2DispatchPending, RuntimeV2DispatchOffered, RuntimeV2DispatchExecuting,
+		RuntimeV2DispatchRetryWait, RuntimeV2DispatchTerminal, RuntimeV2DispatchDeadLetter:
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeV2CancelState(state RuntimeV2CancelState) bool {
+	switch state {
+	case RuntimeV2CancelRequested, RuntimeV2CancelDelivered, RuntimeV2CancelStopping, RuntimeV2CancelStopped,
+		RuntimeV2CancelUnsupported, RuntimeV2CancelFailed, RuntimeV2CancelUnconfirmed:
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeV2ResumeAction(action RuntimeV2ResumeAction) bool {
+	switch action {
+	case RuntimeV2ActionContinueExecution, RuntimeV2ActionUploadEvents, RuntimeV2ActionUploadResult,
+		RuntimeV2ActionStopExecution, RuntimeV2ActionClearSpool:
+		return true
+	default:
+		return false
+	}
+}
+
+func runtimeV2ErrorCode(code string) bool {
+	switch code {
+	case "BAD_REQUEST", "UNAUTHORIZED", "FORBIDDEN", "PERMISSION_DENIED", "NOT_FOUND", "CONFLICT",
+		"VALIDATION_FAILED", "RATE_LIMITED", "INTERNAL_ERROR", "SERVICE_UNAVAILABLE",
+		"IDEMPOTENCY_KEY_REUSED", "RUN_ALREADY_TERMINAL", "STALE_LEASE", "LEASE_EXPIRED",
+		"LEASE_IDENTITY_MISMATCH", "RESULT_ID_CONFLICT", "EVENT_ID_CONFLICT", "NODE_AT_CAPACITY",
+		"RUNTIME_CLIENT_UPGRADE_REQUIRED", "RUNTIME_REQUIRED_FEATURE_MISSING", "RUN_CANCEL_REQUESTED",
+		"RUN_CANCEL_UNCONFIRMED", "RUNTIME_RETRY_EXHAUSTED", "RUNTIME_DISPATCH_TIMEOUT",
+		"RUN_DEADLINE_EXCEEDED", "EVENTS_MISSING", "REPLAY_INPUT_UNAVAILABLE",
+		"ENDPOINT_RESULT_UNKNOWN", "RUNTIME_SESSION_CONFLICT", "RUNTIME_SPOOL_CORRUPT":
 		return true
 	default:
 		return false

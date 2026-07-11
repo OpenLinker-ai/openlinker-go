@@ -125,10 +125,17 @@ type RuntimeV2AssignmentRejectPayload struct {
 }
 
 type RuntimeV2AssignmentRejectedPayload struct {
-	AttemptIdentity RuntimeV2AttemptIdentity `json:"attempt_identity"`
-	Outcome         string                   `json:"outcome"`
-	DispatchState   string                   `json:"dispatch_state"`
+	AttemptIdentity RuntimeV2AttemptIdentity         `json:"attempt_identity"`
+	Outcome         RuntimeV2AssignmentRejectOutcome `json:"outcome"`
+	DispatchState   RuntimeV2DispatchState           `json:"dispatch_state"`
 }
+
+type RuntimeV2AssignmentRejectOutcome string
+
+const (
+	RuntimeV2OfferRejected          RuntimeV2AssignmentRejectOutcome = "offer_rejected"
+	RuntimeV2AssignmentLeaseRevoked RuntimeV2AssignmentRejectOutcome = "lease_revoked"
+)
 
 type RuntimeV2LeaseRenewPayload struct {
 	AttemptIdentity    RuntimeV2AttemptIdentity `json:"attempt_identity"`
@@ -180,13 +187,45 @@ type RuntimeV2RunResultPayload struct {
 }
 
 type RuntimeV2RunResultAckPayload struct {
-	ResultID       string     `json:"result_id"`
-	Classification string     `json:"classification"`
-	RunStatus      string     `json:"run_status"`
-	DispatchState  string     `json:"dispatch_state"`
-	Replayed       bool       `json:"replayed"`
-	NextAttemptAt  *time.Time `json:"next_attempt_at,omitempty"`
+	ResultID       string                        `json:"result_id"`
+	Classification RuntimeV2ResultClassification `json:"classification"`
+	RunStatus      RuntimeV2RunStatus            `json:"run_status"`
+	DispatchState  RuntimeV2DispatchState        `json:"dispatch_state"`
+	Replayed       bool                          `json:"replayed"`
+	NextAttemptAt  *time.Time                    `json:"next_attempt_at,omitempty"`
 }
+
+type RuntimeV2ResultClassification string
+
+const (
+	RuntimeV2ResultSuccess             RuntimeV2ResultClassification = "success"
+	RuntimeV2ResultRetryableFailure    RuntimeV2ResultClassification = "retryable_failure"
+	RuntimeV2ResultNonRetryableFailure RuntimeV2ResultClassification = "non_retryable_failure"
+	RuntimeV2ResultTimeout             RuntimeV2ResultClassification = "timeout"
+	RuntimeV2ResultCanceled            RuntimeV2ResultClassification = "canceled"
+	RuntimeV2ResultDeadLetter          RuntimeV2ResultClassification = "dead_letter"
+)
+
+type RuntimeV2RunStatus string
+
+const (
+	RuntimeV2RunRunning  RuntimeV2RunStatus = "running"
+	RuntimeV2RunSuccess  RuntimeV2RunStatus = "success"
+	RuntimeV2RunFailed   RuntimeV2RunStatus = "failed"
+	RuntimeV2RunTimeout  RuntimeV2RunStatus = "timeout"
+	RuntimeV2RunCanceled RuntimeV2RunStatus = "canceled"
+)
+
+type RuntimeV2DispatchState string
+
+const (
+	RuntimeV2DispatchPending    RuntimeV2DispatchState = "pending"
+	RuntimeV2DispatchOffered    RuntimeV2DispatchState = "offered"
+	RuntimeV2DispatchExecuting  RuntimeV2DispatchState = "executing"
+	RuntimeV2DispatchRetryWait  RuntimeV2DispatchState = "retry_wait"
+	RuntimeV2DispatchTerminal   RuntimeV2DispatchState = "terminal"
+	RuntimeV2DispatchDeadLetter RuntimeV2DispatchState = "dead_letter"
+)
 
 type RuntimeV2CancelState string
 
@@ -212,6 +251,13 @@ type RuntimeV2RunCancelAckPayload struct {
 	AttemptIdentity RuntimeV2AttemptIdentity `json:"attempt_identity"`
 	CancelState     RuntimeV2CancelState     `json:"cancel_state"`
 	ErrorCode       string                   `json:"error_code,omitempty"`
+}
+
+type RuntimeV2RunCancellationState struct {
+	CancellationID string               `json:"cancellation_id"`
+	CancelState    RuntimeV2CancelState `json:"cancel_state"`
+	UpdatedAt      time.Time            `json:"updated_at"`
+	ErrorCode      string               `json:"error_code,omitempty"`
 }
 
 type RuntimeV2EventRange struct {
@@ -244,11 +290,21 @@ const (
 	RuntimeV2ResumeRevoked     RuntimeV2ResumeDecision = "lease_revoked"
 )
 
+type RuntimeV2ResumeAction string
+
+const (
+	RuntimeV2ActionContinueExecution RuntimeV2ResumeAction = "continue_execution"
+	RuntimeV2ActionUploadEvents      RuntimeV2ResumeAction = "upload_events"
+	RuntimeV2ActionUploadResult      RuntimeV2ResumeAction = "upload_result"
+	RuntimeV2ActionStopExecution     RuntimeV2ResumeAction = "stop_execution"
+	RuntimeV2ActionClearSpool        RuntimeV2ResumeAction = "clear_spool"
+)
+
 type RuntimeV2ResumeAcceptedPayload struct {
 	AttemptIdentity RuntimeV2AttemptIdentity `json:"attempt_identity"`
 	Decision        RuntimeV2ResumeDecision  `json:"decision"`
 	LeaseExpiresAt  *time.Time               `json:"lease_expires_at,omitempty"`
-	AllowedActions  []string                 `json:"allowed_actions"`
+	AllowedActions  []RuntimeV2ResumeAction  `json:"allowed_actions"`
 }
 
 type RuntimeV2ResumeResponse struct {
@@ -266,6 +322,46 @@ type RuntimeV2CommandsResponse struct {
 	DatabaseTime time.Time                 `json:"database_time"`
 }
 
+type RuntimeV2RunLeaseRevokedPayload struct {
+	AttemptIdentity RuntimeV2AttemptIdentity `json:"attempt_identity"`
+	ReasonCode      string                   `json:"reason_code"`
+	DispatchState   RuntimeV2DispatchState   `json:"dispatch_state"`
+	RunStatus       RuntimeV2RunStatus       `json:"run_status"`
+}
+
+type RuntimeV2DrainPayload struct {
+	DeadlineAt time.Time `json:"deadline_at"`
+	ReasonCode string    `json:"reason_code"`
+	Capacity   int64     `json:"capacity"`
+	Inflight   int64     `json:"inflight"`
+}
+
+type RuntimeV2DecodedPendingCommand struct {
+	Type   RuntimeV2MessageType
+	Cancel *RuntimeV2RunCancelPayload
+	Drain  *RuntimeV2DrainPayload
+	Revoke *RuntimeV2RunLeaseRevokedPayload
+}
+
+type RuntimeV2CallAgentAuthorization struct {
+	NodeEnvelope         string
+	AgentInvocationToken string
+	IdempotencyKey       string
+}
+
+type RuntimeV2CallAgentRequest struct {
+	TargetAgentID string         `json:"target_agent_id"`
+	Input         map[string]any `json:"input"`
+	Metadata      map[string]any `json:"metadata,omitempty"`
+	Reason        string         `json:"reason,omitempty"`
+}
+
+type RuntimeV2RunSummary struct {
+	RunID         string                 `json:"run_id"`
+	Status        RuntimeV2RunStatus     `json:"status"`
+	DispatchState RuntimeV2DispatchState `json:"dispatch_state"`
+}
+
 type RuntimeV2SessionCloseRequest struct {
 	NodeID           string `json:"node_id"`
 	AgentID          string `json:"agent_id"`
@@ -277,10 +373,12 @@ type RuntimeV2SessionCloseRequest struct {
 }
 
 type RuntimeV2ErrorBody struct {
-	Code               string                `json:"code"`
-	Message            string                `json:"message"`
-	Retryable          bool                  `json:"retryable"`
-	MissingEventRanges []RuntimeV2EventRange `json:"missing_event_ranges,omitempty"`
+	Code                 string                 `json:"code"`
+	Message              string                 `json:"message"`
+	Retryable            bool                   `json:"retryable"`
+	MissingEventRanges   []RuntimeV2EventRange  `json:"missing_event_ranges,omitempty"`
+	CurrentRunStatus     RuntimeV2RunStatus     `json:"current_run_status,omitempty"`
+	CurrentDispatchState RuntimeV2DispatchState `json:"current_dispatch_state,omitempty"`
 }
 
 type RuntimeV2ErrorEnvelope struct {

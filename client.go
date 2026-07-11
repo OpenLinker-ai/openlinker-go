@@ -456,15 +456,25 @@ func (c *Client) newRequestWithToken(ctx context.Context, method, path string, q
 }
 
 func (c *Client) newRequestWithTokenAndHeaders(ctx context.Context, method, path string, query url.Values, body any, accept, token string, headers http.Header) (*http.Response, error) {
-	var bodyReader io.Reader
+	var raw []byte
 	if body != nil {
-		raw, err := json.Marshal(body)
+		var err error
+		raw, err = json.Marshal(body)
 		if err != nil {
 			return nil, fmt.Errorf("openlinker: encode request: %w", err)
 		}
-		bodyReader = bytes.NewReader(raw)
 	}
+	return c.newRequestWithTokenAndHeadersBytes(ctx, method, path, query, raw, accept, token, headers)
+}
 
+// newRequestWithTokenAndHeadersBytes sends body without re-encoding it. Runtime
+// v2 delegated calls use this to bind the invocation proof to the exact bytes
+// written on the wire.
+func (c *Client) newRequestWithTokenAndHeadersBytes(ctx context.Context, method, path string, query url.Values, body []byte, accept, token string, headers http.Header) (*http.Response, error) {
+	var bodyReader io.Reader
+	if body != nil {
+		bodyReader = bytes.NewReader(body)
+	}
 	req, err := http.NewRequestWithContext(ctx, method, c.endpoint(path, query), bodyReader)
 	if err != nil {
 		return nil, err
