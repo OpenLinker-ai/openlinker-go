@@ -9,7 +9,7 @@ import (
 
 const maxIdempotencyKeyBytes = 255
 
-var errInvalidIdempotencyKey = errors.New("openlinker: idempotency key must contain 1 to 255 printable ASCII bytes")
+var errInvalidIdempotencyKey = errors.New("openlinker: idempotency key must contain 1 to 255 printable ASCII bytes without surrounding spaces")
 
 func resolveRunIdempotencyKey(explicit string) (string, error) {
 	key := explicit
@@ -27,7 +27,7 @@ func resolveRunIdempotencyKey(explicit string) (string, error) {
 }
 
 func validateIdempotencyKey(key string) error {
-	if len(key) == 0 || len(key) > maxIdempotencyKeyBytes {
+	if len(key) == 0 || len(key) > maxIdempotencyKeyBytes || key[0] == ' ' || key[len(key)-1] == ' ' {
 		return errInvalidIdempotencyKey
 	}
 	for i := 0; i < len(key); i++ {

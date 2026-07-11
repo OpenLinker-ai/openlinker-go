@@ -171,6 +171,10 @@ func TestCallRuntimeV2AgentRejectsInvalidAuthorityAndSummary(t *testing.T) {
 	if _, err = runtimeClient.CallRuntimeV2Agent(context.Background(), invalid, request); err == nil {
 		t.Fatal("invalid authority reached transport")
 	}
+	invalid.IdempotencyKey = " delegation-42 "
+	if _, err = runtimeClient.CallRuntimeV2Agent(context.Background(), invalid, request); err == nil {
+		t.Fatal("header-normalized idempotency key reached transport")
+	}
 	if calls != 0 {
 		t.Fatalf("invalid authority calls = %d", calls)
 	}

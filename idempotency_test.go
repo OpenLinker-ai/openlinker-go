@@ -11,7 +11,7 @@ import (
 )
 
 func TestValidateIdempotencyKeyBoundaries(t *testing.T) {
-	for _, key := range []string{"x", " ", strings.Repeat("~", maxIdempotencyKeyBytes)} {
+	for _, key := range []string{"x", "a b", strings.Repeat("~", maxIdempotencyKeyBytes)} {
 		if err := validateIdempotencyKey(key); err != nil {
 			t.Fatalf("valid key of length %d rejected: %v", len(key), err)
 		}
@@ -22,6 +22,9 @@ func TestValidateIdempotencyKeyBoundaries(t *testing.T) {
 		"private\x1fkey",
 		"private\x7fkey",
 		"private\x80key",
+		" leading",
+		"trailing ",
+		" ",
 	} {
 		if !errors.Is(validateIdempotencyKey(key), errInvalidIdempotencyKey) {
 			t.Fatalf("unsafe key of length %d was accepted", len(key))
