@@ -1,0 +1,1988 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "name": "openlinker-runtime",
+  "scope": "core-runtime",
+  "version": "v2",
+  "runtime_contract_id": "openlinker.runtime.v2",
+  "protocol_version": 2,
+  "wire_format": "application/json",
+  "required_features": [
+    "lease_fence",
+    "assignment_confirm",
+    "renew",
+    "resume",
+    "event_ack",
+    "result_ack",
+    "cancel",
+    "persistent_spool"
+  ],
+  "limits": {
+    "max_non_artifact_message_bytes": 4194304,
+    "offer_ttl_seconds": 30,
+    "lease_ttl_seconds": 60,
+    "lease_renew_interval_seconds": 20,
+    "hello_timeout_seconds": 5,
+    "max_pull_wait_seconds": 30
+  },
+  "websocket": {
+    "path": "/api/v1/agent-runtime/v2/ws",
+    "auth": "agent_principal_and_node_device",
+    "envelope_schema": {
+      "$ref": "#/$defs/RuntimeMessage"
+    },
+    "close_codes": {
+      "4401": "AUTHENTICATION_FAILED",
+      "4406": "RUNTIME_CLIENT_UPGRADE_REQUIRED",
+      "4409": "RUNTIME_SESSION_CONFLICT",
+      "4412": "RUNTIME_REQUIRED_FEATURE_MISSING"
+    },
+    "messages": [
+      {
+        "type": "runtime.hello",
+        "direction": "node_to_core",
+        "expects_reply": true,
+        "schema": {
+          "$ref": "#/$defs/RuntimeHelloMessage"
+        }
+      },
+      {
+        "type": "runtime.ready",
+        "direction": "core_to_node",
+        "reply_to_required": true,
+        "schema": {
+          "$ref": "#/$defs/RuntimeReadyMessage"
+        }
+      },
+      {
+        "type": "run.assigned",
+        "direction": "core_to_node",
+        "expects_reply": true,
+        "schema": {
+          "$ref": "#/$defs/RunAssignedMessage"
+        }
+      },
+      {
+        "type": "run.assignment.ack",
+        "direction": "node_to_core",
+        "expects_reply": true,
+        "reply_to_required": true,
+        "schema": {
+          "$ref": "#/$defs/RunAssignmentAckMessage"
+        }
+      },
+      {
+        "type": "run.assignment.confirmed",
+        "direction": "core_to_node",
+        "reply_to_required": true,
+        "schema": {
+          "$ref": "#/$defs/RunAssignmentConfirmedMessage"
+        }
+      },
+      {
+        "type": "run.assignment.reject",
+        "direction": "node_to_core",
+        "expects_reply": true,
+        "reply_to_required": true,
+        "schema": {
+          "$ref": "#/$defs/RunAssignmentRejectMessage"
+        }
+      },
+      {
+        "type": "run.assignment.rejected",
+        "direction": "core_to_node",
+        "reply_to_required": true,
+        "schema": {
+          "$ref": "#/$defs/RunAssignmentRejectedMessage"
+        }
+      },
+      {
+        "type": "run.lease.renew",
+        "direction": "node_to_core",
+        "expects_reply": true,
+        "schema": {
+          "$ref": "#/$defs/RunLeaseRenewMessage"
+        }
+      },
+      {
+        "type": "run.lease.renewed",
+        "direction": "core_to_node",
+        "reply_to_required": true,
+        "schema": {
+          "$ref": "#/$defs/RunLeaseRenewedMessage"
+        }
+      },
+      {
+        "type": "run.event",
+        "direction": "node_to_core",
+        "expects_reply": true,
+        "schema": {
+          "$ref": "#/$defs/RunEventMessage"
+        }
+      },
+      {
+        "type": "run.event.ack",
+        "direction": "core_to_node",
+        "reply_to_required": true,
+        "schema": {
+          "$ref": "#/$defs/RunEventAckMessage"
+        }
+      },
+      {
+        "type": "run.result",
+        "direction": "node_to_core",
+        "expects_reply": true,
+        "schema": {
+          "$ref": "#/$defs/RunResultMessage"
+        }
+      },
+      {
+        "type": "run.result.ack",
+        "direction": "core_to_node",
+        "reply_to_required": true,
+        "schema": {
+          "$ref": "#/$defs/RunResultAckMessage"
+        }
+      },
+      {
+        "type": "run.cancel",
+        "direction": "core_to_node",
+        "expects_reply": true,
+        "schema": {
+          "$ref": "#/$defs/RunCancelMessage"
+        }
+      },
+      {
+        "type": "run.cancel.ack",
+        "direction": "node_to_core",
+        "reply_to_required": true,
+        "schema": {
+          "$ref": "#/$defs/RunCancelAckMessage"
+        }
+      },
+      {
+        "type": "runtime.resume",
+        "direction": "node_to_core",
+        "expects_reply": true,
+        "schema": {
+          "$ref": "#/$defs/RuntimeResumeMessage"
+        }
+      },
+      {
+        "type": "run.resume.accepted",
+        "direction": "core_to_node",
+        "reply_to_required": true,
+        "schema": {
+          "$ref": "#/$defs/RunResumeAcceptedMessage"
+        }
+      },
+      {
+        "type": "run.lease.revoked",
+        "direction": "core_to_node",
+        "schema": {
+          "$ref": "#/$defs/RunLeaseRevokedMessage"
+        }
+      },
+      {
+        "type": "runtime.drain",
+        "direction": "bidirectional",
+        "schema": {
+          "$ref": "#/$defs/RuntimeDrainMessage"
+        }
+      },
+      {
+        "type": "runtime.error",
+        "direction": "core_to_node",
+        "reply_to_required": true,
+        "schema": {
+          "$ref": "#/$defs/RuntimeErrorMessage"
+        }
+      }
+    ]
+  },
+  "endpoints": [
+    {
+      "client_method": "createRuntimeSession",
+      "http_method": "POST",
+      "path": "/api/v1/agent-runtime/v2/sessions",
+      "request_body_schema": {
+        "$ref": "#/$defs/RuntimeHelloPayload"
+      },
+      "success_response_schema": {
+        "$ref": "#/$defs/RuntimeReadyPayload"
+      },
+      "error_response_schema": {
+        "$ref": "#/$defs/RuntimeError"
+      }
+    },
+    {
+      "client_method": "claimRuntimeRun",
+      "http_method": "POST",
+      "path": "/api/v1/agent-runtime/v2/runs/claim",
+      "query": {
+        "wait": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30
+        }
+      },
+      "request_body_schema": {
+        "$ref": "#/$defs/RuntimeClaimRequest"
+      },
+      "success_response_schema": {
+        "$ref": "#/$defs/RunAssignedPayload"
+      },
+      "empty_response_status": 204,
+      "error_response_schema": {
+        "$ref": "#/$defs/RuntimeError"
+      }
+    },
+    {
+      "client_method": "ackRuntimeAssignment",
+      "http_method": "POST",
+      "path": "/api/v1/agent-runtime/v2/runs/{id}/assignment-ack",
+      "request_body_schema": {
+        "$ref": "#/$defs/RunAssignmentAckPayload"
+      },
+      "success_response_schema": {
+        "$ref": "#/$defs/RunAssignmentConfirmedPayload"
+      },
+      "error_response_schema": {
+        "$ref": "#/$defs/RuntimeError"
+      }
+    },
+    {
+      "client_method": "rejectRuntimeAssignment",
+      "http_method": "POST",
+      "path": "/api/v1/agent-runtime/v2/runs/{id}/assignment-reject",
+      "request_body_schema": {
+        "$ref": "#/$defs/RunAssignmentRejectPayload"
+      },
+      "success_response_schema": {
+        "$ref": "#/$defs/RunAssignmentRejectedPayload"
+      },
+      "error_response_schema": {
+        "$ref": "#/$defs/RuntimeError"
+      }
+    },
+    {
+      "client_method": "renewRuntimeLease",
+      "http_method": "POST",
+      "path": "/api/v1/agent-runtime/v2/runs/{id}/lease-renew",
+      "request_body_schema": {
+        "$ref": "#/$defs/RunLeaseRenewPayload"
+      },
+      "success_response_schema": {
+        "$ref": "#/$defs/RunLeaseRenewedPayload"
+      },
+      "error_response_schema": {
+        "$ref": "#/$defs/RuntimeError"
+      }
+    },
+    {
+      "client_method": "sendRuntimeEvent",
+      "http_method": "POST",
+      "path": "/api/v1/agent-runtime/v2/runs/{id}/events",
+      "request_body_schema": {
+        "$ref": "#/$defs/RunEventPayload"
+      },
+      "success_response_schema": {
+        "$ref": "#/$defs/RunEventAckPayload"
+      },
+      "error_response_schema": {
+        "$ref": "#/$defs/RuntimeError"
+      }
+    },
+    {
+      "client_method": "completeRuntimeRun",
+      "http_method": "POST",
+      "path": "/api/v1/agent-runtime/v2/runs/{id}/result",
+      "request_body_schema": {
+        "$ref": "#/$defs/RunResultPayload"
+      },
+      "success_response_schema": {
+        "$ref": "#/$defs/RunResultAckPayload"
+      },
+      "error_response_schema": {
+        "$ref": "#/$defs/RuntimeError"
+      }
+    },
+    {
+      "client_method": "resumeRuntimeRuns",
+      "http_method": "POST",
+      "path": "/api/v1/agent-runtime/v2/runs/resume",
+      "request_body_schema": {
+        "$ref": "#/$defs/RuntimeResumePayload"
+      },
+      "success_response_schema": {
+        "$ref": "#/$defs/RuntimeResumeResponse"
+      },
+      "error_response_schema": {
+        "$ref": "#/$defs/RuntimeError"
+      }
+    },
+    {
+      "client_method": "ackRuntimeCancel",
+      "http_method": "POST",
+      "path": "/api/v1/agent-runtime/v2/runs/{id}/cancel-ack",
+      "request_body_schema": {
+        "$ref": "#/$defs/RunCancelAckPayload"
+      },
+      "success_response_schema": {
+        "$ref": "#/$defs/RunCancellationState"
+      },
+      "error_response_schema": {
+        "$ref": "#/$defs/RuntimeError"
+      }
+    },
+    {
+      "client_method": "pollRuntimeCommands",
+      "http_method": "GET",
+      "path": "/api/v1/agent-runtime/v2/commands",
+      "query": {
+        "wait": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30
+        }
+      },
+      "success_response_schema": {
+        "$ref": "#/$defs/RuntimeCommandsResponse"
+      },
+      "error_response_schema": {
+        "$ref": "#/$defs/RuntimeError"
+      }
+    },
+    {
+      "client_method": "callAgent",
+      "http_method": "POST",
+      "path": "/api/v1/agent-runtime/v2/call-agent",
+      "required_headers": [
+        "Idempotency-Key",
+        "OpenLinker-Invocation-Context",
+        "OpenLinker-Invocation-Proof"
+      ],
+      "request_body_schema": {
+        "$ref": "#/$defs/CallAgentRequest"
+      },
+      "success_response_schema": {
+        "$ref": "#/$defs/RunSummary"
+      },
+      "error_response_schema": {
+        "$ref": "#/$defs/RuntimeError"
+      }
+    }
+  ],
+  "legacy_routes": [
+    {
+      "http_method": "POST",
+      "path": "/api/v1/agent-runtime/heartbeat",
+      "response_status": 426,
+      "error_code": "RUNTIME_CLIENT_UPGRADE_REQUIRED"
+    },
+    {
+      "http_method": "GET",
+      "path": "/api/v1/agent-runtime/runs/claim",
+      "response_status": 426,
+      "error_code": "RUNTIME_CLIENT_UPGRADE_REQUIRED"
+    },
+    {
+      "http_method": "POST",
+      "path": "/api/v1/agent-runtime/runs/{id}/result",
+      "response_status": 426,
+      "error_code": "RUNTIME_CLIENT_UPGRADE_REQUIRED"
+    },
+    {
+      "http_method": "GET",
+      "path": "/api/v1/agent-runtime/ws",
+      "response_status": 426,
+      "error_code": "RUNTIME_CLIENT_UPGRADE_REQUIRED"
+    },
+    {
+      "http_method": "POST",
+      "path": "/api/v1/agent-runtime/call-agent",
+      "response_status": 426,
+      "error_code": "RUNTIME_CLIENT_UPGRADE_REQUIRED"
+    }
+  ],
+  "stable_error_codes": [
+    "BAD_REQUEST",
+    "UNAUTHORIZED",
+    "FORBIDDEN",
+    "PERMISSION_DENIED",
+    "NOT_FOUND",
+    "CONFLICT",
+    "VALIDATION_FAILED",
+    "RATE_LIMITED",
+    "INTERNAL_ERROR",
+    "SERVICE_UNAVAILABLE",
+    "IDEMPOTENCY_KEY_REUSED",
+    "RUN_ALREADY_TERMINAL",
+    "STALE_LEASE",
+    "LEASE_EXPIRED",
+    "LEASE_IDENTITY_MISMATCH",
+    "RESULT_ID_CONFLICT",
+    "EVENT_ID_CONFLICT",
+    "NODE_AT_CAPACITY",
+    "RUNTIME_CLIENT_UPGRADE_REQUIRED",
+    "RUNTIME_REQUIRED_FEATURE_MISSING",
+    "RUN_CANCEL_REQUESTED",
+    "RUN_CANCEL_UNCONFIRMED",
+    "RUNTIME_RETRY_EXHAUSTED",
+    "RUNTIME_DISPATCH_TIMEOUT",
+    "RUN_DEADLINE_EXCEEDED",
+    "EVENTS_MISSING",
+    "REPLAY_INPUT_UNAVAILABLE",
+    "ENDPOINT_RESULT_UNKNOWN",
+    "RUNTIME_SESSION_CONFLICT",
+    "RUNTIME_SPOOL_CORRUPT"
+  ],
+  "$defs": {
+    "UUID": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "Timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "NonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "PositiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "RunStatus": {
+      "type": "string",
+      "enum": [
+        "running",
+        "success",
+        "failed",
+        "timeout",
+        "canceled"
+      ]
+    },
+    "DispatchState": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "offered",
+        "executing",
+        "retry_wait",
+        "terminal",
+        "dead_letter"
+      ]
+    },
+    "CancelState": {
+      "type": "string",
+      "enum": [
+        "requested",
+        "delivered",
+        "stopping",
+        "stopped",
+        "unsupported",
+        "failed",
+        "unconfirmed"
+      ]
+    },
+    "ResumeDecision": {
+      "type": "string",
+      "enum": [
+        "continue_execution",
+        "upload_spool_only",
+        "result_already_acked",
+        "lease_revoked"
+      ]
+    },
+    "AttemptIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "attempt_id",
+        "lease_id",
+        "fencing_token",
+        "node_id",
+        "agent_id",
+        "worker_id",
+        "runtime_session_id"
+      ],
+      "properties": {
+        "run_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "lease_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "fencing_token": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "node_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "agent_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "worker_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "runtime_session_id": {
+          "$ref": "#/$defs/UUID"
+        }
+      }
+    },
+    "EventRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "RuntimeErrorBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "enum": [
+            "BAD_REQUEST",
+            "UNAUTHORIZED",
+            "FORBIDDEN",
+            "PERMISSION_DENIED",
+            "NOT_FOUND",
+            "CONFLICT",
+            "VALIDATION_FAILED",
+            "RATE_LIMITED",
+            "INTERNAL_ERROR",
+            "SERVICE_UNAVAILABLE",
+            "IDEMPOTENCY_KEY_REUSED",
+            "RUN_ALREADY_TERMINAL",
+            "STALE_LEASE",
+            "LEASE_EXPIRED",
+            "LEASE_IDENTITY_MISMATCH",
+            "RESULT_ID_CONFLICT",
+            "EVENT_ID_CONFLICT",
+            "NODE_AT_CAPACITY",
+            "RUNTIME_CLIENT_UPGRADE_REQUIRED",
+            "RUNTIME_REQUIRED_FEATURE_MISSING",
+            "RUN_CANCEL_REQUESTED",
+            "RUN_CANCEL_UNCONFIRMED",
+            "RUNTIME_RETRY_EXHAUSTED",
+            "RUNTIME_DISPATCH_TIMEOUT",
+            "RUN_DEADLINE_EXCEEDED",
+            "EVENTS_MISSING",
+            "REPLAY_INPUT_UNAVAILABLE",
+            "ENDPOINT_RESULT_UNKNOWN",
+            "RUNTIME_SESSION_CONFLICT",
+            "RUNTIME_SPOOL_CORRUPT"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "missing_event_ranges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EventRange"
+          }
+        },
+        "current_run_status": {
+          "$ref": "#/$defs/RunStatus"
+        },
+        "current_dispatch_state": {
+          "$ref": "#/$defs/DispatchState"
+        }
+      }
+    },
+    "RuntimeError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/RuntimeErrorBody"
+        }
+      }
+    },
+    "RuntimeEnvelope": {
+      "type": "object",
+      "required": [
+        "protocol_version",
+        "runtime_contract_id",
+        "message_id",
+        "type",
+        "sent_at",
+        "payload"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": 2
+        },
+        "runtime_contract_id": {
+          "const": "openlinker.runtime.v2"
+        },
+        "message_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "reply_to_message_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "type": {
+          "type": "string"
+        },
+        "sent_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "payload": {
+          "type": "object"
+        }
+      }
+    },
+    "RuntimeMessage": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/RuntimeHelloMessage"
+        },
+        {
+          "$ref": "#/$defs/RuntimeReadyMessage"
+        },
+        {
+          "$ref": "#/$defs/RunAssignedMessage"
+        },
+        {
+          "$ref": "#/$defs/RunAssignmentAckMessage"
+        },
+        {
+          "$ref": "#/$defs/RunAssignmentConfirmedMessage"
+        },
+        {
+          "$ref": "#/$defs/RunAssignmentRejectMessage"
+        },
+        {
+          "$ref": "#/$defs/RunAssignmentRejectedMessage"
+        },
+        {
+          "$ref": "#/$defs/RunLeaseRenewMessage"
+        },
+        {
+          "$ref": "#/$defs/RunLeaseRenewedMessage"
+        },
+        {
+          "$ref": "#/$defs/RunEventMessage"
+        },
+        {
+          "$ref": "#/$defs/RunEventAckMessage"
+        },
+        {
+          "$ref": "#/$defs/RunResultMessage"
+        },
+        {
+          "$ref": "#/$defs/RunResultAckMessage"
+        },
+        {
+          "$ref": "#/$defs/RunCancelMessage"
+        },
+        {
+          "$ref": "#/$defs/RunCancelAckMessage"
+        },
+        {
+          "$ref": "#/$defs/RuntimeResumeMessage"
+        },
+        {
+          "$ref": "#/$defs/RunResumeAcceptedMessage"
+        },
+        {
+          "$ref": "#/$defs/RunLeaseRevokedMessage"
+        },
+        {
+          "$ref": "#/$defs/RuntimeDrainMessage"
+        },
+        {
+          "$ref": "#/$defs/RuntimeErrorMessage"
+        }
+      ]
+    },
+    "RuntimeHelloPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node_id",
+        "agent_id",
+        "worker_id",
+        "runtime_session_id",
+        "session_epoch",
+        "node_version",
+        "capacity",
+        "features",
+        "contract_digest"
+      ],
+      "properties": {
+        "node_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "agent_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "worker_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "runtime_session_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "session_epoch": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "node_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1024
+        },
+        "features": {
+          "type": "array",
+          "uniqueItems": true,
+          "minItems": 8,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "contract_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "RuntimeReadyPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "core_instance_id",
+        "features",
+        "offer_ttl_seconds",
+        "lease_ttl_seconds",
+        "database_time"
+      ],
+      "properties": {
+        "core_instance_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "features": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "offer_ttl_seconds": {
+          "$ref": "#/$defs/PositiveInteger"
+        },
+        "lease_ttl_seconds": {
+          "$ref": "#/$defs/PositiveInteger"
+        },
+        "database_time": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "RunAssignedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_identity",
+        "offer_no",
+        "offer_expires_at",
+        "attempt_deadline_at",
+        "run_deadline_at",
+        "input",
+        "node_envelope",
+        "agent_invocation_token"
+      ],
+      "properties": {
+        "attempt_identity": {
+          "$ref": "#/$defs/AttemptIdentity"
+        },
+        "offer_no": {
+          "$ref": "#/$defs/PositiveInteger"
+        },
+        "offer_expires_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "attempt_deadline_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "run_deadline_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "input": {
+          "type": "object"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "node_envelope": {
+          "type": "string",
+          "minLength": 1
+        },
+        "agent_invocation_token": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "RunAssignmentAckPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_identity"
+      ],
+      "properties": {
+        "attempt_identity": {
+          "$ref": "#/$defs/AttemptIdentity"
+        }
+      }
+    },
+    "RunAssignmentConfirmedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_identity",
+        "attempt_no",
+        "lease_expires_at"
+      ],
+      "properties": {
+        "attempt_identity": {
+          "$ref": "#/$defs/AttemptIdentity"
+        },
+        "attempt_no": {
+          "$ref": "#/$defs/PositiveInteger"
+        },
+        "lease_expires_at": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "RunAssignmentRejectPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_identity",
+        "reason_code",
+        "capacity",
+        "inflight"
+      ],
+      "properties": {
+        "attempt_identity": {
+          "$ref": "#/$defs/AttemptIdentity"
+        },
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "NODE_AT_CAPACITY",
+            "NODE_DRAINING",
+            "RUNTIME_CLIENT_UPGRADE_REQUIRED",
+            "RUNTIME_REQUIRED_FEATURE_MISSING"
+          ]
+        },
+        "capacity": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "inflight": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        }
+      }
+    },
+    "RunAssignmentRejectedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_identity",
+        "outcome",
+        "dispatch_state"
+      ],
+      "properties": {
+        "attempt_identity": {
+          "$ref": "#/$defs/AttemptIdentity"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "offer_rejected",
+            "lease_revoked"
+          ]
+        },
+        "dispatch_state": {
+          "$ref": "#/$defs/DispatchState"
+        }
+      }
+    },
+    "RunLeaseRenewPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_identity",
+        "last_client_event_seq",
+        "capacity",
+        "inflight"
+      ],
+      "properties": {
+        "attempt_identity": {
+          "$ref": "#/$defs/AttemptIdentity"
+        },
+        "last_client_event_seq": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "capacity": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "inflight": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        }
+      }
+    },
+    "RunLeaseRenewedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_identity",
+        "lease_expires_at"
+      ],
+      "properties": {
+        "attempt_identity": {
+          "$ref": "#/$defs/AttemptIdentity"
+        },
+        "lease_expires_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "pending_command": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/PendingCommand"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RunEventPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_identity",
+        "client_event_id",
+        "client_event_seq",
+        "event_type",
+        "payload"
+      ],
+      "properties": {
+        "attempt_identity": {
+          "$ref": "#/$defs/AttemptIdentity"
+        },
+        "client_event_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "client_event_seq": {
+          "$ref": "#/$defs/PositiveInteger"
+        },
+        "event_type": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+        },
+        "payload": {
+          "type": "object"
+        }
+      }
+    },
+    "RunEventAckPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "client_event_id",
+        "client_event_seq",
+        "sequence",
+        "replayed"
+      ],
+      "properties": {
+        "client_event_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "client_event_seq": {
+          "$ref": "#/$defs/PositiveInteger"
+        },
+        "sequence": {
+          "$ref": "#/$defs/PositiveInteger"
+        },
+        "replayed": {
+          "type": "boolean"
+        }
+      }
+    },
+    "RunErrorPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error_code",
+        "message"
+      ],
+      "properties": {
+        "error_code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "retryable_hint": {
+          "type": "boolean"
+        }
+      }
+    },
+    "RunResultPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_identity",
+        "result_id",
+        "status",
+        "duration_ms",
+        "final_client_event_seq"
+      ],
+      "properties": {
+        "attempt_identity": {
+          "$ref": "#/$defs/AttemptIdentity"
+        },
+        "result_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "success",
+            "failed"
+          ]
+        },
+        "output": {
+          "type": "object"
+        },
+        "error": {
+          "$ref": "#/$defs/RunErrorPayload"
+        },
+        "duration_ms": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "final_client_event_seq": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "output"
+          ],
+          "properties": {
+            "status": {
+              "const": "success"
+            }
+          },
+          "not": {
+            "required": [
+              "error"
+            ]
+          }
+        },
+        {
+          "required": [
+            "error"
+          ],
+          "properties": {
+            "status": {
+              "const": "failed"
+            }
+          },
+          "not": {
+            "required": [
+              "output"
+            ]
+          }
+        }
+      ]
+    },
+    "RunResultAckPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "result_id",
+        "classification",
+        "run_status",
+        "dispatch_state",
+        "replayed"
+      ],
+      "properties": {
+        "result_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "classification": {
+          "type": "string",
+          "enum": [
+            "success",
+            "retryable_failure",
+            "non_retryable_failure",
+            "timeout",
+            "canceled",
+            "dead_letter"
+          ]
+        },
+        "run_status": {
+          "$ref": "#/$defs/RunStatus"
+        },
+        "dispatch_state": {
+          "$ref": "#/$defs/DispatchState"
+        },
+        "replayed": {
+          "type": "boolean"
+        },
+        "next_attempt_at": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "RunCancelPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cancellation_id",
+        "attempt_identity",
+        "reason_code",
+        "deadline_at"
+      ],
+      "properties": {
+        "cancellation_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "attempt_identity": {
+          "$ref": "#/$defs/AttemptIdentity"
+        },
+        "reason_code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "deadline_at": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "RunCancelAckPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cancellation_id",
+        "attempt_identity",
+        "cancel_state"
+      ],
+      "properties": {
+        "cancellation_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "attempt_identity": {
+          "$ref": "#/$defs/AttemptIdentity"
+        },
+        "cancel_state": {
+          "$ref": "#/$defs/CancelState"
+        },
+        "error_code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        }
+      }
+    },
+    "RunCancellationState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cancellation_id",
+        "cancel_state",
+        "updated_at"
+      ],
+      "properties": {
+        "cancellation_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "cancel_state": {
+          "$ref": "#/$defs/CancelState"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "error_code": {
+          "type": "string"
+        }
+      }
+    },
+    "ResumeAttempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_identity",
+        "last_acked_client_event_seq",
+        "pending_client_event_ranges"
+      ],
+      "properties": {
+        "attempt_identity": {
+          "$ref": "#/$defs/AttemptIdentity"
+        },
+        "last_acked_client_event_seq": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "pending_client_event_ranges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/EventRange"
+          }
+        },
+        "pending_result_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "final_client_event_seq": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        }
+      }
+    },
+    "RuntimeResumePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "node_id",
+        "agent_id",
+        "worker_id",
+        "runtime_session_id",
+        "attempts"
+      ],
+      "properties": {
+        "node_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "agent_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "worker_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "runtime_session_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "attempts": {
+          "type": "array",
+          "maxItems": 1024,
+          "items": {
+            "$ref": "#/$defs/ResumeAttempt"
+          }
+        }
+      }
+    },
+    "RunResumeAcceptedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_identity",
+        "decision",
+        "allowed_actions"
+      ],
+      "properties": {
+        "attempt_identity": {
+          "$ref": "#/$defs/AttemptIdentity"
+        },
+        "decision": {
+          "$ref": "#/$defs/ResumeDecision"
+        },
+        "lease_expires_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "allowed_actions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "continue_execution",
+              "upload_events",
+              "upload_result",
+              "stop_execution",
+              "clear_spool"
+            ]
+          }
+        }
+      }
+    },
+    "RuntimeResumeResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "decisions"
+      ],
+      "properties": {
+        "decisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RunResumeAcceptedPayload"
+          }
+        }
+      }
+    },
+    "RunLeaseRevokedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_identity",
+        "reason_code",
+        "dispatch_state",
+        "run_status"
+      ],
+      "properties": {
+        "attempt_identity": {
+          "$ref": "#/$defs/AttemptIdentity"
+        },
+        "reason_code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "dispatch_state": {
+          "$ref": "#/$defs/DispatchState"
+        },
+        "run_status": {
+          "$ref": "#/$defs/RunStatus"
+        }
+      }
+    },
+    "RuntimeDrainPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deadline_at",
+        "reason_code",
+        "capacity",
+        "inflight"
+      ],
+      "properties": {
+        "deadline_at": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "reason_code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "capacity": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "inflight": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        }
+      }
+    },
+    "CancelCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "payload"
+      ],
+      "properties": {
+        "type": {
+          "const": "run.cancel"
+        },
+        "payload": {
+          "$ref": "#/$defs/RunCancelPayload"
+        }
+      }
+    },
+    "DrainCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "payload"
+      ],
+      "properties": {
+        "type": {
+          "const": "runtime.drain"
+        },
+        "payload": {
+          "$ref": "#/$defs/RuntimeDrainPayload"
+        }
+      }
+    },
+    "RevokeCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "payload"
+      ],
+      "properties": {
+        "type": {
+          "const": "run.lease.revoked"
+        },
+        "payload": {
+          "$ref": "#/$defs/RunLeaseRevokedPayload"
+        }
+      }
+    },
+    "PendingCommand": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/CancelCommand"
+        },
+        {
+          "$ref": "#/$defs/DrainCommand"
+        },
+        {
+          "$ref": "#/$defs/RevokeCommand"
+        }
+      ]
+    },
+    "RuntimeCommandsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commands",
+        "database_time"
+      ],
+      "properties": {
+        "commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PendingCommand"
+          }
+        },
+        "database_time": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "RuntimeClaimRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtime_session_id",
+        "capacity",
+        "inflight"
+      ],
+      "properties": {
+        "runtime_session_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "capacity": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        },
+        "inflight": {
+          "$ref": "#/$defs/NonNegativeInteger"
+        }
+      }
+    },
+    "CallAgentRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_agent_id",
+        "input"
+      ],
+      "properties": {
+        "target_agent_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "input": {
+          "type": "object"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    },
+    "RunSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "status",
+        "dispatch_state"
+      ],
+      "properties": {
+        "run_id": {
+          "$ref": "#/$defs/UUID"
+        },
+        "status": {
+          "$ref": "#/$defs/RunStatus"
+        },
+        "dispatch_state": {
+          "$ref": "#/$defs/DispatchState"
+        }
+      }
+    },
+    "RuntimeHelloMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "runtime.hello"
+            },
+            "payload": {
+              "$ref": "#/$defs/RuntimeHelloPayload"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RuntimeReadyMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "required": [
+            "reply_to_message_id"
+          ],
+          "properties": {
+            "type": {
+              "const": "runtime.ready"
+            },
+            "payload": {
+              "$ref": "#/$defs/RuntimeReadyPayload"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RunAssignedMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "run.assigned"
+            },
+            "payload": {
+              "$ref": "#/$defs/RunAssignedPayload"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RunAssignmentAckMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "required": [
+            "reply_to_message_id"
+          ],
+          "properties": {
+            "type": {
+              "const": "run.assignment.ack"
+            },
+            "payload": {
+              "$ref": "#/$defs/RunAssignmentAckPayload"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RunAssignmentConfirmedMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "required": [
+            "reply_to_message_id"
+          ],
+          "properties": {
+            "type": {
+              "const": "run.assignment.confirmed"
+            },
+            "payload": {
+              "$ref": "#/$defs/RunAssignmentConfirmedPayload"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RunAssignmentRejectMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "required": [
+            "reply_to_message_id"
+          ],
+          "properties": {
+            "type": {
+              "const": "run.assignment.reject"
+            },
+            "payload": {
+              "$ref": "#/$defs/RunAssignmentRejectPayload"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RunAssignmentRejectedMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "required": [
+            "reply_to_message_id"
+          ],
+          "properties": {
+            "type": {
+              "const": "run.assignment.rejected"
+            },
+            "payload": {
+              "$ref": "#/$defs/RunAssignmentRejectedPayload"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RunLeaseRenewMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "run.lease.renew"
+            },
+            "payload": {
+              "$ref": "#/$defs/RunLeaseRenewPayload"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RunLeaseRenewedMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "required": [
+            "reply_to_message_id"
+          ],
+          "properties": {
+            "type": {
+              "const": "run.lease.renewed"
+            },
+            "payload": {
+              "$ref": "#/$defs/RunLeaseRenewedPayload"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RunEventMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "run.event"
+            },
+            "payload": {
+              "$ref": "#/$defs/RunEventPayload"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RunEventAckMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "required": [
+            "reply_to_message_id"
+          ],
+          "properties": {
+            "type": {
+              "const": "run.event.ack"
+            },
+            "payload": {
+              "$ref": "#/$defs/RunEventAckPayload"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RunResultMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "run.result"
+            },
+            "payload": {
+              "$ref": "#/$defs/RunResultPayload"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RunResultAckMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "required": [
+            "reply_to_message_id"
+          ],
+          "properties": {
+            "type": {
+              "const": "run.result.ack"
+            },
+            "payload": {
+              "$ref": "#/$defs/RunResultAckPayload"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RunCancelMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "run.cancel"
+            },
+            "payload": {
+              "$ref": "#/$defs/RunCancelPayload"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RunCancelAckMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "required": [
+            "reply_to_message_id"
+          ],
+          "properties": {
+            "type": {
+              "const": "run.cancel.ack"
+            },
+            "payload": {
+              "$ref": "#/$defs/RunCancelAckPayload"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RuntimeResumeMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "runtime.resume"
+            },
+            "payload": {
+              "$ref": "#/$defs/RuntimeResumePayload"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RunResumeAcceptedMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "required": [
+            "reply_to_message_id"
+          ],
+          "properties": {
+            "type": {
+              "const": "run.resume.accepted"
+            },
+            "payload": {
+              "$ref": "#/$defs/RunResumeAcceptedPayload"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RunLeaseRevokedMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "run.lease.revoked"
+            },
+            "payload": {
+              "$ref": "#/$defs/RunLeaseRevokedPayload"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RuntimeDrainMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "runtime.drain"
+            },
+            "payload": {
+              "$ref": "#/$defs/RuntimeDrainPayload"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RuntimeErrorMessage": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RuntimeEnvelope"
+        },
+        {
+          "type": "object",
+          "required": [
+            "reply_to_message_id"
+          ],
+          "properties": {
+            "type": {
+              "const": "runtime.error"
+            },
+            "payload": {
+              "$ref": "#/$defs/RuntimeErrorBody"
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    }
+  }
+}
