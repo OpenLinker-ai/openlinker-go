@@ -3,7 +3,8 @@
 `openlinker-go` is the Go SDK for OpenLinker Core. Use `NewClient` to discover
 and invoke Agents, stream run events, verify webhooks, and call A2A transports
 including JSON-RPC, HTTP+JSON/SSE, and gRPC. Use `NewRuntime` for Agent runtime
-connectors. Both work with self-hosted Core and services built on its public API.
+v2 protocol primitives. Both work with self-hosted Core and services built on
+its public API.
 
 Chinese documentation: [README.zh-CN.md](./README.zh-CN.md)
 
@@ -33,14 +34,14 @@ flowchart LR
   Service["Go service / CLI / backend"] --> ClientSDK["openlinker-go Client"]
   ClientSDK -->|"REST client with OPENLINKER_USER_TOKEN"| Core["openlinker-core<br/>registry / runs / events"]
   ClientSDK -->|"A2A JSON-RPC / HTTP+JSON / gRPC"| Core
-  Runtime["Agent runtime process"] --> RuntimeSDK["openlinker-go Runtime"]
-  RuntimeSDK -->|"heartbeat / claim / result with OPENLINKER_AGENT_TOKEN"| Core
+  AgentNode["openlinker-agent-node"] --> RuntimeSDK["openlinker-go Runtime v2"]
+  RuntimeSDK -->|"mTLS + Agent Token / session / lease / event / result"| Core
 
   HostedBridge["Hosted Bridge<br/>optional deployment adapter"] -.->|"same Core API contract"| Core
 
   Core -->|"direct_http"| HTTPAgent["Public HTTPS Agent"]
   Core -->|"mcp_server"| MCPAgent["Remote MCP / JSON-RPC server"]
-  Core -->|"runtime_ws / runtime_pull"| AgentNode["openlinker-agent-node"]
+  Core -->|"Runtime v2 assignments and cancellation"| AgentNode
 ```
 
 ## Quick Start
@@ -103,7 +104,7 @@ Core returned the existing run.
 Stream run events:
 
 ```go
-err = client.StreamRunEvents(context.Background(), result.RunID, func(event openlinker.StreamRunEvent) error {
+err = client.StreamRunEvents(context.Background(), result.RunID, openlinker.StreamRunEventsOptions{}, func(event openlinker.StreamRunEvent) error {
 	fmt.Println(event.Event, string(event.Data))
 	return nil
 })
@@ -152,60 +153,26 @@ if err != nil || !ok {
 _ = body
 ```
 
-## Runtime Connectors
+## Runtime v2
 
-Agent runtime processes use `OPENLINKER_AGENT_TOKEN` through `NewRuntime`:
+`NewRuntime` exposes strict Runtime v2 HTTP primitives. Runtime traffic must use
+the dedicated mTLS Core origin, a verified Node certificate, and the Agent
+Token bound to that Agent. The SDK deliberately does not contain a process
+runner or an in-memory connector.
 
-```go
-runtime, err := openlinker.NewRuntime(
-	"https://core.example.com",
-	openlinker.WithAgentToken(os.Getenv("OPENLINKER_AGENT_TOKEN")),
-)
-if err != nil {
-	log.Fatal(err)
-}
+Use `openlinker-agent-node` for real workers. It owns durable identity, the
+assignment journal, encrypted Event/Result spooling, lease renewal, resume,
+cancellation, and graceful drain. Custom Node implementations can build on:
 
-connector := openlinker.NewRuntimePullConnector(runtime)
-```
+- `CreateRuntimeV2Session`, heartbeat, close, claim, explicit assignment ACK,
+  reject, and lease renewal
+- durable Event and Result submission with caller-supplied stable IDs
+- resume and explicit-session cancellation command polling/acknowledgement
+- assignment-scoped delegated calls with exact-body invocation proofs
 
-The SDK includes the base Agent runtime integration layer on `Runtime`:
-
-- `HeartbeatAgent`
-- `ClaimRuntimeRun`
-- `ClaimRuntimeRunDetailed`
-- `CompleteRuntimeRun`
-- `CallAgent`
-- `CallAgentAt`
-- `RuntimePullConnector`
-- `RuntimeWSConnector`
-- `Native`
-
-For native Go workers, `WithAgent` wraps the connector lifecycle and default
-result mapping. Existing Agent code only needs to implement a minimal text
-runner:
-
-```go
-type MyAgent struct{}
-
-func (MyAgent) Run(ctx context.Context, input string) (string, error) {
-	return "hello " + input, nil
-}
-
-err := openlinker.WithAgent(MyAgent{}).Run(context.Background())
-```
-
-Use `Native` when you need full control over assignment handling and custom
-result mapping. By default both runners read `OPENLINKER_API_BASE`,
-`OPENLINKER_AGENT_TOKEN` (or legacy `OPENLINKER_RUNTIME_TOKEN`),
-`OPENLINKER_WORKER_CONNECTOR`,
-`OPENLINKER_WORKER_PULL_WAIT`, and `OPENLINKER_WORKER_MAX_RUNS`.
-
-`OPENLINKER_RUNTIME_TOKEN` remains a compatibility alias for older deployments,
-but new configuration should use `OPENLINKER_AGENT_TOKEN` with an `ol_agent_`
-token issued for the Agent.
-
-It does not include command, Codex, OpenClaw, or local HTTP backend adapters.
-Use `openlinker-agent-node` for those process-level integrations.
+Supply an `http.Client` configured with the Node certificate and the Runtime
+server CA through `WithHTTPClient`. `NewRuntime` validates Agent Token separation;
+TLS credential loading and durable state remain the Node's responsibility.
 
 ## A2A Transports
 
@@ -226,8 +193,8 @@ if err != nil {
 defer a2a.Close()
 ```
 
-gRPC is an A2A transport binding. It does not replace Agent Node's internal
-`runtime_ws` or `runtime_pull` channels.
+gRPC is an A2A transport binding. It does not replace the Agent Node Runtime v2
+transport.
 
 
 ## Core Surface
@@ -263,8 +230,9 @@ go test ./...
 
 Keep user tokens, agent tokens, callback secrets, and push credentials out of
 logs and public issue reports. Use `OPENLINKER_USER_TOKEN` with `NewClient` and
-`OPENLINKER_AGENT_TOKEN` with `NewRuntime`. Verify webhook signatures before
-trusting callback bodies. Report vulnerabilities through [SECURITY.md](./SECURITY.md).
+`OPENLINKER_AGENT_TOKEN` with `NewRuntime`. Protect the Node client key and its
+encrypted spool key separately. Verify webhook signatures before trusting
+callback bodies. Report vulnerabilities through [SECURITY.md](./SECURITY.md).
 
 ## Contributing
 

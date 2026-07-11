@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -140,12 +139,8 @@ func TestClientEndpointAndConstructionValidation(t *testing.T) {
 	if _, err := NewClient("https://example.test", WithAgentToken(" runtime ")); err == nil || !strings.Contains(err.Error(), "NewRuntime") {
 		t.Fatalf("NewClient with agent token err = %v", err)
 	}
-	runtime, err := NewRuntime("https://example.test/root/api/v1", WithRuntimeToken(" runtime "))
-	if err != nil {
+	if _, err := NewRuntime("https://example.test/root/api/v1", WithRuntimeToken(" runtime ")); err != nil {
 		t.Fatal(err)
-	}
-	if got := runtime.runtimeAuthToken(); got != "runtime" {
-		t.Fatalf("runtime token = %q", got)
 	}
 	if _, err := NewRuntime("https://example.test", WithUserToken(" user "), WithAgentToken(" runtime ")); err == nil || !strings.Contains(err.Error(), "user token") {
 		t.Fatalf("NewRuntime with user token err = %v", err)
@@ -163,14 +158,6 @@ func TestClientMethodsPropagateRequestErrors(t *testing.T) {
 	client, err := NewClient(
 		"https://example.test",
 		WithUserToken("ol_user_access"),
-		WithHTTPClient(sdkHTTPClient(http.StatusBadGateway, `{"error":{"code":"BROKEN","message":"bad gateway"}}`)),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	runtime, err := NewRuntime(
-		"https://example.test",
-		WithAgentToken("ol_agent_runtime"),
 		WithHTTPClient(sdkHTTPClient(http.StatusBadGateway, `{"error":{"code":"BROKEN","message":"bad gateway"}}`)),
 	)
 	if err != nil {
@@ -215,22 +202,6 @@ func TestClientMethodsPropagateRequestErrors(t *testing.T) {
 		}},
 		{name: "stream events", call: func() error {
 			return client.StreamRunEvents(ctx, "run", StreamRunEventsOptions{}, func(StreamRunEvent) error { return nil })
-		}},
-		{name: "heartbeat", call: func() error {
-			_, err := runtime.HeartbeatAgent(ctx)
-			return err
-		}},
-		{name: "claim", call: func() error {
-			_, err := runtime.ClaimRuntimeRun(ctx, ClaimRuntimeRunParams{})
-			return err
-		}},
-		{name: "complete", call: func() error {
-			_, err := runtime.CompleteRuntimeRun(ctx, "run", RuntimePullResultRequest{Status: "success"})
-			return err
-		}},
-		{name: "call agent", call: func() error {
-			_, err := runtime.CallAgentAt(ctx, "/agent-runtime/call-agent", CallAgentRequest{CurrentRunID: "run", TargetAgentID: "agent", Input: JSON{"q": "hi"}})
-			return err
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -296,10 +267,6 @@ func TestErrorFallbackRetryAfterAndDecodeFailures(t *testing.T) {
 	if d := retryAfter(headers); d != 0 {
 		t.Fatalf("retryAfter invalid = %v", d)
 	}
-	headers.Set("X-OpenLinker-Max-Claim-Wait-Seconds", "bad")
-	if got := headerInt32(headers, "X-OpenLinker-Max-Claim-Wait-Seconds"); got != 0 {
-		t.Fatalf("headerInt32 invalid = %d", got)
-	}
 }
 
 type sdkRoundTripper func(*http.Request) (*http.Response, error)
@@ -317,47 +284,6 @@ func sdkHTTPClient(status int, body string) *http.Client {
 			Body:       io.NopCloser(strings.NewReader(body)),
 		}, nil
 	})}
-}
-
-func TestRuntimeHTTPAgentTokenNoContentAndDecodeEdges(t *testing.T) {
-	var auths []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		auths = append(auths, r.Header.Get("Authorization"))
-		switch r.URL.Path {
-		case "/api/v1/agent-runtime/heartbeat":
-			w.WriteHeader(http.StatusNoContent)
-		case "/api/v1/agent-runtime/call-agent":
-			w.WriteHeader(http.StatusNoContent)
-		case "/api/v1/agent-runtime/runs/claim":
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("{"))
-		default:
-			t.Fatalf("unexpected path: %s", r.URL.Path)
-		}
-	}))
-	defer server.Close()
-
-	runtime, err := NewRuntime(server.URL, WithAgentToken("ol_agent_access"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if heartbeat, err := runtime.HeartbeatAgent(context.Background()); err != nil || heartbeat.AgentID != "" {
-		t.Fatalf("HeartbeatAgent = %+v err=%v", heartbeat, err)
-	}
-	if child, err := runtime.CallAgent(context.Background(), CallAgentRequest{CurrentRunID: "run-1", TargetAgentID: "agent-2", Input: JSON{"q": "hello"}}); err != nil || child.RunID != "" {
-		t.Fatalf("CallAgent no content = %+v err=%v", child, err)
-	}
-	if _, err := runtime.ClaimRuntimeRunDetailed(context.Background(), ClaimRuntimeRunParams{}); err == nil || !strings.Contains(err.Error(), "decode response") {
-		t.Fatalf("ClaimRuntimeRunDetailed decode err = %v", err)
-	}
-	if len(auths) != 3 {
-		t.Fatalf("auths len = %d", len(auths))
-	}
-	for _, auth := range auths {
-		if auth != "Bearer ol_agent_access" {
-			t.Fatalf("agent runtime auth = %q", auth)
-		}
-	}
 }
 
 func TestReadSSEVariantsAndHandlerErrors(t *testing.T) {
@@ -385,223 +311,5 @@ func TestReadSSEVariantsAndHandlerErrors(t *testing.T) {
 	})
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("handler err = %v", err)
-	}
-}
-
-func TestRuntimeHelpersValidationAndMessageBranches(t *testing.T) {
-	if err := NewRuntimePullConnector(nil).Start(context.Background(), RuntimeHandlers{}); err == nil {
-		t.Fatal("runtime pull without client succeeded")
-	}
-	noTokenClient, err := NewClient("https://example.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := (&RuntimePullConnector{Client: noTokenClient}).Start(context.Background(), RuntimeHandlers{}); err == nil {
-		t.Fatal("runtime pull without token succeeded")
-	}
-	pull := &RuntimePullConnector{Client: noTokenClient}
-	if pull.SupportsLiveEvents() {
-		t.Fatal("runtime pull should not support live events")
-	}
-	if err := pull.SendRunEvent(context.Background(), "run-1", AgentEvent{}); err != nil {
-		t.Fatalf("pull SendRunEvent = %v", err)
-	}
-
-	runtime, err := NewRuntime("http://example.test/base", WithAgentToken("runtime"), WithHeader("X-Extra", "1"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	headers := runtime.runtimeWebSocketHeaders()
-	if headers.Get("Authorization") != "Bearer runtime" || headers.Get("X-Extra") != "1" {
-		t.Fatalf("runtime ws headers = %#v", headers)
-	}
-	if got, err := runtime.webSocketEndpoint("/agent-runtime/ws"); err != nil || got != "ws://example.test/base/api/v1/agent-runtime/ws" {
-		t.Fatalf("webSocketEndpoint http = %q err=%v", got, err)
-	}
-	if got, err := runtime.webSocketEndpoint("wss://agents.example/ws"); err != nil || got != "wss://agents.example/ws" {
-		t.Fatalf("webSocketEndpoint absolute = %q err=%v", got, err)
-	}
-	ftpClient, err := NewClient("ftp://example.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ftpClient.webSocketEndpoint("/ws"); err == nil {
-		t.Fatal("unsupported websocket scheme succeeded")
-	}
-
-	ws := NewRuntimeWSConnector(runtime)
-	if !ws.SupportsLiveEvents() {
-		t.Fatal("runtime ws should support live events")
-	}
-	if err := NewRuntimeWSConnector(nil).Start(context.Background(), RuntimeHandlers{}); err == nil {
-		t.Fatal("runtime ws without client succeeded")
-	}
-	if err := (&RuntimeWSConnector{Client: noTokenClient}).Start(context.Background(), RuntimeHandlers{}); err == nil {
-		t.Fatal("runtime ws without token succeeded")
-	}
-	if err := ws.SendRunEvent(context.Background(), "run-1", AgentEvent{}); err == nil {
-		t.Fatal("send without websocket succeeded")
-	}
-	if err := ws.CompleteRun(context.Background(), "run-1", RuntimePullResultRequest{}); err == nil {
-		t.Fatal("complete without websocket succeeded")
-	}
-
-	var readyCount, assignedCount, messageCount, errorCount int32
-	ws.handlers = RuntimeHandlers{
-		OnReady: func(message RuntimeWSServerMessage) {
-			atomic.AddInt32(&readyCount, 1)
-		},
-		OnAssigned: func(assignment RuntimeAssignment) {
-			if assignment.RunID != "run-1" {
-				t.Fatalf("assignment = %+v", assignment)
-			}
-			atomic.AddInt32(&assignedCount, 1)
-		},
-		OnMessage: func(message RuntimeWSServerMessage) {
-			atomic.AddInt32(&messageCount, 1)
-		},
-		OnError: func(err error) {
-			atomic.AddInt32(&errorCount, 1)
-		},
-	}
-	ws.handleMessage([]byte(`{"type":"runtime.ready","agent_id":"agent-1"}`))
-	ws.handleMessage([]byte(`{"type":"run.assigned","run_id":"run-1","agent_id":"agent-1","a2a":{"current_run_id":"run-1"}}`))
-	ws.handleMessage([]byte(`{"type":"error","error":{"code":"BAD","message":"bad message"}}`))
-	ws.handleMessage([]byte(`{"type":"error","error":{"message":"message only"}}`))
-	ws.handleMessage([]byte(`{"type":"error"}`))
-	ws.handleMessage([]byte(`{"type":"noop"}`))
-	ws.handleMessage([]byte(`not-json`))
-
-	if readyCount != 1 || assignedCount != 1 || messageCount != 6 || errorCount != 5 {
-		t.Fatalf("counts ready=%d assigned=%d message=%d error=%d", readyCount, assignedCount, messageCount, errorCount)
-	}
-	if assignment := RuntimeAssignmentFromPullRun(nil); assignment.RunID != "" {
-		t.Fatalf("nil pull assignment = %+v", assignment)
-	}
-	if got := retryAfterFromClaimResult(&ClaimRuntimeRunResult{RetryAfter: 3 * time.Second}, time.Second); got != 3*time.Second {
-		t.Fatalf("retryAfterFromClaimResult = %v", got)
-	}
-	if got := retryAfterFromError(&Error{RetryAfter: 4 * time.Second}, time.Second); got != 4*time.Second {
-		t.Fatalf("retryAfterFromError = %v", got)
-	}
-}
-
-func TestRuntimePullConnectorRetriesRateLimitBeforeAssignment(t *testing.T) {
-	var claims int32
-	assignedCh := make(chan RuntimeAssignment, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent-runtime/heartbeat":
-			writeJSON(t, w, AgentHeartbeatResponse{AgentID: "agent-1"})
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/agent-runtime/runs/claim":
-			if atomic.AddInt32(&claims, 1) == 1 {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusTooManyRequests)
-				_, _ = w.Write([]byte(`{"error":{"code":"RATE_LIMITED","message":"retry later"}}`))
-				return
-			}
-			writeJSON(t, w, RuntimePullRunResponse{RunID: "run-after-retry", AgentID: "agent-1", Source: "api"})
-		default:
-			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
-		}
-	}))
-	defer server.Close()
-
-	client, err := NewRuntime(server.URL, WithAgentToken("ol_agent_retry"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	connector := NewRuntimePullConnector(client)
-	connector.Wait = time.Millisecond
-	connector.Heartbeat = time.Millisecond
-	connector.EmptyRetry = time.Millisecond
-	connector.MaxRuns = 1
-	if err := connector.Start(context.Background(), RuntimeHandlers{
-		OnAssigned: func(assignment RuntimeAssignment) {
-			assignedCh <- assignment
-		},
-		OnError: func(err error) {
-			t.Errorf("unexpected runtime pull error: %v", err)
-		},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	defer connector.Stop(context.Background())
-
-	select {
-	case assignment := <-assignedCh:
-		if assignment.RunID != "run-after-retry" {
-			t.Fatalf("assignment = %+v", assignment)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for assignment after retry")
-	}
-	if atomic.LoadInt32(&claims) < 2 {
-		t.Fatalf("claims = %d", claims)
-	}
-}
-
-func TestRuntimePullConnectorReportsClaimErrorsThenStopsOnEmpty(t *testing.T) {
-	var claims int32
-	errCh := make(chan error, 2)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent-runtime/heartbeat":
-			writeJSON(t, w, AgentHeartbeatResponse{AgentID: "agent-1"})
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/agent-runtime/runs/claim":
-			if atomic.AddInt32(&claims, 1) == 1 {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				_, _ = w.Write([]byte(`{"error":{"code":"BROKEN","message":"claim failed"}}`))
-				return
-			}
-			w.WriteHeader(http.StatusNoContent)
-		default:
-			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
-		}
-	}))
-	defer server.Close()
-
-	client, err := NewRuntime(server.URL, WithAgentToken("ol_agent_claim_error"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	connector := NewRuntimePullConnector(client)
-	connector.Wait = time.Millisecond
-	connector.Heartbeat = time.Millisecond
-	connector.EmptyRetry = time.Millisecond
-	connector.StopOnEmpty = true
-	if err := connector.Start(context.Background(), RuntimeHandlers{
-		OnAssigned: func(assignment RuntimeAssignment) {
-			t.Errorf("unexpected assignment: %+v", assignment)
-		},
-		OnError: func(err error) {
-			errCh <- err
-		},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	defer connector.Stop(context.Background())
-
-	select {
-	case err := <-errCh:
-		if !strings.Contains(err.Error(), "runtime pull claim returned 500") || !strings.Contains(err.Error(), "claim failed") {
-			t.Fatalf("claim error = %v", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for claim error")
-	}
-
-	deadline := time.Now().Add(2 * time.Second)
-	for atomic.LoadInt32(&claims) < 2 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	stopCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if err := connector.Stop(stopCtx); err != nil {
-		t.Fatal(err)
-	}
-	if atomic.LoadInt32(&claims) < 2 {
-		t.Fatalf("claims = %d", claims)
 	}
 }

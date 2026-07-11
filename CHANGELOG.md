@@ -17,6 +17,13 @@ runtime connector, callback, and A2A contracts are declared stable.
   now expose `Items` and typed retention metadata; the legacy `Events` field
   has been removed.
 
+### Removed
+
+- Breaking: removed the pre-v2 heartbeat, pull claim/result, unversioned
+  delegated-call API, in-memory pull/WebSocket connectors, Native runners,
+  Blades wrapper, and legacy runtime examples. `Runtime` now exposes strict v2
+  primitives only; reliable process execution belongs in Agent Node.
+
 ### Documentation
 
 - Split Chinese documentation into dedicated `*.zh-CN.md` files and kept the

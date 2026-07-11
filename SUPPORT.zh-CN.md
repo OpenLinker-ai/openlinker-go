@@ -7,7 +7,7 @@ English documentation: [SUPPORT.md](./SUPPORT.md)
 ## 适合提交 Issue 的内容
 
 - 支持的 Core endpoint 类型化 client 行为
-- runtime pull 或 WebSocket connector 行为
+- 严格的 Runtime v2 协议与 HTTP 行为
 - callback 签名或校验行为
 - A2A JSON-RPC、HTTP+JSON、SSE 或 gRPC client 行为
 - 本 SDK 与 `openlinker-core` 的契约不一致

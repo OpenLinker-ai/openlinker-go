@@ -3,7 +3,7 @@
 Chinese documentation: [CONTRIBUTING.zh-CN.md](./CONTRIBUTING.zh-CN.md)
 
 Thanks for helping improve `openlinker-go`, the Go SDK for OpenLinker Core
-APIs, runtime connectors, callbacks, and A2A transports.
+APIs, Runtime v2 primitives, callbacks, and A2A transports.
 
 ## Development Setup
 
@@ -19,7 +19,7 @@ agent tokens, callback secrets, private endpoints, or captured customer data.
 Allowed here:
 
 - typed wrappers for open-source Core API surfaces
-- runtime pull/WebSocket connector helpers
+- strict Runtime v2 protocol types and HTTP primitives
 - callback construction and signature verification helpers
 - A2A JSON-RPC, HTTP+JSON, SSE, and gRPC client behavior
 - contract tests and generated protobuf artifacts used by this SDK
@@ -34,12 +34,11 @@ Out of scope:
 ## Pull Request Expectations
 
 - Keep exported API changes small and documented.
-- Add or update tests for client behavior, callbacks, runtime connectors, or
+- Add or update tests for client behavior, callbacks, Runtime v2, or
   A2A transports.
 - Keep generated protobuf files aligned with `proto/`.
 - Update `README.md` and `CHANGELOG.md` for public behavior changes.
-- Preserve backwards compatibility unless the change is clearly documented as
-  pre-1.0 breaking behavior.
+- Document breaking pre-1.0 behavior explicitly.
 
 ## Checks
 

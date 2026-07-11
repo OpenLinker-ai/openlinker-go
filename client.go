@@ -316,97 +316,8 @@ func (c *Client) streamPlatformCallbacks(ctx context.Context, runID string, opts
 	return terminal, nil
 }
 
-func (c *Client) HeartbeatAgent(ctx context.Context) (*AgentHeartbeatResponse, error) {
-	var out AgentHeartbeatResponse
-	if err := c.doRuntime(ctx, http.MethodPost, "/agent-runtime/heartbeat", nil, nil, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-func (c *Client) ClaimRuntimeRun(ctx context.Context, params ClaimRuntimeRunParams) (*RuntimePullRunResponse, error) {
-	result, err := c.ClaimRuntimeRunDetailed(ctx, params)
-	if err != nil || result == nil {
-		return nil, err
-	}
-	return result.Run, nil
-}
-
-type ClaimRuntimeRunResult struct {
-	Run                 *RuntimePullRunResponse
-	RetryAfter          time.Duration
-	MaxClaimWaitSeconds int32
-}
-
-func (c *Client) ClaimRuntimeRunDetailed(ctx context.Context, params ClaimRuntimeRunParams) (*ClaimRuntimeRunResult, error) {
-	query := make(url.Values)
-	setQueryInt32(query, "wait", params.WaitSeconds)
-
-	resp, err := c.newRuntimeRequest(ctx, http.MethodGet, "/agent-runtime/runs/claim", query, nil, "application/json")
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNoContent {
-		return &ClaimRuntimeRunResult{
-			RetryAfter:          retryAfter(resp.Header),
-			MaxClaimWaitSeconds: headerInt32(resp.Header, "X-OpenLinker-Max-Claim-Wait-Seconds"),
-		}, nil
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, parseError(resp)
-	}
-	var out RuntimePullRunResponse
-	if err := decodeJSONResponse(resp.Body, &out); err != nil {
-		return nil, fmt.Errorf("openlinker: decode response: %w", err)
-	}
-	return &ClaimRuntimeRunResult{Run: &out}, nil
-}
-
-func (c *Client) CompleteRuntimeRun(ctx context.Context, runID string, result RuntimePullResultRequest) (*RunResponse, error) {
-	var out RunResponse
-	path := "/agent-runtime/runs/" + url.PathEscape(runID) + "/result"
-	if err := c.doRuntime(ctx, http.MethodPost, path, nil, result, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-func (c *Client) CallAgent(ctx context.Context, req CallAgentRequest) (*RunResponse, error) {
-	return c.CallAgentAt(ctx, "", req)
-}
-
-func (c *Client) CallAgentAt(ctx context.Context, endpoint string, req CallAgentRequest) (*RunResponse, error) {
-	var out RunResponse
-	if strings.TrimSpace(endpoint) == "" {
-		endpoint = "/agent-runtime/call-agent"
-	}
-	if err := c.doRuntime(ctx, http.MethodPost, endpoint, nil, req, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 func (c *Client) do(ctx context.Context, method, path string, query url.Values, body any, out any) error {
 	resp, err := c.newRequest(ctx, method, path, query, body, "application/json")
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return parseError(resp)
-	}
-	if resp.StatusCode == http.StatusNoContent || out == nil {
-		return nil
-	}
-	if err := decodeJSONResponse(resp.Body, out); err != nil {
-		return fmt.Errorf("openlinker: decode response: %w", err)
-	}
-	return nil
-}
-
-func (c *Client) doRuntime(ctx context.Context, method, path string, query url.Values, body any, out any) error {
-	resp, err := c.newRuntimeRequest(ctx, method, path, query, body, "application/json")
 	if err != nil {
 		return err
 	}
@@ -628,18 +539,6 @@ func retryAfter(headers http.Header) time.Duration {
 		}
 	}
 	return 0
-}
-
-func headerInt32(headers http.Header, name string) int32 {
-	value := headers.Get(name)
-	if value == "" {
-		return 0
-	}
-	parsed, err := strconv.ParseInt(value, 10, 32)
-	if err != nil || parsed <= 0 {
-		return 0
-	}
-	return int32(parsed)
 }
 
 func readSSE(reader io.Reader, handle func(StreamRunEvent) error) error {

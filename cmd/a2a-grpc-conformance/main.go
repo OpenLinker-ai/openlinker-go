@@ -149,7 +149,7 @@ func main() {
 
 	cancelClient := newClient(ctx, cfg.GRPCEndpoint, cfg.CancelableSlug, cfg.Token)
 	defer cancelClient.Close()
-	cancelableTask, err := cancelClient.SendMessage(ctx, messageParams(cfg.Suffix, "grpc-cancel", "用 gRPC 启动 runtime_pull 任务并取消", true))
+	cancelableTask, err := cancelClient.SendMessage(ctx, messageParams(cfg.Suffix, "grpc-cancel", "用 gRPC 启动私有 Agent 任务并取消", true))
 	must(err, "SendMessage cancelable task")
 	assert(cancelableTask.ID != "", "gRPC cancelable task id is empty")
 	assert(cancelableTask.Status.State == "working", "gRPC cancelable task initial state = %q", cancelableTask.Status.State)
