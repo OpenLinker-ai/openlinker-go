@@ -167,13 +167,8 @@ func TestRuntimeV2ContractMatchesExportedConstants(t *testing.T) {
 		}
 	}
 
-	if len(contract.LegacyRoutes) != 5 {
-		t.Fatalf("legacy routes = %d, want 5", len(contract.LegacyRoutes))
-	}
-	for _, route := range contract.LegacyRoutes {
-		if route.ResponseStatus != 426 || route.ErrorCode != "RUNTIME_CLIENT_UPGRADE_REQUIRED" {
-			t.Fatalf("invalid legacy route response: %#v", route)
-		}
+	if len(contract.LegacyRoutes) != 0 {
+		t.Fatalf("runtime v1 routes must be absent, got %d", len(contract.LegacyRoutes))
 	}
 	if len(contract.StableErrorCodes) == 0 {
 		t.Fatal("runtime contract has no stable error codes")
