@@ -52,10 +52,6 @@ func WithAgentToken(token string) Option {
 	}
 }
 
-func WithRuntimeToken(token string) Option {
-	return WithAgentToken(token)
-}
-
 func WithSDKAgent(agent string) Option {
 	return func(c *Client) {
 		if strings.TrimSpace(agent) != "" {

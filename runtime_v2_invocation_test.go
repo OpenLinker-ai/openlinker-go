@@ -119,7 +119,7 @@ func TestCallRuntimeV2AgentSignsAndSendsTheSameBody(t *testing.T) {
 
 	runtimeClient, err := NewRuntime(
 		server.URL,
-		WithRuntimeToken("long-lived-agent-token"),
+		WithAgentToken("long-lived-agent-token"),
 		WithHeader("Authorization", "Bearer caller-default-must-not-win"),
 		WithHeader("Idempotency-Key", "caller-default-must-not-win"),
 		WithHeader(runtimeV2InvocationHeader, "caller-default-must-not-win"),
@@ -156,7 +156,7 @@ func TestCallRuntimeV2AgentRejectsInvalidAuthorityAndSummary(t *testing.T) {
 		})
 	}))
 	defer server.Close()
-	runtimeClient, err := NewRuntime(server.URL, WithRuntimeToken("long-lived-agent-token"))
+	runtimeClient, err := NewRuntime(server.URL, WithAgentToken("long-lived-agent-token"))
 	if err != nil {
 		t.Fatal(err)
 	}

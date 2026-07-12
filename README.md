@@ -162,6 +162,19 @@ verified Node certificate, and the Agent Token bound to that Agent. Both
 transports use the same session, lease, fencing, resume, Event ACK, Result ACK,
 and cancellation semantics. There is no v1 fallback.
 
+Create a Runtime v2 client with the Agent Token explicitly:
+
+```go
+runtimeClient, err := openlinker.NewRuntime(
+	"https://core-runtime.example.com",
+	openlinker.WithHTTPClient(mtlsClient),
+	openlinker.WithAgentToken(os.Getenv("OPENLINKER_AGENT_TOKEN")),
+)
+```
+
+`WithAgentToken` is the only Agent credential option. The retired Runtime Token
+name is not accepted as an alias.
+
 `DialRuntimeV2WebSocket` authenticates the upgrade, sends `runtime.hello`, and
 returns only after a correlated `runtime.ready`. The connection has one writer,
 strict 4 MiB envelope decoding, typed assignment/command pushes, correlated

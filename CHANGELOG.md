@@ -29,6 +29,8 @@ runtime connector, callback, and A2A contracts are declared stable.
 
 ### Removed
 
+- Breaking: removed the `WithRuntimeToken` compatibility alias. Runtime v2
+  clients now accept Agent credentials only through `WithAgentToken`.
 - Breaking: removed the pre-v2 heartbeat, pull claim/result, unversioned
   delegated-call API, v1 pull/WebSocket connectors, Native runners,
   Blades wrapper, and legacy runtime examples. `Runtime` now exposes strict v2

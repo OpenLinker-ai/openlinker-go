@@ -66,7 +66,7 @@ func TestRuntimeV2CommandsAndCancelAck(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runtimeClient, err := NewRuntime(server.URL, WithRuntimeToken("ol_agent_v2"))
+	runtimeClient, err := NewRuntime(server.URL, WithAgentToken("ol_agent_v2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestRuntimeV2ResponseIdentityAndCommandValidation(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	runtimeClient, err := NewRuntime(server.URL, WithRuntimeToken("ol_agent_v2"))
+	runtimeClient, err := NewRuntime(server.URL, WithAgentToken("ol_agent_v2"))
 	if err != nil {
 		t.Fatal(err)
 	}

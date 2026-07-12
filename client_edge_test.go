@@ -139,7 +139,7 @@ func TestClientEndpointAndConstructionValidation(t *testing.T) {
 	if _, err := NewClient("https://example.test", WithAgentToken(" runtime ")); err == nil || !strings.Contains(err.Error(), "NewRuntime") {
 		t.Fatalf("NewClient with agent token err = %v", err)
 	}
-	if _, err := NewRuntime("https://example.test/root/api/v1", WithRuntimeToken(" runtime ")); err != nil {
+	if _, err := NewRuntime("https://example.test/root/api/v1", WithAgentToken(" runtime ")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := NewRuntime("https://example.test", WithUserToken(" user "), WithAgentToken(" runtime ")); err == nil || !strings.Contains(err.Error(), "user token") {

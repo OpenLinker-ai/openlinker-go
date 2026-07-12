@@ -82,7 +82,7 @@ func TestRuntimeV2HTTPFlowRequiresExplicitAssignmentConfirmation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	runtimeClient, err := NewRuntime(server.URL, WithRuntimeToken("ol_agent_v2"))
+	runtimeClient, err := NewRuntime(server.URL, WithAgentToken("ol_agent_v2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestRuntimeV2HTTPRejectsUnknownResponseAndUnstableIDs(t *testing.T) {
 		_, _ = w.Write([]byte(`{"core_instance_id":"` + runtimeV2TestCoreID + `","features":["lease_fence","assignment_confirm","renew","resume","event_ack","result_ack","cancel","persistent_spool"],"offer_ttl_seconds":30,"lease_ttl_seconds":60,"database_time":"2026-07-11T00:00:00Z","unexpected":true}`))
 	}))
 	defer server.Close()
-	runtimeClient, err := NewRuntime(server.URL, WithRuntimeToken("ol_agent_v2"))
+	runtimeClient, err := NewRuntime(server.URL, WithAgentToken("ol_agent_v2"))
 	if err != nil {
 		t.Fatal(err)
 	}
