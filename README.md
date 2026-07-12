@@ -35,7 +35,7 @@ flowchart LR
   ClientSDK -->|"REST client with OPENLINKER_USER_TOKEN"| Core["openlinker-core<br/>registry / runs / events"]
   ClientSDK -->|"A2A JSON-RPC / HTTP+JSON / gRPC"| Core
   AgentNode["openlinker-agent-node"] --> RuntimeSDK["openlinker-go Runtime v2"]
-  RuntimeSDK -->|"mTLS + Agent Token / session / lease / event / result"| Core
+  RuntimeSDK -->|"mTLS + Agent Token / v2 WebSocket or v2 HTTP pull"| Core
 
   HostedBridge["Hosted Bridge<br/>optional deployment adapter"] -.->|"same Core API contract"| Core
 
@@ -155,24 +155,37 @@ _ = body
 
 ## Runtime v2
 
-`NewRuntime` exposes strict Runtime v2 HTTP primitives. Runtime traffic must use
-the dedicated mTLS Core origin, a verified Node certificate, and the Agent
-Token bound to that Agent. The SDK deliberately does not contain a process
-runner or an in-memory connector.
+`NewRuntime` exposes the two strict Runtime v2 transports: WebSocket for the
+normal low-latency path and HTTP long-poll for networks that cannot keep a
+WebSocket alive. Runtime traffic must use the dedicated mTLS Core origin, a
+verified Node certificate, and the Agent Token bound to that Agent. Both
+transports use the same session, lease, fencing, resume, Event ACK, Result ACK,
+and cancellation semantics. There is no v1 fallback.
+
+`DialRuntimeV2WebSocket` authenticates the upgrade, sends `runtime.hello`, and
+returns only after a correlated `runtime.ready`. The connection has one writer,
+strict 4 MiB envelope decoding, typed assignment/command pushes, correlated
+business ACK waits, multi-message resume, and explicit close-code reporting.
+It also implements the same Runtime v2 method surface as the HTTP client, so a
+durable worker can switch transports without changing execution logic.
 
 Use `openlinker-agent-node` for real workers. It owns durable identity, the
 assignment journal, encrypted Event/Result spooling, lease renewal, resume,
 cancellation, and graceful drain. Custom Node implementations can build on:
 
-- `CreateRuntimeV2Session`, heartbeat, close, claim, explicit assignment ACK,
-  reject, and lease renewal
+- `DialRuntimeV2WebSocket`, typed assignment/command channels, correlated ACKs,
+  lease renewal, Event/Result submission, resume, and cancellation ACK
+- HTTP `CreateRuntimeV2Session`, heartbeat, close, long-poll claim, explicit
+  assignment ACK/reject, command poll, and lease renewal
 - durable Event and Result submission with caller-supplied stable IDs
 - resume and explicit-session cancellation command polling/acknowledgement
 - assignment-scoped delegated calls with exact-body invocation proofs
 
-Supply an `http.Client` configured with the Node certificate and the Runtime
-server CA through `WithHTTPClient`. `NewRuntime` validates Agent Token separation;
-TLS credential loading and durable state remain the Node's responsibility.
+Supply an `http.Client` backed by `*http.Transport` and configured with the Node
+certificate and Runtime server CA through `WithHTTPClient`. The SDK reuses that
+transport's mTLS settings for `wss://`. `NewRuntime` validates Agent Token
+separation; TLS credential loading and durable state remain the Node's
+responsibility.
 
 ## A2A Transports
 

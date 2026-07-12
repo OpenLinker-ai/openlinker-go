@@ -7,6 +7,16 @@ runtime connector, callback, and A2A contracts are declared stable.
 
 ## Unreleased
 
+### Added
+
+- Added a strict Runtime v2 WebSocket client that reuses the configured mTLS
+  transport and Agent Token, performs `runtime.hello` / `runtime.ready`, uses a
+  single writer, enforces the 4 MiB envelope limit, correlates business ACKs by
+  `reply_to_message_id`, supports multi-message resume, and exposes typed
+  assignment, cancellation, drain, and lease-revocation pushes.
+- Added an authenticated WebSocket reachability probe for durable workers that
+  use v2 HTTP long-poll as a restricted-network fallback.
+
 ### Changed
 
 - Made Core run creation idempotent by sending `Idempotency-Key` from
@@ -20,7 +30,7 @@ runtime connector, callback, and A2A contracts are declared stable.
 ### Removed
 
 - Breaking: removed the pre-v2 heartbeat, pull claim/result, unversioned
-  delegated-call API, in-memory pull/WebSocket connectors, Native runners,
+  delegated-call API, v1 pull/WebSocket connectors, Native runners,
   Blades wrapper, and legacy runtime examples. `Runtime` now exposes strict v2
   primitives only; reliable process execution belongs in Agent Node.
 
