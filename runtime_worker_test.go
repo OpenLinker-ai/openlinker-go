@@ -585,6 +585,10 @@ func TestDelegatedAgentCallRequiresExplicitIntentKey(t *testing.T) {
 			t.Fatalf("delegated call with key %q: %v", key, err)
 		}
 	}
+	attempt.finished.Store(true)
+	if _, err := node.callAgentForAttempt(context.Background(), attempt, testTargetAgentID, body, RuntimeCallOptions{IdempotencyKey: "after-handler"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("post-handler delegated call error = %v, want context.Canceled", err)
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	if strings.Join(keys, ",") != "intent-a,intent-b,intent-a" {

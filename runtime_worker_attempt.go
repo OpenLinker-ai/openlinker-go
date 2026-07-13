@@ -118,6 +118,7 @@ func (node *RuntimeWorker) executeAttempt(attempt *activeRuntimeAttempt) {
 		node.persistAttemptFailure(attempt, startedAt, "ATTEMPT_DEADLINE_EXCEEDED", "Attempt deadline elapsed before handler execution")
 		return
 	}
+	handlerCtx, stopHandler := context.WithCancel(attempt.ctx)
 	runCtx := RuntimeContext{
 		RunID:    attempt.identity.RunID,
 		AgentID:  attempt.identity.AgentID,
@@ -138,7 +139,19 @@ func (node *RuntimeWorker) executeAttempt(attempt *activeRuntimeAttempt) {
 		return nil
 	}
 	runCtx.callAgent = func(ctx context.Context, targetAgentID string, input any, options RuntimeCallOptions) (any, error) {
-		return node.callAgentForAttempt(ctx, attempt, targetAgentID, input, options)
+		if attempt.finished.Load() || attempt.canceled.Load() || handlerCtx.Err() != nil {
+			return nil, context.Canceled
+		}
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		callCtx, cancelCall := context.WithCancel(ctx)
+		stopCall := context.AfterFunc(handlerCtx, cancelCall)
+		defer func() {
+			stopCall()
+			cancelCall()
+		}()
+		return node.callAgentForAttempt(callCtx, attempt, targetAgentID, input, options)
 	}
 
 	result := RuntimeResult{Status: "success"}
@@ -149,7 +162,7 @@ func (node *RuntimeWorker) executeAttempt(attempt *activeRuntimeAttempt) {
 				result.Error = &RuntimeHandlerError{Code: "HANDLER_PANIC", Message: "runtime handler panicked"}
 			}
 		}()
-		raw, err := node.Handler.Handle(attempt.ctx, runCtx)
+		raw, err := node.Handler.Handle(handlerCtx, runCtx)
 		if err != nil {
 			result.Status = "failed"
 			result.Error = normalizeHandlerError(err)
@@ -163,6 +176,7 @@ func (node *RuntimeWorker) executeAttempt(attempt *activeRuntimeAttempt) {
 	}()
 
 	attempt.finished.Store(true)
+	stopHandler()
 	if attempt.canceled.Load() {
 		return
 	}
@@ -292,6 +306,12 @@ func (node *RuntimeWorker) callAgentForAttempt(
 	input any,
 	options RuntimeCallOptions,
 ) (any, error) {
+	if attempt.finished.Load() || attempt.canceled.Load() || attempt.ctx.Err() != nil {
+		return nil, context.Canceled
+	}
+	if caller == nil {
+		caller = context.Background()
+	}
 	inputMap, err := runtimeObject(input)
 	if err != nil {
 		return nil, err
@@ -309,6 +329,9 @@ func (node *RuntimeWorker) callAgentForAttempt(
 	idempotencyKey := options.IdempotencyKey
 	if err := validateDelegatedIdempotencyKey(idempotencyKey); err != nil {
 		return nil, err
+	}
+	if attempt.finished.Load() || attempt.canceled.Load() || attempt.ctx.Err() != nil {
+		return nil, context.Canceled
 	}
 	callCtx, cancel := context.WithCancel(caller)
 	stop := context.AfterFunc(attempt.ctx, cancel)
