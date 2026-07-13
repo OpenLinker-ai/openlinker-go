@@ -66,8 +66,8 @@ func TestCoreClientV1ContractMapsToImplementedMethods(t *testing.T) {
 	}
 }
 
-func TestRuntimeV2ContractMatchesExportedConstants(t *testing.T) {
-	raw := readContractFile(t, "contracts/core-runtime.v2.json")
+func TestRuntimeContractMatchesExportedConstants(t *testing.T) {
+	raw := readContractFile(t, "contracts/core-runtime.json")
 	type runtimeEndpointContract struct {
 		ClientMethod      string `json:"client_method"`
 		Method            string `json:"http_method"`

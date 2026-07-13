@@ -10,19 +10,19 @@ import (
 	"testing"
 )
 
-const runtimeV2TestTargetAgentID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+const runtimeTestTargetAgentID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 
-func TestBuildRuntimeV2InvocationProofMatchesCoreVector(t *testing.T) {
+func TestBuildRuntimeInvocationProofMatchesCoreVector(t *testing.T) {
 	t.Parallel()
 
-	request := RuntimeV2InvocationProofRequest{
+	request := RuntimeInvocationProofRequest{
 		Method:         http.MethodPost,
-		Path:           runtimeV2CallAgentPath,
+		Path:           runtimeCallAgentPath,
 		IdempotencyKey: "delegation-42<&",
 		Context:        "ol_ctx_v2.current.payload.signature",
 		Body:           []byte(`{"target_agent_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","input":{"q":"hello"},"reason":"need data"}`),
 	}
-	proof, err := BuildRuntimeV2InvocationProof("ol_inv_v2.current.payload.signature", request)
+	proof, err := BuildRuntimeInvocationProof("ol_inv_v2.current.payload.signature", request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,17 +33,17 @@ func TestBuildRuntimeV2InvocationProofMatchesCoreVector(t *testing.T) {
 		t.Fatalf("proof = %q, want %q", proof, want)
 	}
 
-	mutations := []func(*RuntimeV2InvocationProofRequest){
-		func(value *RuntimeV2InvocationProofRequest) { value.Body = append(value.Body, ' ') },
-		func(value *RuntimeV2InvocationProofRequest) { value.IdempotencyKey += "-other" },
-		func(value *RuntimeV2InvocationProofRequest) { value.Context += "x" },
-		func(value *RuntimeV2InvocationProofRequest) { value.Path += "/other" },
+	mutations := []func(*RuntimeInvocationProofRequest){
+		func(value *RuntimeInvocationProofRequest) { value.Body = append(value.Body, ' ') },
+		func(value *RuntimeInvocationProofRequest) { value.IdempotencyKey += "-other" },
+		func(value *RuntimeInvocationProofRequest) { value.Context += "x" },
+		func(value *RuntimeInvocationProofRequest) { value.Path += "/other" },
 	}
 	for index, mutate := range mutations {
 		changed := request
 		changed.Body = append([]byte(nil), request.Body...)
 		mutate(&changed)
-		got, buildErr := BuildRuntimeV2InvocationProof("ol_inv_v2.current.payload.signature", changed)
+		got, buildErr := BuildRuntimeInvocationProof("ol_inv_v2.current.payload.signature", changed)
 		if buildErr != nil {
 			t.Fatalf("mutation %d: %v", index, buildErr)
 		}
@@ -51,7 +51,7 @@ func TestBuildRuntimeV2InvocationProofMatchesCoreVector(t *testing.T) {
 			t.Fatalf("mutation %d did not change proof", index)
 		}
 	}
-	otherTokenProof, err := BuildRuntimeV2InvocationProof("ol_inv_v2.other.payload.signature", request)
+	otherTokenProof, err := BuildRuntimeInvocationProof("ol_inv_v2.other.payload.signature", request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,17 +60,17 @@ func TestBuildRuntimeV2InvocationProofMatchesCoreVector(t *testing.T) {
 	}
 }
 
-func TestCallRuntimeV2AgentSignsAndSendsTheSameBody(t *testing.T) {
+func TestCallRuntimeAgentSignsAndSendsTheSameBody(t *testing.T) {
 	t.Parallel()
 
-	authorization := RuntimeV2CallAgentAuthorization{
+	authorization := RuntimeCallAgentAuthorization{
 		NodeEnvelope:         "ol_ctx_v2.current.payload.signature",
 		AgentInvocationToken: "ol_inv_v2.current.payload.signature",
 		IdempotencyKey:       "delegation-42",
 	}
-	changingValue := &runtimeV2ChangingJSON{}
-	request := RuntimeV2CallAgentRequest{
-		TargetAgentID: runtimeV2TestTargetAgentID,
+	changingValue := &runtimeChangingJSON{}
+	request := RuntimeCallAgentRequest{
+		TargetAgentID: runtimeTestTargetAgentID,
 		Input:         map[string]any{"q": "hello", "nonce": changingValue},
 		Metadata:      map[string]any{"trace": "sdk"},
 		Reason:        "need data",
@@ -78,7 +78,7 @@ func TestCallRuntimeV2AgentSignsAndSendsTheSameBody(t *testing.T) {
 	expectedBody := []byte(`{"target_agent_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","input":{"nonce":{"value":1},"q":"hello"},"metadata":{"trace":"sdk"},"reason":"need data"}`)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Method != http.MethodPost || req.URL.EscapedPath() != runtimeV2CallAgentPath {
+		if req.Method != http.MethodPost || req.URL.EscapedPath() != runtimeCallAgentPath {
 			t.Errorf("request = %s %s", req.Method, req.URL.EscapedPath())
 		}
 		if got := req.Header.Values("Authorization"); len(got) != 1 || got[0] != "Bearer "+authorization.AgentInvocationToken {
@@ -87,7 +87,7 @@ func TestCallRuntimeV2AgentSignsAndSendsTheSameBody(t *testing.T) {
 		if got := req.Header.Get("Idempotency-Key"); got != authorization.IdempotencyKey {
 			t.Errorf("Idempotency-Key = %q", got)
 		}
-		if got := req.Header.Get(runtimeV2InvocationHeader); got != authorization.NodeEnvelope {
+		if got := req.Header.Get(runtimeInvocationHeader); got != authorization.NodeEnvelope {
 			t.Errorf("context = %q", got)
 		}
 		body, readErr := io.ReadAll(req.Body)
@@ -100,19 +100,19 @@ func TestCallRuntimeV2AgentSignsAndSendsTheSameBody(t *testing.T) {
 		if calls := changingValue.calls.Load(); calls != 1 {
 			t.Errorf("request body marshaled %d times", calls)
 		}
-		wantProof, buildErr := BuildRuntimeV2InvocationProof(authorization.AgentInvocationToken, RuntimeV2InvocationProofRequest{
+		wantProof, buildErr := BuildRuntimeInvocationProof(authorization.AgentInvocationToken, RuntimeInvocationProofRequest{
 			Method: req.Method, Path: req.URL.EscapedPath(), IdempotencyKey: req.Header.Get("Idempotency-Key"),
-			Context: req.Header.Get(runtimeV2InvocationHeader), Body: body,
+			Context: req.Header.Get(runtimeInvocationHeader), Body: body,
 		})
 		if buildErr != nil {
 			t.Fatal(buildErr)
 		}
-		if got := req.Header.Get(runtimeV2InvocationProofHeader); got != wantProof {
+		if got := req.Header.Get(runtimeInvocationProofHeader); got != wantProof {
 			t.Errorf("proof = %q, want %q", got, wantProof)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		writeRuntimeV2TestJSON(t, w, RuntimeV2RunSummary{
-			RunID: runtimeV2TestRunID, Status: RuntimeV2RunRunning, DispatchState: RuntimeV2DispatchPending,
+		writeRuntimeTestJSON(t, w, RuntimeRunSummary{
+			RunID: runtimeTestRunID, Status: RuntimeRunRunning, DispatchState: RuntimeDispatchPending,
 		})
 	}))
 	defer server.Close()
@@ -122,37 +122,37 @@ func TestCallRuntimeV2AgentSignsAndSendsTheSameBody(t *testing.T) {
 		WithAgentToken("long-lived-agent-token"),
 		WithHeader("Authorization", "Bearer caller-default-must-not-win"),
 		WithHeader("Idempotency-Key", "caller-default-must-not-win"),
-		WithHeader(runtimeV2InvocationHeader, "caller-default-must-not-win"),
+		WithHeader(runtimeInvocationHeader, "caller-default-must-not-win"),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	summary, err := runtimeClient.CallRuntimeV2Agent(context.Background(), authorization, request)
+	summary, err := runtimeClient.CallRuntimeAgent(context.Background(), authorization, request)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary.RunID != runtimeV2TestRunID || summary.Status != RuntimeV2RunRunning || summary.DispatchState != RuntimeV2DispatchPending {
+	if summary.RunID != runtimeTestRunID || summary.Status != RuntimeRunRunning || summary.DispatchState != RuntimeDispatchPending {
 		t.Fatalf("summary = %#v", summary)
 	}
 }
 
-type runtimeV2ChangingJSON struct {
+type runtimeChangingJSON struct {
 	calls atomic.Int32
 }
 
-func (value *runtimeV2ChangingJSON) MarshalJSON() ([]byte, error) {
+func (value *runtimeChangingJSON) MarshalJSON() ([]byte, error) {
 	return []byte(fmt.Sprintf(`{"value":%d}`, value.calls.Add(1))), nil
 }
 
-func TestCallRuntimeV2AgentRejectsInvalidAuthorityAndSummary(t *testing.T) {
+func TestCallRuntimeAgentRejectsInvalidAuthorityAndSummary(t *testing.T) {
 	t.Parallel()
 
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
 		w.Header().Set("Content-Type", "application/json")
-		writeRuntimeV2TestJSON(t, w, RuntimeV2RunSummary{
-			RunID: runtimeV2TestRunID, Status: RuntimeV2RunSuccess, DispatchState: RuntimeV2DispatchPending,
+		writeRuntimeTestJSON(t, w, RuntimeRunSummary{
+			RunID: runtimeTestRunID, Status: RuntimeRunSuccess, DispatchState: RuntimeDispatchPending,
 		})
 	}))
 	defer server.Close()
@@ -160,25 +160,25 @@ func TestCallRuntimeV2AgentRejectsInvalidAuthorityAndSummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := RuntimeV2CallAgentRequest{TargetAgentID: runtimeV2TestTargetAgentID, Input: map[string]any{}}
-	authorization := RuntimeV2CallAgentAuthorization{
+	request := RuntimeCallAgentRequest{TargetAgentID: runtimeTestTargetAgentID, Input: map[string]any{}}
+	authorization := RuntimeCallAgentAuthorization{
 		NodeEnvelope:         "ol_ctx_v2.current.payload.signature",
 		AgentInvocationToken: "ol_inv_v2.current.payload.signature",
 		IdempotencyKey:       "delegation-42",
 	}
 	invalid := authorization
 	invalid.IdempotencyKey = "\n"
-	if _, err = runtimeClient.CallRuntimeV2Agent(context.Background(), invalid, request); err == nil {
+	if _, err = runtimeClient.CallRuntimeAgent(context.Background(), invalid, request); err == nil {
 		t.Fatal("invalid authority reached transport")
 	}
 	invalid.IdempotencyKey = " delegation-42 "
-	if _, err = runtimeClient.CallRuntimeV2Agent(context.Background(), invalid, request); err == nil {
+	if _, err = runtimeClient.CallRuntimeAgent(context.Background(), invalid, request); err == nil {
 		t.Fatal("header-normalized idempotency key reached transport")
 	}
 	if calls != 0 {
 		t.Fatalf("invalid authority calls = %d", calls)
 	}
-	if _, err = runtimeClient.CallRuntimeV2Agent(context.Background(), authorization, request); err == nil {
+	if _, err = runtimeClient.CallRuntimeAgent(context.Background(), authorization, request); err == nil {
 		t.Fatal("inconsistent run summary must fail")
 	}
 	if calls != 1 {

@@ -375,7 +375,7 @@ func (c *Client) newRequestWithTokenAndHeaders(ctx context.Context, method, path
 }
 
 // newRequestWithTokenAndHeadersBytes sends body without re-encoding it. Runtime
-// v2 delegated calls use this to bind the invocation proof to the exact bytes
+// delegated calls use this to bind the invocation proof to the exact bytes
 // written on the wire.
 func (c *Client) newRequestWithTokenAndHeadersBytes(ctx context.Context, method, path string, query url.Values, body []byte, accept, token string, headers http.Header) (*http.Response, error) {
 	var bodyReader io.Reader

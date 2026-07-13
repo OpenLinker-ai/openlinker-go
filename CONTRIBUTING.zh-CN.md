@@ -2,7 +2,7 @@
 
 English documentation: [CONTRIBUTING.md](./CONTRIBUTING.md)
 
-感谢你改进 `openlinker-go`，这是 OpenLinker Core API、Runtime v2 原语、callback 和
+感谢你改进 `openlinker-go`，这是 OpenLinker Core API、Runtime 原语、callback 和
 A2A transport 的 Go SDK。
 
 ## 开发环境
@@ -19,7 +19,7 @@ go test ./...
 可以放在这里：
 
 - 开源 Core API 的类型化 wrapper
-- 严格的 Runtime v2 协议类型与 HTTP 原语
+- 严格的 Runtime 协议类型与 HTTP 原语
 - callback 创建和签名校验 helper
 - A2A JSON-RPC、HTTP+JSON、SSE 和 gRPC 客户端行为
 - 本 SDK 使用的契约测试和生成 protobuf artifact
@@ -33,7 +33,7 @@ go test ./...
 ## PR 要求
 
 - 导出的 API 变化要小且有文档说明。
-- client、callback、Runtime v2 或 A2A transport 行为变化需要测试。
+- client、callback、Runtime 或 A2A transport 行为变化需要测试。
 - 生成 protobuf 文件要与 `proto/` 保持一致。
 - 公共行为变化要更新 `README.md` 和 `CHANGELOG.md`。
 - pre-1.0 的 breaking behavior 必须明确记录。

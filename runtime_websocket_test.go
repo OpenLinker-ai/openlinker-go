@@ -14,73 +14,73 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func TestRuntimeV2WebSocketHandshakeAssignmentAndCancelCorrelation(t *testing.T) {
+func TestRuntimeWebSocketHandshakeAssignmentAndCancelCorrelation(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	hello := runtimeV2TestHello()
-	identity := runtimeV2TestIdentity()
+	hello := runtimeTestHello()
+	identity := runtimeTestIdentity()
 	serverErr := make(chan error, 1)
-	server := newRuntimeV2SDKWSServer(t, func(request *http.Request, conn *websocket.Conn) error {
+	server := newRuntimeSDKWSServer(t, func(request *http.Request, conn *websocket.Conn) error {
 		if request.URL.Path != "/api/v1/agent-runtime/ws" {
 			return fmt.Errorf("WebSocket path = %q", request.URL.Path)
 		}
 		if got := request.Header.Get("Authorization"); got != "Bearer ol_agent_v2" {
 			return fmt.Errorf("authorization = %q", got)
 		}
-		helloEnvelope, err := readRuntimeV2SDKWSEnvelope(conn)
+		helloEnvelope, err := readRuntimeSDKWSEnvelope(conn)
 		if err != nil {
 			return err
 		}
-		if helloEnvelope.Type != RuntimeV2Hello || helloEnvelope.ReplyToMessageID != "" {
-			return fmt.Errorf("hello envelope = %#v", helloEnvelope.RuntimeV2EnvelopeFields)
+		if helloEnvelope.Type != RuntimeHello || helloEnvelope.ReplyToMessageID != "" {
+			return fmt.Errorf("hello envelope = %#v", helloEnvelope.RuntimeEnvelopeFields)
 		}
-		if _, err = decodeRuntimeV2WSPayload[RuntimeV2HelloPayload](helloEnvelope, RuntimeV2Hello); err != nil {
+		if _, err = decodeRuntimeWSPayload[RuntimeHelloPayload](helloEnvelope, RuntimeHello); err != nil {
 			return err
 		}
-		if err = writeRuntimeV2SDKWSEnvelope(conn, RuntimeV2Ready, helloEnvelope.MessageID, RuntimeV2ReadyPayload{
-			CoreInstanceID: runtimeV2TestCoreID, Features: RuntimeRequiredFeatures(),
+		if err = writeRuntimeSDKWSEnvelope(conn, RuntimeReady, helloEnvelope.MessageID, RuntimeReadyPayload{
+			CoreInstanceID: runtimeTestCoreID, Features: RuntimeRequiredFeatures(),
 			OfferTTLSeconds: 30, LeaseTTLSeconds: 60, DatabaseTime: now,
 		}); err != nil {
 			return err
 		}
 
-		assignmentMessageID, err := writeRuntimeV2SDKWSEnvelopeID(conn, RuntimeV2RunAssigned, "", runtimeV2TestAssignment(now, identity))
+		assignmentMessageID, err := writeRuntimeSDKWSEnvelopeID(conn, RuntimeRunAssigned, "", runtimeTestAssignment(now, identity))
 		if err != nil {
 			return err
 		}
-		ackEnvelope, err := readRuntimeV2SDKWSEnvelope(conn)
+		ackEnvelope, err := readRuntimeSDKWSEnvelope(conn)
 		if err != nil {
 			return err
 		}
-		if ackEnvelope.Type != RuntimeV2AssignmentAck || ackEnvelope.ReplyToMessageID != assignmentMessageID {
-			return fmt.Errorf("assignment ACK correlation = %#v", ackEnvelope.RuntimeV2EnvelopeFields)
+		if ackEnvelope.Type != RuntimeAssignmentAck || ackEnvelope.ReplyToMessageID != assignmentMessageID {
+			return fmt.Errorf("assignment ACK correlation = %#v", ackEnvelope.RuntimeEnvelopeFields)
 		}
-		ack, err := decodeRuntimeV2WSPayload[RuntimeV2AssignmentAckPayload](ackEnvelope, RuntimeV2AssignmentAck)
+		ack, err := decodeRuntimeWSPayload[RuntimeAssignmentAckPayload](ackEnvelope, RuntimeAssignmentAck)
 		if err != nil || ack.AttemptIdentity != identity {
 			return fmt.Errorf("assignment ACK = %#v, %w", ack, err)
 		}
-		if err = writeRuntimeV2SDKWSEnvelope(conn, RuntimeV2AssignmentConfirmed, ackEnvelope.MessageID, RuntimeV2AssignmentConfirmedPayload{
+		if err = writeRuntimeSDKWSEnvelope(conn, RuntimeAssignmentConfirmed, ackEnvelope.MessageID, RuntimeAssignmentConfirmedPayload{
 			AttemptIdentity: identity, AttemptNo: 1, LeaseExpiresAt: now.Add(time.Minute),
 		}); err != nil {
 			return err
 		}
 
-		cancel := RuntimeV2RunCancelPayload{
-			CancellationID: runtimeV2TestCancellationID, AttemptIdentity: identity,
+		cancel := RuntimeRunCancelPayload{
+			CancellationID: runtimeTestCancellationID, AttemptIdentity: identity,
 			ReasonCode: "OWNER_REQUEST", DeadlineAt: now.Add(time.Minute),
 		}
-		cancelMessageID, err := writeRuntimeV2SDKWSEnvelopeID(conn, RuntimeV2RunCancel, "", cancel)
+		cancelMessageID, err := writeRuntimeSDKWSEnvelopeID(conn, RuntimeRunCancel, "", cancel)
 		if err != nil {
 			return err
 		}
-		cancelAckEnvelope, err := readRuntimeV2SDKWSEnvelope(conn)
+		cancelAckEnvelope, err := readRuntimeSDKWSEnvelope(conn)
 		if err != nil {
 			return err
 		}
-		if cancelAckEnvelope.Type != RuntimeV2RunCancelAck || cancelAckEnvelope.ReplyToMessageID != cancelMessageID {
-			return fmt.Errorf("cancel ACK correlation = %#v", cancelAckEnvelope.RuntimeV2EnvelopeFields)
+		if cancelAckEnvelope.Type != RuntimeRunCancelAck || cancelAckEnvelope.ReplyToMessageID != cancelMessageID {
+			return fmt.Errorf("cancel ACK correlation = %#v", cancelAckEnvelope.RuntimeEnvelopeFields)
 		}
-		cancelAck, err := decodeRuntimeV2WSPayload[RuntimeV2RunCancelAckPayload](cancelAckEnvelope, RuntimeV2RunCancelAck)
-		if err != nil || cancelAck.CancelState != RuntimeV2CancelStopping {
+		cancelAck, err := decodeRuntimeWSPayload[RuntimeRunCancelAckPayload](cancelAckEnvelope, RuntimeRunCancelAck)
+		if err != nil || cancelAck.CancelState != RuntimeCancelStopping {
 			return fmt.Errorf("cancel ACK = %#v, %w", cancelAck, err)
 		}
 		return nil
@@ -91,28 +91,28 @@ func TestRuntimeV2WebSocketHandshakeAssignmentAndCancelCorrelation(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	connection, err := runtimeClient.DialRuntimeV2WebSocket(context.Background(), hello)
+	connection, err := runtimeClient.DialRuntimeWebSocket(context.Background(), hello)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer connection.Close()
-	if connection.Ready().CoreInstanceID != runtimeV2TestCoreID {
+	if connection.Ready().CoreInstanceID != runtimeTestCoreID {
 		t.Fatalf("ready = %#v", connection.Ready())
 	}
 
-	assigned, err := connection.ClaimRuntimeV2Run(context.Background(), 25, RuntimeV2ClaimRequest{
+	assigned, err := connection.ClaimRuntimeRun(context.Background(), 25, RuntimeClaimRequest{
 		RuntimeSessionID: hello.RuntimeSessionID, Capacity: 1,
 	})
 	if err != nil || assigned == nil {
 		t.Fatalf("assignment = %#v, %v", assigned, err)
 	}
-	confirmed, err := connection.AckRuntimeV2Assignment(context.Background(), RuntimeV2AssignmentAckPayload{
+	confirmed, err := connection.AckRuntimeAssignment(context.Background(), RuntimeAssignmentAckPayload{
 		AttemptIdentity: assigned.AttemptIdentity,
 	})
 	if err != nil || confirmed.AttemptNo != 1 {
 		t.Fatalf("confirmation = %#v, %v", confirmed, err)
 	}
-	commands, err := connection.PollRuntimeV2Commands(context.Background(), hello.RuntimeSessionID, 25)
+	commands, err := connection.PollRuntimeCommands(context.Background(), hello.RuntimeSessionID, 25)
 	if err != nil || len(commands.Commands) != 1 {
 		t.Fatalf("commands = %#v, %v", commands, err)
 	}
@@ -120,11 +120,11 @@ func TestRuntimeV2WebSocketHandshakeAssignmentAndCancelCorrelation(t *testing.T)
 	if err != nil || decoded.Cancel == nil {
 		t.Fatalf("decoded command = %#v, %v", decoded, err)
 	}
-	state, err := connection.AckRuntimeV2Cancel(context.Background(), RuntimeV2RunCancelAckPayload{
+	state, err := connection.AckRuntimeCancel(context.Background(), RuntimeRunCancelAckPayload{
 		CancellationID: decoded.Cancel.CancellationID, AttemptIdentity: decoded.Cancel.AttemptIdentity,
-		CancelState: RuntimeV2CancelStopping,
+		CancelState: RuntimeCancelStopping,
 	})
-	if err != nil || state.CancelState != RuntimeV2CancelStopping {
+	if err != nil || state.CancelState != RuntimeCancelStopping {
 		t.Fatalf("cancel state = %#v, %v", state, err)
 	}
 	if err = <-serverErr; err != nil {
@@ -132,26 +132,26 @@ func TestRuntimeV2WebSocketHandshakeAssignmentAndCancelCorrelation(t *testing.T)
 	}
 }
 
-func TestRuntimeV2WebSocketCorrelatesConcurrentBusinessACKs(t *testing.T) {
+func TestRuntimeWebSocketCorrelatesConcurrentBusinessACKs(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	hello := runtimeV2TestHello()
-	identity := runtimeV2TestIdentity()
+	hello := runtimeTestHello()
+	identity := runtimeTestIdentity()
 	serverErr := make(chan error, 1)
-	server := newRuntimeV2SDKWSServer(t, func(_ *http.Request, conn *websocket.Conn) error {
-		if err := serveRuntimeV2SDKWSReady(conn, now); err != nil {
+	server := newRuntimeSDKWSServer(t, func(_ *http.Request, conn *websocket.Conn) error {
+		if err := serveRuntimeSDKWSReady(conn, now); err != nil {
 			return err
 		}
-		first, err := readRuntimeV2SDKWSEnvelope(conn)
+		first, err := readRuntimeSDKWSEnvelope(conn)
 		if err != nil {
 			return err
 		}
-		second, err := readRuntimeV2SDKWSEnvelope(conn)
+		second, err := readRuntimeSDKWSEnvelope(conn)
 		if err != nil {
 			return err
 		}
-		eventByID := map[string]RuntimeV2RunEventPayload{}
-		for _, envelope := range []RuntimeV2Envelope{first, second} {
-			event, decodeErr := decodeRuntimeV2WSPayload[RuntimeV2RunEventPayload](envelope, RuntimeV2RunEvent)
+		eventByID := map[string]RuntimeRunEventPayload{}
+		for _, envelope := range []RuntimeEnvelope{first, second} {
+			event, decodeErr := decodeRuntimeWSPayload[RuntimeRunEventPayload](envelope, RuntimeRunEvent)
 			if decodeErr != nil {
 				return decodeErr
 			}
@@ -159,9 +159,9 @@ func TestRuntimeV2WebSocketCorrelatesConcurrentBusinessACKs(t *testing.T) {
 		}
 		// Reverse write order. A FIFO response implementation would return the
 		// wrong business ACK to one caller.
-		for _, envelope := range []RuntimeV2Envelope{second, first} {
+		for _, envelope := range []RuntimeEnvelope{second, first} {
 			event := eventByID[envelope.MessageID]
-			if err := writeRuntimeV2SDKWSEnvelope(conn, RuntimeV2RunEventAck, envelope.MessageID, RuntimeV2RunEventAckPayload{
+			if err := writeRuntimeSDKWSEnvelope(conn, RuntimeRunEventAck, envelope.MessageID, RuntimeRunEventAckPayload{
 				ClientEventID: event.ClientEventID, ClientEventSeq: event.ClientEventSeq,
 				Sequence: event.ClientEventSeq,
 			}); err != nil {
@@ -172,14 +172,14 @@ func TestRuntimeV2WebSocketCorrelatesConcurrentBusinessACKs(t *testing.T) {
 	}, serverErr)
 	defer server.Close()
 	runtimeClient, _ := NewRuntime(server.URL, WithAgentToken("ol_agent_v2"))
-	connection, err := runtimeClient.DialRuntimeV2WebSocket(context.Background(), hello)
+	connection, err := runtimeClient.DialRuntimeWebSocket(context.Background(), hello)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer connection.Close()
 
-	requests := []RuntimeV2RunEventPayload{
-		{AttemptIdentity: identity, ClientEventID: runtimeV2TestEventID, ClientEventSeq: 1, EventType: "run.progress", Payload: map[string]any{"n": 1}},
+	requests := []RuntimeRunEventPayload{
+		{AttemptIdentity: identity, ClientEventID: runtimeTestEventID, ClientEventSeq: 1, EventType: "run.progress", Payload: map[string]any{"n": 1}},
 		{AttemptIdentity: identity, ClientEventID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ClientEventSeq: 2, EventType: "run.progress", Payload: map[string]any{"n": 2}},
 	}
 	var wait sync.WaitGroup
@@ -189,7 +189,7 @@ func TestRuntimeV2WebSocketCorrelatesConcurrentBusinessACKs(t *testing.T) {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
-			ack, callErr := connection.AppendRuntimeV2Event(context.Background(), request)
+			ack, callErr := connection.AppendRuntimeEvent(context.Background(), request)
 			if callErr != nil {
 				errs <- callErr
 				return
@@ -209,34 +209,34 @@ func TestRuntimeV2WebSocketCorrelatesConcurrentBusinessACKs(t *testing.T) {
 	}
 }
 
-func TestRuntimeV2WebSocketResumeCollectsEveryCorrelatedDecision(t *testing.T) {
+func TestRuntimeWebSocketResumeCollectsEveryCorrelatedDecision(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	hello := runtimeV2TestHello()
-	first := runtimeV2TestIdentity()
+	hello := runtimeTestHello()
+	first := runtimeTestIdentity()
 	second := first
 	second.RunID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	second.AttemptID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 	second.LeaseID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 	serverErr := make(chan error, 1)
-	server := newRuntimeV2SDKWSServer(t, func(_ *http.Request, conn *websocket.Conn) error {
-		if err := serveRuntimeV2SDKWSReady(conn, now); err != nil {
+	server := newRuntimeSDKWSServer(t, func(_ *http.Request, conn *websocket.Conn) error {
+		if err := serveRuntimeSDKWSReady(conn, now); err != nil {
 			return err
 		}
-		resumeEnvelope, err := readRuntimeV2SDKWSEnvelope(conn)
+		resumeEnvelope, err := readRuntimeSDKWSEnvelope(conn)
 		if err != nil {
 			return err
 		}
-		resume, err := decodeRuntimeV2WSPayload[RuntimeV2ResumePayload](resumeEnvelope, RuntimeV2Resume)
+		resume, err := decodeRuntimeWSPayload[RuntimeResumePayload](resumeEnvelope, RuntimeResume)
 		if err != nil || len(resume.Attempts) != 2 {
 			return fmt.Errorf("resume = %#v, %w", resume, err)
 		}
 		leaseExpiry := now.Add(time.Minute)
-		decisions := []RuntimeV2ResumeAcceptedPayload{
-			{AttemptIdentity: first, Decision: RuntimeV2ResumeContinue, LeaseExpiresAt: &leaseExpiry, AllowedActions: []RuntimeV2ResumeAction{RuntimeV2ActionContinueExecution, RuntimeV2ActionUploadEvents, RuntimeV2ActionUploadResult}},
-			{AttemptIdentity: second, Decision: RuntimeV2ResumeResultAcked, AllowedActions: []RuntimeV2ResumeAction{RuntimeV2ActionClearSpool}},
+		decisions := []RuntimeResumeAcceptedPayload{
+			{AttemptIdentity: first, Decision: RuntimeResumeContinue, LeaseExpiresAt: &leaseExpiry, AllowedActions: []RuntimeResumeAction{RuntimeActionContinueExecution, RuntimeActionUploadEvents, RuntimeActionUploadResult}},
+			{AttemptIdentity: second, Decision: RuntimeResumeResultAcked, AllowedActions: []RuntimeResumeAction{RuntimeActionClearSpool}},
 		}
 		for _, decision := range decisions {
-			if err = writeRuntimeV2SDKWSEnvelope(conn, RuntimeV2ResumeAccepted, resumeEnvelope.MessageID, decision); err != nil {
+			if err = writeRuntimeSDKWSEnvelope(conn, RuntimeResumeAccepted, resumeEnvelope.MessageID, decision); err != nil {
 				return err
 			}
 		}
@@ -244,20 +244,20 @@ func TestRuntimeV2WebSocketResumeCollectsEveryCorrelatedDecision(t *testing.T) {
 	}, serverErr)
 	defer server.Close()
 	runtimeClient, _ := NewRuntime(server.URL, WithAgentToken("ol_agent_v2"))
-	connection, err := runtimeClient.DialRuntimeV2WebSocket(context.Background(), hello)
+	connection, err := runtimeClient.DialRuntimeWebSocket(context.Background(), hello)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer connection.Close()
-	response, err := connection.ResumeRuntimeV2Runs(context.Background(), RuntimeV2ResumePayload{
+	response, err := connection.ResumeRuntimeRuns(context.Background(), RuntimeResumePayload{
 		NodeID: hello.NodeID, AgentID: hello.AgentID, WorkerID: hello.WorkerID,
 		RuntimeSessionID: hello.RuntimeSessionID,
-		Attempts: []RuntimeV2ResumeAttempt{
-			{AttemptIdentity: first, PendingClientEventRanges: []RuntimeV2EventRange{}},
-			{AttemptIdentity: second, PendingClientEventRanges: []RuntimeV2EventRange{}},
+		Attempts: []RuntimeResumeAttempt{
+			{AttemptIdentity: first, PendingClientEventRanges: []RuntimeEventRange{}},
+			{AttemptIdentity: second, PendingClientEventRanges: []RuntimeEventRange{}},
 		},
 	})
-	if err != nil || len(response.Decisions) != 2 || response.Decisions[1].Decision != RuntimeV2ResumeResultAcked {
+	if err != nil || len(response.Decisions) != 2 || response.Decisions[1].Decision != RuntimeResumeResultAcked {
 		t.Fatalf("resume response = %#v, %v", response, err)
 	}
 	if err = <-serverErr; err != nil {
@@ -265,17 +265,17 @@ func TestRuntimeV2WebSocketResumeCollectsEveryCorrelatedDecision(t *testing.T) {
 	}
 }
 
-func TestRuntimeV2WebSocketCanceledRequestsDoNotLeakPendingEntries(t *testing.T) {
+func TestRuntimeWebSocketCanceledRequestsDoNotLeakPendingEntries(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	hello := runtimeV2TestHello()
+	hello := runtimeTestHello()
 	serverDone := make(chan struct{})
 	serverErr := make(chan error, 1)
-	server := newRuntimeV2SDKWSServer(t, func(_ *http.Request, conn *websocket.Conn) error {
-		if err := serveRuntimeV2SDKWSReady(conn, now); err != nil {
+	server := newRuntimeSDKWSServer(t, func(_ *http.Request, conn *websocket.Conn) error {
+		if err := serveRuntimeSDKWSReady(conn, now); err != nil {
 			return err
 		}
 		for index := 0; index < 64; index++ {
-			if _, err := readRuntimeV2SDKWSEnvelope(conn); err != nil {
+			if _, err := readRuntimeSDKWSEnvelope(conn); err != nil {
 				return err
 			}
 		}
@@ -285,12 +285,12 @@ func TestRuntimeV2WebSocketCanceledRequestsDoNotLeakPendingEntries(t *testing.T)
 	}, serverErr)
 	defer server.Close()
 	runtimeClient, _ := NewRuntime(server.URL, WithAgentToken("ol_agent_v2"))
-	connection, err := runtimeClient.DialRuntimeV2WebSocket(context.Background(), hello)
+	connection, err := runtimeClient.DialRuntimeWebSocket(context.Background(), hello)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer connection.Close()
-	identity := runtimeV2TestIdentity()
+	identity := runtimeTestIdentity()
 	var wait sync.WaitGroup
 	for index := 0; index < 64; index++ {
 		wait.Add(1)
@@ -298,9 +298,9 @@ func TestRuntimeV2WebSocketCanceledRequestsDoNotLeakPendingEntries(t *testing.T)
 			defer wait.Done()
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 			defer cancel()
-			_, _ = connection.AppendRuntimeV2Event(ctx, RuntimeV2RunEventPayload{
+			_, _ = connection.AppendRuntimeEvent(ctx, RuntimeRunEventPayload{
 				AttemptIdentity: identity,
-				ClientEventID:   runtimeV2SDKTestUUID(sequence + 1),
+				ClientEventID:   runtimeSDKTestUUID(sequence + 1),
 				ClientEventSeq:  int64(sequence + 1),
 				EventType:       "run.progress",
 				Payload:         map[string]any{"sequence": sequence + 1},
@@ -313,7 +313,7 @@ func TestRuntimeV2WebSocketCanceledRequestsDoNotLeakPendingEntries(t *testing.T)
 	pending := len(connection.pending)
 	abandoned := len(connection.abandoned)
 	connection.pendingMu.Unlock()
-	if pending != 0 || abandoned > runtimeV2WSLateReplyLimit {
+	if pending != 0 || abandoned > runtimeWSLateReplyLimit {
 		t.Fatalf("pending=%d abandoned=%d", pending, abandoned)
 	}
 	if err = <-serverErr; err != nil {
@@ -321,16 +321,16 @@ func TestRuntimeV2WebSocketCanceledRequestsDoNotLeakPendingEntries(t *testing.T)
 	}
 }
 
-func TestRuntimeV2WebSocketRejectsUnknownPayloadAndReportsProtocolClose(t *testing.T) {
+func TestRuntimeWebSocketRejectsUnknownPayloadAndReportsProtocolClose(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	hello := runtimeV2TestHello()
+	hello := runtimeTestHello()
 	closeCode := make(chan int, 1)
 	serverErr := make(chan error, 1)
-	server := newRuntimeV2SDKWSServer(t, func(_ *http.Request, conn *websocket.Conn) error {
-		if err := serveRuntimeV2SDKWSReady(conn, now); err != nil {
+	server := newRuntimeSDKWSServer(t, func(_ *http.Request, conn *websocket.Conn) error {
+		if err := serveRuntimeSDKWSReady(conn, now); err != nil {
 			return err
 		}
-		_, raw, err := newRuntimeV2WSEnvelope(RuntimeV2RunAssigned, "", runtimeV2TestAssignment(now, runtimeV2TestIdentity()))
+		_, raw, err := newRuntimeWSEnvelope(RuntimeRunAssigned, "", runtimeTestAssignment(now, runtimeTestIdentity()))
 		if err != nil {
 			return err
 		}
@@ -352,7 +352,7 @@ func TestRuntimeV2WebSocketRejectsUnknownPayloadAndReportsProtocolClose(t *testi
 	}, serverErr)
 	defer server.Close()
 	runtimeClient, _ := NewRuntime(server.URL, WithAgentToken("ol_agent_v2"))
-	connection, err := runtimeClient.DialRuntimeV2WebSocket(context.Background(), hello)
+	connection, err := runtimeClient.DialRuntimeWebSocket(context.Background(), hello)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,7 +361,7 @@ func TestRuntimeV2WebSocketRejectsUnknownPayloadAndReportsProtocolClose(t *testi
 	case <-time.After(2 * time.Second):
 		t.Fatal("WebSocket did not close")
 	}
-	if code := <-closeCode; code != RuntimeV2WSCloseProtocolError {
+	if code := <-closeCode; code != RuntimeWSCloseProtocolError {
 		t.Fatalf("close code = %d", code)
 	}
 	if err = <-serverErr; err != nil {
@@ -369,11 +369,11 @@ func TestRuntimeV2WebSocketRejectsUnknownPayloadAndReportsProtocolClose(t *testi
 	}
 }
 
-func TestRuntimeV2WebSocketNilCloseReturnsError(t *testing.T) {
-	var connection *RuntimeV2WebSocket
-	err := connection.CloseRuntimeV2Session(context.Background(), RuntimeV2SessionCloseRequest{
-		NodeID: runtimeV2TestNodeID, AgentID: runtimeV2TestAgentID, WorkerID: "worker-a",
-		RuntimeSessionID: runtimeV2TestSessionID, SessionEpoch: 1,
+func TestRuntimeWebSocketNilCloseReturnsError(t *testing.T) {
+	var connection *RuntimeWebSocket
+	err := connection.CloseRuntimeSession(context.Background(), RuntimeSessionCloseRequest{
+		NodeID: runtimeTestNodeID, AgentID: runtimeTestAgentID, WorkerID: "worker-a",
+		RuntimeSessionID: runtimeTestSessionID, SessionEpoch: 1,
 		Status: "closed", Reason: "test_close",
 	})
 	if err == nil {
@@ -381,7 +381,7 @@ func TestRuntimeV2WebSocketNilCloseReturnsError(t *testing.T) {
 	}
 }
 
-func newRuntimeV2SDKWSServer(
+func newRuntimeSDKWSServer(
 	t *testing.T,
 	handle func(*http.Request, *websocket.Conn) error,
 	result chan<- error,
@@ -399,53 +399,53 @@ func newRuntimeV2SDKWSServer(
 	}))
 }
 
-func serveRuntimeV2SDKWSReady(conn *websocket.Conn, now time.Time) error {
-	hello, err := readRuntimeV2SDKWSEnvelope(conn)
+func serveRuntimeSDKWSReady(conn *websocket.Conn, now time.Time) error {
+	hello, err := readRuntimeSDKWSEnvelope(conn)
 	if err != nil {
 		return err
 	}
-	return writeRuntimeV2SDKWSEnvelope(conn, RuntimeV2Ready, hello.MessageID, RuntimeV2ReadyPayload{
-		CoreInstanceID: runtimeV2TestCoreID, Features: RuntimeRequiredFeatures(),
+	return writeRuntimeSDKWSEnvelope(conn, RuntimeReady, hello.MessageID, RuntimeReadyPayload{
+		CoreInstanceID: runtimeTestCoreID, Features: RuntimeRequiredFeatures(),
 		OfferTTLSeconds: 30, LeaseTTLSeconds: 60, DatabaseTime: now,
 	})
 }
 
-func readRuntimeV2SDKWSEnvelope(conn *websocket.Conn) (RuntimeV2Envelope, error) {
+func readRuntimeSDKWSEnvelope(conn *websocket.Conn) (RuntimeEnvelope, error) {
 	messageType, raw, err := conn.ReadMessage()
 	if err != nil {
-		return RuntimeV2Envelope{}, err
+		return RuntimeEnvelope{}, err
 	}
 	if messageType != websocket.TextMessage {
-		return RuntimeV2Envelope{}, errors.New("message was not text")
+		return RuntimeEnvelope{}, errors.New("message was not text")
 	}
-	return decodeRuntimeV2WSEnvelope(raw)
+	return decodeRuntimeWSEnvelope(raw)
 }
 
-func writeRuntimeV2SDKWSEnvelope(
+func writeRuntimeSDKWSEnvelope(
 	conn *websocket.Conn,
-	messageType RuntimeV2MessageType,
+	messageType RuntimeMessageType,
 	replyTo string,
 	payload any,
 ) error {
-	_, err := writeRuntimeV2SDKWSEnvelopeID(conn, messageType, replyTo, payload)
+	_, err := writeRuntimeSDKWSEnvelopeID(conn, messageType, replyTo, payload)
 	return err
 }
 
-func writeRuntimeV2SDKWSEnvelopeID(
+func writeRuntimeSDKWSEnvelopeID(
 	conn *websocket.Conn,
-	messageType RuntimeV2MessageType,
+	messageType RuntimeMessageType,
 	replyTo string,
 	payload any,
 ) (string, error) {
-	envelope, raw, err := newRuntimeV2WSEnvelope(messageType, replyTo, payload)
+	envelope, raw, err := newRuntimeWSEnvelope(messageType, replyTo, payload)
 	if err != nil {
 		return "", err
 	}
 	return envelope.MessageID, conn.WriteMessage(websocket.TextMessage, raw)
 }
 
-func runtimeV2TestAssignment(now time.Time, identity RuntimeV2AttemptIdentity) RuntimeV2RunAssignedPayload {
-	return RuntimeV2RunAssignedPayload{
+func runtimeTestAssignment(now time.Time, identity RuntimeAttemptIdentity) RuntimeRunAssignedPayload {
+	return RuntimeRunAssignedPayload{
 		AttemptIdentity: identity, OfferNo: 1, OfferExpiresAt: now.Add(time.Minute),
 		AttemptDeadlineAt: now.Add(2 * time.Minute), RunDeadlineAt: now.Add(3 * time.Minute),
 		Input: map[string]any{"task": "test"}, Metadata: map[string]any{},
@@ -454,6 +454,6 @@ func runtimeV2TestAssignment(now time.Time, identity RuntimeV2AttemptIdentity) R
 	}
 }
 
-func runtimeV2SDKTestUUID(value int) string {
+func runtimeSDKTestUUID(value int) string {
 	return fmt.Sprintf("%08x-0000-4000-8000-%012x", value, value)
 }

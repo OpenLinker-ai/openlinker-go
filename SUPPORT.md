@@ -8,7 +8,7 @@ requests that fit the `openlinker-go` SDK's open-source scope.
 ## Good Issue Topics
 
 - typed client behavior for supported Core endpoints
-- strict Runtime v2 protocol and HTTP behavior
+- strict Runtime protocol and HTTP behavior
 - callback signing or verification behavior
 - A2A JSON-RPC, HTTP+JSON, SSE, or gRPC client behavior
 - contract mismatch between this SDK and `openlinker-core`
