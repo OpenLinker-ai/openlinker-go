@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	openLinkerDiscoveryPath     = "/.well-known/json"
+	openLinkerDiscoveryPath     = "/.well-known/openlinker.json"
 	openLinkerDiscoveryTimeout  = 5 * time.Second
 	openLinkerDiscoveryMaxBytes = 64 << 10
 )

@@ -16,7 +16,7 @@ func TestResolveRuntimeURLDiscoversWithoutRuntimeCredentials(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		calls.Add(1)
-		if request.Method != http.MethodGet || request.URL.Path != openLinkerDiscoveryPath {
+		if request.Method != http.MethodGet || request.URL.Path != "/.well-known/openlinker.json" {
 			t.Fatalf("request = %s %s", request.Method, request.URL.Path)
 		}
 		if request.Header.Get("Authorization") != "" || request.Header.Get("Cookie") != "" {
