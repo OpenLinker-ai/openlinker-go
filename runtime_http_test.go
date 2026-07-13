@@ -314,6 +314,108 @@ func TestRuntimeHTTPSerializesConcurrentSessionCreation(t *testing.T) {
 	}
 }
 
+func TestRuntimeHTTPHeartbeatSharesPullGenerationWhileLifecycleRotationWaits(t *testing.T) {
+	claimStarted := make(chan struct{})
+	commandsStarted := make(chan struct{})
+	heartbeatReached := make(chan struct{})
+	closeReached := make(chan struct{})
+	releasePulls := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releasePulls) }) })
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Header.Get(RuntimeAttachmentHeader) != runtimeTestAttachmentID {
+			t.Errorf("%s attachment header = %q", req.URL.Path, req.Header.Get(RuntimeAttachmentHeader))
+		}
+		switch req.URL.Path {
+		case "/api/v1/agent-runtime/runs/claim":
+			close(claimStarted)
+			<-releasePulls
+			w.WriteHeader(http.StatusNoContent)
+		case "/api/v1/agent-runtime/commands":
+			close(commandsStarted)
+			<-releasePulls
+			w.Header().Set("Content-Type", "application/json")
+			writeRuntimeTestJSON(t, w, RuntimeCommandsResponse{Commands: []RuntimePendingCommand{}, DatabaseTime: now})
+		case "/api/v1/agent-runtime/sessions/" + runtimeTestSessionID + "/heartbeat":
+			close(heartbeatReached)
+			w.Header().Set("Content-Type", "application/json")
+			writeRuntimeTestJSON(t, w, RuntimeReadyPayload{
+				CoreInstanceID: runtimeTestCoreID, AttachmentID: runtimeTestAttachmentID,
+				Features: RuntimeRequiredFeatures(), OfferTTLSeconds: 30, LeaseTTLSeconds: 60, DatabaseTime: now,
+			})
+		case "/api/v1/agent-runtime/sessions/" + runtimeTestSessionID + "/close":
+			close(closeReached)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	defer server.Close()
+
+	runtimeClient, err := NewRuntime(server.URL, WithAgentToken("ol_agent_v2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeClient.attachmentMu.Lock()
+	runtimeClient.attachmentID = runtimeTestAttachmentID
+	runtimeClient.attachmentMu.Unlock()
+
+	claimDone := make(chan error, 1)
+	go func() {
+		_, claimErr := runtimeClient.ClaimRuntimeRun(context.Background(), 25, RuntimeClaimRequest{
+			RuntimeSessionID: runtimeTestSessionID, Capacity: 1, Inflight: 0,
+		})
+		claimDone <- claimErr
+	}()
+	commandsDone := make(chan error, 1)
+	go func() {
+		_, commandsErr := runtimeClient.PollRuntimeCommands(context.Background(), runtimeTestSessionID, 25)
+		commandsDone <- commandsErr
+	}()
+	waitForTestSignal(t, claimStarted, time.Second, "long claim request")
+	waitForTestSignal(t, commandsStarted, time.Second, "long command poll")
+
+	heartbeatDone := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_, heartbeatErr := runtimeClient.HeartbeatRuntimeSession(ctx, runtimeTestHello())
+		heartbeatDone <- heartbeatErr
+	}()
+	waitForTestSignal(t, heartbeatReached, time.Second, "heartbeat alongside long Pull requests")
+	if err = <-heartbeatDone; err != nil {
+		t.Fatalf("heartbeat alongside long Pull requests: %v", err)
+	}
+
+	closeDone := make(chan error, 1)
+	go func() {
+		closeDone <- runtimeClient.CloseRuntimeSession(context.Background(), RuntimeSessionCloseRequest{
+			NodeID: runtimeTestNodeID, AgentID: runtimeTestAgentID, WorkerID: "worker-a",
+			RuntimeSessionID: runtimeTestSessionID, SessionEpoch: 1,
+			Status: "closed", Reason: "transport rotation",
+		})
+	}()
+	select {
+	case <-closeReached:
+		t.Fatal("attachment lifecycle rotation crossed in-flight Pull requests")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	releaseOnce.Do(func() { close(releasePulls) })
+	if err = <-claimDone; err != nil {
+		t.Fatalf("claim request: %v", err)
+	}
+	if err = <-commandsDone; err != nil {
+		t.Fatalf("command poll: %v", err)
+	}
+	waitForTestSignal(t, closeReached, time.Second, "lifecycle rotation after Pull requests")
+	if err = <-closeDone; err != nil {
+		t.Fatalf("close Runtime session: %v", err)
+	}
+}
+
 func TestRuntimeHTTPRejectsUnknownResponseAndUnstableIDs(t *testing.T) {
 	t.Parallel()
 

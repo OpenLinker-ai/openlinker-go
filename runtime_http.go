@@ -45,8 +45,8 @@ func (r *Runtime) HeartbeatRuntimeSession(ctx context.Context, hello RuntimeHell
 	if r == nil || r.client == nil {
 		return nil, errors.New("openlinker: runtime client is nil")
 	}
-	r.attachmentMu.Lock()
-	defer r.attachmentMu.Unlock()
+	r.attachmentMu.RLock()
+	defer r.attachmentMu.RUnlock()
 	attachmentID := r.attachmentID
 	if !runtimeUUID(attachmentID) {
 		return nil, errors.New("openlinker: runtime attachment is not established")
@@ -62,7 +62,6 @@ func (r *Runtime) HeartbeatRuntimeSession(ctx context.Context, hello RuntimeHell
 	if ready.AttachmentID != attachmentID {
 		return nil, errors.New("openlinker: runtime heartbeat attachment mismatch")
 	}
-	r.attachmentID = ready.AttachmentID
 	return &ready, nil
 }
 

@@ -130,6 +130,7 @@ func (node *RuntimeWorker) handleCancelCommand(command RuntimeRunCancelPayload) 
 			node.reportFatal(err)
 		}
 	}
+	node.retireActiveAttempt(node.activeAttempt(record.Identity.AttemptID))
 }
 
 func (node *RuntimeWorker) ackCancelOnce(command RuntimeRunCancelPayload, state RuntimeCancelState, errorCode string) error {
@@ -187,7 +188,7 @@ func (node *RuntimeWorker) renewAttemptLease(attempt *activeRuntimeAttempt) {
 	retry := 0
 	for {
 		select {
-		case <-node.runtimeCtx.Done():
+		case <-attempt.renewCtx.Done():
 			return
 		case <-attempt.renewStop:
 			return
@@ -210,12 +211,12 @@ func (node *RuntimeWorker) renewAttemptLease(attempt *activeRuntimeAttempt) {
 			return
 		}
 		capacity, inflight := node.capacitySnapshot()
-		renewCtx := node.runtimeCtx
+		renewCtx := attempt.renewCtx
 		var cancelRenew context.CancelFunc
 		if expiry := attempt.leaseExpiry(); !expiry.IsZero() {
-			renewCtx, cancelRenew = context.WithDeadline(node.runtimeCtx, expiry)
+			renewCtx, cancelRenew = context.WithDeadline(attempt.renewCtx, expiry)
 		} else {
-			renewCtx, cancelRenew = context.WithTimeout(node.runtimeCtx, 10*time.Second)
+			renewCtx, cancelRenew = context.WithTimeout(attempt.renewCtx, 10*time.Second)
 		}
 		renewed, err := node.runtimeClient.RenewRuntimeLease(renewCtx, RuntimeLeaseRenewPayload{
 			AttemptIdentity:    sdkAttemptIdentity(attempt.identity),

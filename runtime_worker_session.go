@@ -361,6 +361,9 @@ func (node *RuntimeWorker) resumeDurableStateWithClient(parent context.Context, 
 			}
 			if reconnect && record.State == AssignmentStateFinished {
 				node.allowSpool(record.Identity.AttemptID, spoolPermission{events: true, result: true})
+				if active := node.activeAttempt(record.Identity.AttemptID); active != nil && decision.LeaseExpiresAt != nil {
+					active.setLeaseExpiry(*decision.LeaseExpiresAt)
+				}
 				continue
 			}
 			if record.State == AssignmentStateStarted || record.State == AssignmentStateFinished {
@@ -423,6 +426,7 @@ func (node *RuntimeWorker) stopActiveAttemptForResume(ctx context.Context, attem
 	active.cancel()
 	select {
 	case <-active.done:
+		node.retireActiveAttempt(active)
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

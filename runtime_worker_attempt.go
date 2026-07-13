@@ -13,13 +13,16 @@ import (
 )
 
 type activeRuntimeAttempt struct {
-	identity  AttemptIdentity
-	payload   DurableAssignmentPayload
-	ctx       context.Context
-	cancel    context.CancelFunc
-	done      chan struct{}
-	renewStop chan struct{}
-	renewDone chan struct{}
+	identity    AttemptIdentity
+	payload     DurableAssignmentPayload
+	ctx         context.Context
+	cancel      context.CancelFunc
+	done        chan struct{}
+	renewCtx    context.Context
+	renewCancel context.CancelFunc
+	renewStop   chan struct{}
+	renewDone   chan struct{}
+	retireOnce  sync.Once
 
 	canceled atomic.Bool
 	finished atomic.Bool
@@ -54,12 +57,15 @@ func (node *RuntimeWorker) startConfirmedAttempt(record AssignmentJournalRecord,
 		return nil
 	}
 	attemptCtx, cancel := runtimeAttemptContext(node.runtimeCtx, payload)
+	renewCtx, renewCancel := context.WithCancel(node.runtimeCtx)
 	attempt := &activeRuntimeAttempt{
 		identity:       record.Identity,
 		payload:        cloneAssignmentPayload(payload),
 		ctx:            attemptCtx,
 		cancel:         cancel,
 		done:           make(chan struct{}),
+		renewCtx:       renewCtx,
+		renewCancel:    renewCancel,
 		renewStop:      make(chan struct{}),
 		renewDone:      make(chan struct{}),
 		leaseExpiresAt: leaseExpiry,
@@ -71,8 +77,7 @@ func (node *RuntimeWorker) startConfirmedAttempt(record AssignmentJournalRecord,
 	node.stateMu.Unlock()
 
 	if _, err := node.store.AdvanceAssignment(record.Identity.AssignmentMessageID, AssignmentStateStarted); err != nil {
-		node.removeActiveAttempt(attempt)
-		cancel()
+		node.retireActiveAttempt(attempt)
 		node.executions.Done()
 		return err
 	}
@@ -94,12 +99,7 @@ func runtimeAttemptContext(parent context.Context, payload DurableAssignmentPayl
 func (node *RuntimeWorker) executeAttempt(attempt *activeRuntimeAttempt) {
 	defer node.executions.Done()
 	defer close(attempt.done)
-	defer node.removeActiveAttempt(attempt)
 	go node.renewAttemptLease(attempt)
-	defer func() {
-		close(attempt.renewStop)
-		<-attempt.renewDone
-	}()
 
 	input := RuntimeJSONMap{}
 	if err := json.Unmarshal(attempt.payload.Input, &input); err != nil {
@@ -382,6 +382,27 @@ func (node *RuntimeWorker) removeActiveAttempt(attempt *activeRuntimeAttempt) {
 		delete(node.active, attempt.identity.AttemptID)
 	}
 	node.stateMu.Unlock()
+}
+
+// retireActiveAttempt ends the lease/inflight lifecycle. Handler completion is
+// deliberately not enough: pending Events and the Result still need the same
+// fenced lease until Core acknowledges the Result or explicitly revokes it.
+func (node *RuntimeWorker) retireActiveAttempt(attempt *activeRuntimeAttempt) {
+	if attempt == nil {
+		return
+	}
+	attempt.retireOnce.Do(func() {
+		if attempt.renewCancel != nil {
+			attempt.renewCancel()
+		}
+		if attempt.renewStop != nil {
+			close(attempt.renewStop)
+		}
+		if attempt.cancel != nil {
+			attempt.cancel()
+		}
+	})
+	node.removeActiveAttempt(attempt)
 }
 
 func (node *RuntimeWorker) cancelAllActive() {

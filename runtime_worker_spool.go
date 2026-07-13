@@ -155,6 +155,7 @@ func (node *RuntimeWorker) flushAttemptSpool(record AssignmentJournalRecord, per
 	if ack == nil || ack.ResultID != result.ResultID {
 		return fmt.Errorf("%w: Result ACK identity", ErrRuntimeProtocolMismatch)
 	}
+	node.retireActiveAttempt(node.activeAttempt(record.Identity.AttemptID))
 	if err := node.store.AckResult(record.Identity.AttemptID, result.ResultID); err != nil {
 		return err
 	}
@@ -217,7 +218,8 @@ func runtimeMissingEventRanges(err error) ([]RuntimeEventRange, bool) {
 }
 
 func (node *RuntimeWorker) revokeLocalAttempt(record AssignmentJournalRecord) {
-	if active := node.activeAttempt(record.Identity.AttemptID); active != nil {
+	active := node.activeAttempt(record.Identity.AttemptID)
+	if active != nil {
 		active.canceled.Store(true)
 		active.cancel()
 	}
@@ -226,6 +228,7 @@ func (node *RuntimeWorker) revokeLocalAttempt(record AssignmentJournalRecord) {
 		if !errors.Is(err, ErrAssignmentNotFound) && node.runtimeCtx.Err() == nil {
 			node.reportFatal(err)
 		}
+		node.retireActiveAttempt(active)
 		return
 	}
 	if current.State != AssignmentStateResultACKed && current.State != AssignmentStateRejected && current.State != AssignmentStateRevoked {
@@ -236,6 +239,7 @@ func (node *RuntimeWorker) revokeLocalAttempt(record AssignmentJournalRecord) {
 	node.stateMu.Lock()
 	delete(node.spoolAllowed, record.Identity.AttemptID)
 	node.stateMu.Unlock()
+	node.retireActiveAttempt(active)
 }
 
 func enforceRuntimeMessageLimit(value any) error {

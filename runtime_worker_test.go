@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -153,6 +155,102 @@ func TestRuntimeReliableFlowReplaysStableEventAndResult(t *testing.T) {
 	if len(records) != 0 {
 		t.Fatalf("fully acknowledged Attempt remained durable: %#v", records)
 	}
+}
+
+func TestRuntimeFinishedAttemptRenewsLeaseUntilSpoolIsAcknowledged(t *testing.T) {
+	dataDir := t.TempDir()
+	client := newFakeRuntimeClient()
+	client.createFn = func(_ context.Context, _ RuntimeHelloPayload) (*RuntimeReadyPayload, error) {
+		ready := client.readyPayload()
+		ready.LeaseTTLSeconds = 1
+		return ready, nil
+	}
+	var claimed atomic.Bool
+	client.claimFn = func(ctx context.Context, _ int, _ RuntimeClaimRequest) (*RuntimeRunAssignedPayload, error) {
+		if claimed.CompareAndSwap(false, true) {
+			return assignedRunForHello(client.helloSnapshot()), nil
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+
+	const renewsBeforeRecovery = int32(3)
+	var renewCalls atomic.Int32
+	var invalidInflight atomic.Bool
+	client.renewFn = func(_ context.Context, request RuntimeLeaseRenewPayload) (*RuntimeLeaseRenewedPayload, error) {
+		if request.Inflight != 1 || request.Capacity != 1 {
+			invalidInflight.Store(true)
+		}
+		renewCalls.Add(1)
+		return &RuntimeLeaseRenewedPayload{
+			AttemptIdentity: request.AttemptIdentity,
+			LeaseExpiresAt:  time.Now().Add(2 * time.Second).UTC(),
+		}, nil
+	}
+
+	firstUploadFailure := make(chan struct{})
+	var firstUploadFailureOnce sync.Once
+	client.eventFn = func(_ context.Context, request RuntimeRunEventPayload) (*RuntimeRunEventAckPayload, error) {
+		if renewCalls.Load() < renewsBeforeRecovery {
+			firstUploadFailureOnce.Do(func() { close(firstUploadFailure) })
+			return nil, errors.New("simulated spool upload outage")
+		}
+		return &RuntimeRunEventAckPayload{
+			ClientEventID: request.ClientEventID, ClientEventSeq: request.ClientEventSeq,
+			Sequence: request.ClientEventSeq,
+		}, nil
+	}
+	resultACKed := make(chan struct{})
+	var resultACKOnce sync.Once
+	client.resultFn = func(_ context.Context, request RuntimeRunResultPayload) (*RuntimeRunResultAckPayload, error) {
+		if renewCalls.Load() < renewsBeforeRecovery {
+			return nil, errors.New("Result reached Core before the controlled outage recovered")
+		}
+		resultACKOnce.Do(func() { close(resultACKed) })
+		return successfulResultACK(request.ResultID), nil
+	}
+
+	handlerReturned := make(chan struct{})
+	var handlerCalls atomic.Int32
+	node := newRuntimeWorkerForTest(dataDir, client, testRuntimeHandlerFunc(func(_ context.Context, _ any, runCtx RuntimeContext) (any, error) {
+		handlerCalls.Add(1)
+		if err := runCtx.Emit("run.progress", RuntimeJSONMap{"phase": "handler_finished"}); err != nil {
+			return nil, err
+		}
+		close(handlerReturned)
+		return RuntimeJSONMap{"ok": true}, nil
+	}))
+	node.Logger = log.New(io.Discard, "", 0)
+	errCh := startRuntimeWorkerForTest(node)
+	var stopOnce sync.Once
+	stop := func() {
+		stopOnce.Do(func() { stopRuntimeWorkerForTest(t, node, errCh) })
+	}
+	t.Cleanup(stop)
+
+	waitForTestSignal(t, handlerReturned, 2*time.Second, "handler completion")
+	waitForTestSignal(t, firstUploadFailure, 2*time.Second, "controlled spool upload failure")
+	eventuallyForTest(t, 5*time.Second, func() bool {
+		return renewCalls.Load() >= renewsBeforeRecovery
+	}, "lease renewal across multiple spool retry intervals")
+	waitForTestSignal(t, resultACKed, 2*time.Second, "Result ACK after spool recovery")
+	if handlerCalls.Load() != 1 {
+		t.Fatalf("handler calls = %d, want exactly 1", handlerCalls.Load())
+	}
+	if invalidInflight.Load() {
+		t.Fatal("finished Attempt was removed from in-flight capacity before Result ACK")
+	}
+	eventuallyForTest(t, time.Second, func() bool {
+		node.stateMu.RLock()
+		defer node.stateMu.RUnlock()
+		return len(node.active) == 0
+	}, "Result ACK to retire the active Attempt")
+	renewsAfterACK := renewCalls.Load()
+	time.Sleep(450 * time.Millisecond)
+	if got := renewCalls.Load(); got != renewsAfterACK {
+		t.Fatalf("lease renewed after Result ACK: before=%d after=%d", renewsAfterACK, got)
+	}
+	stop()
 }
 
 func TestRuntimeResumeAfterAssignmentACKResponseLossExecutesOnce(t *testing.T) {
