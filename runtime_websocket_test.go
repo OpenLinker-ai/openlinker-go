@@ -405,6 +405,138 @@ func TestRuntimeWebSocketNilCloseReturnsError(t *testing.T) {
 	}
 }
 
+func TestRuntimeWebSocketAttachInvalidatesPullGeneration(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	serverErr := make(chan error, 1)
+	server := newRuntimeSDKWSServer(t, func(_ *http.Request, conn *websocket.Conn) error {
+		return serveRuntimeSDKWSReady(conn, now)
+	}, serverErr)
+	defer server.Close()
+	runtimeClient, err := NewRuntime(server.URL, WithAgentToken("ol_agent_v2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeClient.attachmentMu.Lock()
+	runtimeClient.attachmentID = runtimeTestAttachmentID
+	runtimeClient.attachmentMu.Unlock()
+	connection, err := runtimeClient.DialRuntimeWebSocket(context.Background(), runtimeTestHello())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	runtimeClient.attachmentMu.RLock()
+	attachmentID := runtimeClient.attachmentID
+	runtimeClient.attachmentMu.RUnlock()
+	if attachmentID != "" {
+		t.Fatalf("Pull attachment remained after WebSocket attach: %q", attachmentID)
+	}
+	if _, err = runtimeClient.HeartbeatRuntimeSession(context.Background(), runtimeTestHello()); err == nil {
+		t.Fatal("HTTP heartbeat reused the generation detached by WebSocket attach")
+	}
+	if err = <-serverErr; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRuntimeWebSocketFailedAttachStillInvalidatesPullGeneration(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "upgrade unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	runtimeClient, err := NewRuntime(server.URL, WithAgentToken("ol_agent_v2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeClient.attachmentMu.Lock()
+	runtimeClient.attachmentID = runtimeTestAttachmentID
+	runtimeClient.attachmentMu.Unlock()
+	if _, err = runtimeClient.DialRuntimeWebSocket(context.Background(), runtimeTestHello()); err == nil {
+		t.Fatal("failed WebSocket upgrade returned no error")
+	}
+	runtimeClient.attachmentMu.RLock()
+	attachmentID := runtimeClient.attachmentID
+	runtimeClient.attachmentMu.RUnlock()
+	if attachmentID != "" {
+		t.Fatalf("ambiguous WebSocket attach retained Pull generation %q", attachmentID)
+	}
+}
+
+func TestRuntimeWebSocketAttachWaitsForInflightPullGeneration(t *testing.T) {
+	pullStarted := make(chan struct{})
+	releasePull := make(chan struct{})
+	webSocketReached := make(chan struct{})
+	serverErr := make(chan error, 1)
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api/v1/agent-runtime/ws" {
+			close(webSocketReached)
+			conn, err := upgrader.Upgrade(w, request, nil)
+			if err != nil {
+				serverErr <- err
+				return
+			}
+			defer conn.Close()
+			serverErr <- serveRuntimeSDKWSReady(conn, time.Now().UTC())
+			return
+		}
+		if request.Header.Get(RuntimeAttachmentHeader) != runtimeTestAttachmentID {
+			http.Error(w, "wrong attachment", http.StatusConflict)
+			return
+		}
+		close(pullStarted)
+		<-releasePull
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(RuntimeRunEventAckPayload{
+			ClientEventID: runtimeTestEventID, ClientEventSeq: 1, Sequence: 1,
+		})
+	}))
+	defer server.Close()
+	runtimeClient, err := NewRuntime(server.URL, WithAgentToken("ol_agent_v2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimeClient.attachmentMu.Lock()
+	runtimeClient.attachmentID = runtimeTestAttachmentID
+	runtimeClient.attachmentMu.Unlock()
+	eventDone := make(chan error, 1)
+	go func() {
+		_, eventErr := runtimeClient.AppendRuntimeEvent(context.Background(), RuntimeRunEventPayload{
+			AttemptIdentity: runtimeTestIdentity(), ClientEventID: runtimeTestEventID,
+			ClientEventSeq: 1, EventType: "run.progress", Payload: RuntimeJSONMap{"step": 1},
+		})
+		eventDone <- eventErr
+	}()
+	<-pullStarted
+	dialDone := make(chan struct {
+		connection *RuntimeWebSocket
+		err        error
+	}, 1)
+	go func() {
+		connection, dialErr := runtimeClient.DialRuntimeWebSocket(context.Background(), runtimeTestHello())
+		dialDone <- struct {
+			connection *RuntimeWebSocket
+			err        error
+		}{connection: connection, err: dialErr}
+	}()
+	select {
+	case <-webSocketReached:
+		t.Fatal("WebSocket attach crossed an in-flight Pull generation")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releasePull)
+	if err = <-eventDone; err != nil {
+		t.Fatal(err)
+	}
+	result := <-dialDone
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	defer result.connection.Close()
+	if err = <-serverErr; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func newRuntimeSDKWSServer(
 	t *testing.T,
 	handle func(*http.Request, *websocket.Conn) error,

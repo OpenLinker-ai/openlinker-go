@@ -114,6 +114,17 @@ func (r *Runtime) DialRuntimeWebSocket(
 	if err := validateRuntimeHello(hello); err != nil {
 		return nil, err
 	}
+	if r == nil || r.client == nil {
+		return nil, errors.New("openlinker: runtime client is nil")
+	}
+	// A WebSocket hello rotates the same durable attachment as Pull create.
+	// Wait for in-flight Pull operations, then fail closed by invalidating the
+	// cached Pull generation before any upgrade bytes can reach Core. Even an
+	// ambiguous/failed handshake must not let later Pull calls reuse a generation
+	// that Core may already have detached.
+	r.attachmentMu.Lock()
+	r.attachmentID = ""
+	defer r.attachmentMu.Unlock()
 	conn, response, err := r.dialRuntimeWebSocket(ctx)
 	if err != nil {
 		return nil, runtimeWSDialError(response, err)

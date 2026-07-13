@@ -241,6 +241,107 @@ func TestRuntimeTransportAutoRestoresPullAfterWebSocketSessionConflict(t *testin
 	}
 }
 
+func TestRuntimeWorkerStopFencesLatePullAttachment(t *testing.T) {
+	pull := newFakeRuntimeClient()
+	createStarted := make(chan struct{})
+	releaseCreate := make(chan struct{})
+	pull.createFn = func(context.Context, RuntimeHelloPayload) (*RuntimeReadyPayload, error) {
+		close(createStarted)
+		<-releaseCreate // Simulate a transport that returns success after cancellation.
+		return pull.readyPayload(), nil
+	}
+	firstWS := newFakeRuntimeDuplex(newFakeRuntimeClient())
+	node := newRuntimeWorkerForTest(t.TempDir(), pull, testRuntimeHandlerFunc(func(context.Context, any, RuntimeContext) (any, error) {
+		return RuntimeJSONMap{"unused": true}, nil
+	}))
+	node.Transport = RuntimeTransportAuto
+	node.runtimeDialer = &fakeRuntimeTransportDialer{connections: []RuntimeDuplexClient{firstWS}}
+	node.RetryMinimum = time.Millisecond
+	node.RetryMaximum = 5 * time.Millisecond
+	runDone := make(chan error, 1)
+	go func() { runDone <- node.Start(context.Background()) }()
+	waitForRuntimeTransport(t, node, RuntimeTransportWebSocketActive)
+	firstWS.disconnect(errors.New("force Pull fallback"))
+	select {
+	case <-createStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Pull attachment did not start")
+	}
+	stopDone := make(chan error, 1)
+	go func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		stopDone <- node.Stop(stopCtx)
+	}()
+	waitForRuntimeTransport(t, node, RuntimeTransportStopped)
+	close(releaseCreate)
+	if err := <-stopDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+	pull.mu.Lock()
+	closes := append([]RuntimeSessionCloseRequest(nil), pull.closes...)
+	pull.mu.Unlock()
+	if len(closes) != 1 || closes[0].Reason != "transport_transition_superseded" {
+		t.Fatalf("late Pull attachment closes = %#v", closes)
+	}
+}
+
+func TestRuntimeWorkerStopFencesLateWebSocketAttachment(t *testing.T) {
+	pull := newFakeRuntimeClient()
+	wsClient := newFakeRuntimeClient()
+	createStarted := make(chan struct{})
+	releaseCreate := make(chan struct{})
+	wsClient.createFn = func(context.Context, RuntimeHelloPayload) (*RuntimeReadyPayload, error) {
+		close(createStarted)
+		<-releaseCreate // Simulate a WebSocket ready reply after cancellation.
+		return wsClient.readyPayload(), nil
+	}
+	lateWS := newFakeRuntimeDuplex(wsClient)
+	dialer := &fakeRuntimeTransportDialer{}
+	node := newRuntimeWorkerForTest(t.TempDir(), pull, testRuntimeHandlerFunc(func(context.Context, any, RuntimeContext) (any, error) {
+		return RuntimeJSONMap{"unused": true}, nil
+	}))
+	node.Transport = RuntimeTransportAuto
+	node.runtimeDialer = dialer
+	node.RetryMinimum = time.Millisecond
+	node.RetryMaximum = 5 * time.Millisecond
+	runDone := make(chan error, 1)
+	go func() { runDone <- node.Start(context.Background()) }()
+	waitForRuntimeTransport(t, node, RuntimeTransportPullActive)
+	dialer.mu.Lock()
+	dialer.connections = append(dialer.connections, lateWS)
+	dialer.mu.Unlock()
+	dialer.allowProbe.Store(true)
+	select {
+	case <-createStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("WebSocket attachment did not start")
+	}
+	stopDone := make(chan error, 1)
+	go func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		stopDone <- node.Stop(stopCtx)
+	}()
+	waitForRuntimeTransport(t, node, RuntimeTransportStopped)
+	close(releaseCreate)
+	if err := <-stopDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+	wsClient.mu.Lock()
+	closes := append([]RuntimeSessionCloseRequest(nil), wsClient.closes...)
+	wsClient.mu.Unlock()
+	if len(closes) != 1 || closes[0].Reason != "transport_transition_superseded" {
+		t.Fatalf("late WebSocket attachment closes = %#v", closes)
+	}
+}
+
 func TestSwitchingRuntimeClientCancelsOldGenerationBeforePublishingNew(t *testing.T) {
 	oldClient := newFakeRuntimeClient()
 	entered := make(chan struct{})
@@ -252,7 +353,10 @@ func TestSwitchingRuntimeClientCancelsOldGenerationBeforePublishingNew(t *testin
 		return nil, ctx.Err()
 	}
 	gate := newSwitchingRuntimeClient(oldClient)
-	gate.activate(RuntimeTransportPull, oldClient)
+	epoch, _, _ := gate.beginTransition(RuntimeTransportSwitchingPull)
+	if !gate.activateIfCurrent(epoch, RuntimeTransportPull, oldClient) {
+		t.Fatal("initial Pull activation was rejected")
+	}
 	callDone := make(chan error, 1)
 	go func() {
 		_, err := gate.ClaimRuntimeRun(context.Background(), 25, RuntimeClaimRequest{
@@ -281,6 +385,22 @@ func TestSwitchingRuntimeClientCancelsOldGenerationBeforePublishingNew(t *testin
 	}
 	if _, err := gate.ClaimRuntimeRun(context.Background(), 0, RuntimeClaimRequest{}); !errors.Is(err, ErrRuntimeTransportSwitching) {
 		t.Fatalf("claim during transition = %v", err)
+	}
+}
+
+func TestSwitchingRuntimeClientStopFencesLateActivation(t *testing.T) {
+	gate := newSwitchingRuntimeClient(newFakeRuntimeClient())
+	epoch, _, _ := gate.beginTransition(RuntimeTransportSwitchingPull)
+	gate.stop()
+	if gate.activateIfCurrent(epoch, RuntimeTransportPull, newFakeRuntimeClient()) {
+		t.Fatal("a stopped transport accepted a late attachment")
+	}
+	_, state, active := gate.snapshot()
+	if state != RuntimeTransportStopped || active != nil {
+		t.Fatalf("stopped transport snapshot = state %s, active %#v", state, active)
+	}
+	if next, _, _ := gate.beginTransition(RuntimeTransportConnectingWS); next != 0 {
+		t.Fatalf("stopped transport reserved transition epoch %d", next)
 	}
 }
 

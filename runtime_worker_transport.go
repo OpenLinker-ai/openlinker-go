@@ -29,6 +29,8 @@ const (
 
 var ErrRuntimeTransportSwitching = errors.New("runtime transport is switching")
 
+var errRuntimeTransportTransitionSuperseded = errors.New("runtime transport transition was superseded")
+
 type RuntimeDuplexClient interface {
 	RuntimeClient
 	Done() <-chan struct{}
@@ -69,6 +71,9 @@ type switchingRuntimeClient struct {
 	cancel     context.CancelFunc
 	operations int
 	callClient RuntimeClient
+	// transitionEpoch fences attach work that completes after a newer transport
+	// transition (especially shutdown) has already taken ownership of the gate.
+	transitionEpoch uint64
 }
 
 func newSwitchingRuntimeClient(callClient RuntimeClient) *switchingRuntimeClient {
@@ -82,7 +87,9 @@ func newSwitchingRuntimeClient(callClient RuntimeClient) *switchingRuntimeClient
 
 func (client *switchingRuntimeClient) setState(state RuntimeTransportState) {
 	client.mu.Lock()
-	client.state = state
+	if client.state != RuntimeTransportStopped {
+		client.state = state
+	}
 	client.mu.Unlock()
 }
 
@@ -92,8 +99,12 @@ func (client *switchingRuntimeClient) snapshot() (RuntimeTransportMode, RuntimeT
 	return client.kind, client.state, client.active
 }
 
-func (client *switchingRuntimeClient) activate(kind RuntimeTransportMode, active RuntimeClient) {
+func (client *switchingRuntimeClient) activateIfCurrent(epoch uint64, kind RuntimeTransportMode, active RuntimeClient) bool {
 	client.mu.Lock()
+	defer client.mu.Unlock()
+	if epoch == 0 || epoch != client.transitionEpoch || client.state == RuntimeTransportStopped {
+		return false
+	}
 	if client.cancel != nil {
 		client.cancel()
 	}
@@ -105,11 +116,17 @@ func (client *switchingRuntimeClient) activate(kind RuntimeTransportMode, active
 	} else {
 		client.state = RuntimeTransportPullActive
 	}
-	client.mu.Unlock()
+	return true
 }
 
-func (client *switchingRuntimeClient) beginTransition(state RuntimeTransportState) (RuntimeTransportMode, RuntimeClient) {
+func (client *switchingRuntimeClient) beginTransition(state RuntimeTransportState) (uint64, RuntimeTransportMode, RuntimeClient) {
 	client.mu.Lock()
+	if client.state == RuntimeTransportStopped {
+		client.mu.Unlock()
+		return 0, "", nil
+	}
+	client.transitionEpoch++
+	epoch := client.transitionEpoch
 	client.state = state
 	kind, active := client.kind, client.active
 	client.active = nil
@@ -121,11 +138,12 @@ func (client *switchingRuntimeClient) beginTransition(state RuntimeTransportStat
 		client.cond.Wait()
 	}
 	client.mu.Unlock()
-	return kind, active
+	return epoch, kind, active
 }
 
 func (client *switchingRuntimeClient) stop() (RuntimeTransportMode, RuntimeClient) {
-	return client.beginTransition(RuntimeTransportStopped)
+	_, kind, active := client.beginTransition(RuntimeTransportStopped)
+	return kind, active
 }
 
 func (client *switchingRuntimeClient) begin(
