@@ -21,7 +21,7 @@ func (r *Runtime) CreateRuntimeV2Session(ctx context.Context, hello RuntimeV2Hel
 		return nil, err
 	}
 	var ready RuntimeV2ReadyPayload
-	if _, err := r.doRuntimeV2(ctx, http.MethodPost, "/agent-runtime/v2/sessions", nil, hello, &ready); err != nil {
+	if _, err := r.doRuntimeV2(ctx, http.MethodPost, "/agent-runtime/sessions", nil, hello, &ready); err != nil {
 		return nil, err
 	}
 	if err := validateRuntimeV2Ready(ready); err != nil {
@@ -35,7 +35,7 @@ func (r *Runtime) HeartbeatRuntimeV2Session(ctx context.Context, hello RuntimeV2
 		return nil, err
 	}
 	var ready RuntimeV2ReadyPayload
-	path := "/agent-runtime/v2/sessions/" + url.PathEscape(hello.RuntimeSessionID) + "/heartbeat"
+	path := "/agent-runtime/sessions/" + url.PathEscape(hello.RuntimeSessionID) + "/heartbeat"
 	if _, err := r.doRuntimeV2(ctx, http.MethodPost, path, nil, hello, &ready); err != nil {
 		return nil, err
 	}
@@ -49,7 +49,7 @@ func (r *Runtime) CloseRuntimeV2Session(ctx context.Context, request RuntimeV2Se
 	if err := validateRuntimeV2SessionClose(request); err != nil {
 		return err
 	}
-	path := "/agent-runtime/v2/sessions/" + url.PathEscape(request.RuntimeSessionID) + "/close"
+	path := "/agent-runtime/sessions/" + url.PathEscape(request.RuntimeSessionID) + "/close"
 	status, err := r.doRuntimeV2(ctx, http.MethodPost, path, nil, request, nil)
 	if err != nil {
 		return err
@@ -72,7 +72,7 @@ func (r *Runtime) ClaimRuntimeV2Run(
 	query := make(url.Values)
 	query.Set("wait", strconv.Itoa(waitSeconds))
 	var assigned RuntimeV2RunAssignedPayload
-	status, err := r.doRuntimeV2(ctx, http.MethodPost, "/agent-runtime/v2/runs/claim", query, request, &assigned)
+	status, err := r.doRuntimeV2(ctx, http.MethodPost, "/agent-runtime/runs/claim", query, request, &assigned)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +194,7 @@ func (r *Runtime) ResumeRuntimeV2Runs(ctx context.Context, request RuntimeV2Resu
 		return nil, err
 	}
 	var response RuntimeV2ResumeResponse
-	if _, err := r.doRuntimeV2(ctx, http.MethodPost, "/agent-runtime/v2/runs/resume", nil, request, &response); err != nil {
+	if _, err := r.doRuntimeV2(ctx, http.MethodPost, "/agent-runtime/runs/resume", nil, request, &response); err != nil {
 		return nil, err
 	}
 	if len(response.Decisions) != len(request.Attempts) {
@@ -223,7 +223,7 @@ func (r *Runtime) PollRuntimeV2Commands(
 	query.Set("runtime_session_id", runtimeSessionID)
 	query.Set("wait", strconv.Itoa(waitSeconds))
 	var response RuntimeV2CommandsResponse
-	if _, err := r.doRuntimeV2(ctx, http.MethodGet, "/agent-runtime/v2/commands", query, nil, &response); err != nil {
+	if _, err := r.doRuntimeV2(ctx, http.MethodGet, "/agent-runtime/commands", query, nil, &response); err != nil {
 		return nil, err
 	}
 	if response.Commands == nil || response.DatabaseTime.IsZero() {
@@ -662,7 +662,7 @@ func validateRuntimeV2Resume(value RuntimeV2ResumePayload) error {
 }
 
 func runtimeV2RunPath(runID, action string) string {
-	return "/agent-runtime/v2/runs/" + url.PathEscape(runID) + "/" + action
+	return "/agent-runtime/runs/" + url.PathEscape(runID) + "/" + action
 }
 
 func runtimeV2Capacity(capacity, inflight int64) bool {

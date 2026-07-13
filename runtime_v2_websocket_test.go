@@ -20,6 +20,9 @@ func TestRuntimeV2WebSocketHandshakeAssignmentAndCancelCorrelation(t *testing.T)
 	identity := runtimeV2TestIdentity()
 	serverErr := make(chan error, 1)
 	server := newRuntimeV2SDKWSServer(t, func(request *http.Request, conn *websocket.Conn) error {
+		if request.URL.Path != "/api/v1/agent-runtime/ws" {
+			return fmt.Errorf("WebSocket path = %q", request.URL.Path)
+		}
 		if got := request.Header.Get("Authorization"); got != "Bearer ol_agent_v2" {
 			return fmt.Errorf("authorization = %q", got)
 		}

@@ -125,8 +125,11 @@ func TestRuntimeV2ContractMatchesExportedConstants(t *testing.T) {
 		t.Fatalf("contract digest = %q, want %q", got, RuntimeContractDigest)
 	}
 
-	if contract.WebSocket.Path != "/api/v1/agent-runtime/v2/ws" {
+	if contract.WebSocket.Path != "/api/v1/agent-runtime/ws" {
 		t.Fatalf("websocket path = %q", contract.WebSocket.Path)
+	}
+	if strings.Contains(contract.WebSocket.Path, "/v2/") {
+		t.Fatalf("websocket path exposes protocol version: %q", contract.WebSocket.Path)
 	}
 	if contract.WebSocket.EnvelopeSchema.Ref != "#/$defs/RuntimeMessage" {
 		t.Fatalf("websocket envelope schema = %q", contract.WebSocket.EnvelopeSchema.Ref)
@@ -152,15 +155,21 @@ func TestRuntimeV2ContractMatchesExportedConstants(t *testing.T) {
 		if endpoint.Method == "" || endpoint.Path == "" {
 			t.Fatalf("runtime endpoint is incomplete: %#v", endpoint)
 		}
+		if !strings.HasPrefix(endpoint.Path, "/api/v1/agent-runtime/") {
+			t.Fatalf("runtime endpoint is outside canonical prefix: %q", endpoint.Path)
+		}
+		if strings.Contains(endpoint.Path, "/agent-runtime/"+contract.Version+"/") {
+			t.Fatalf("runtime endpoint exposes protocol version: %q", endpoint.Path)
+		}
 		paths = append(paths, endpoint.Path)
 	}
 	for _, requiredPath := range []string{
-		"/api/v1/agent-runtime/v2/sessions",
-		"/api/v1/agent-runtime/v2/runs/claim",
-		"/api/v1/agent-runtime/v2/runs/{id}/result",
-		"/api/v1/agent-runtime/v2/runs/resume",
-		"/api/v1/agent-runtime/v2/commands",
-		"/api/v1/agent-runtime/v2/call-agent",
+		"/api/v1/agent-runtime/sessions",
+		"/api/v1/agent-runtime/runs/claim",
+		"/api/v1/agent-runtime/runs/{id}/result",
+		"/api/v1/agent-runtime/runs/resume",
+		"/api/v1/agent-runtime/commands",
+		"/api/v1/agent-runtime/call-agent",
 	} {
 		if !slices.Contains(paths, requiredPath) {
 			t.Fatalf("runtime contract missing endpoint %q", requiredPath)

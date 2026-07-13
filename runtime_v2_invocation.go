@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	runtimeV2CallAgentPath         = "/api/v1/agent-runtime/v2/call-agent"
+	runtimeV2CallAgentPath         = "/api/v1/agent-runtime/call-agent"
 	runtimeV2InvocationProofDomain = "openlinker/runtime-v2/invocation-proof"
 	runtimeV2InvocationHeader      = "OpenLinker-Invocation-Context"
 	runtimeV2InvocationProofHeader = "OpenLinker-Invocation-Proof"

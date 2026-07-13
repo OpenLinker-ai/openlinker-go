@@ -40,7 +40,7 @@ func TestRuntimeV2CommandsAndCancelAck(t *testing.T) {
 		steps <- req.URL.RequestURI()
 		w.Header().Set("Content-Type", "application/json")
 		switch req.URL.Path {
-		case "/api/v1/agent-runtime/v2/commands":
+		case "/api/v1/agent-runtime/commands":
 			if req.Method != http.MethodGet || req.URL.Query().Get("wait") != "17" ||
 				req.URL.Query().Get("runtime_session_id") != runtimeV2TestSessionID {
 				t.Errorf("command request = %s %s", req.Method, req.URL.RequestURI())
@@ -49,7 +49,7 @@ func TestRuntimeV2CommandsAndCancelAck(t *testing.T) {
 				Commands:     []RuntimeV2PendingCommand{{Type: RuntimeV2RunCancel, Payload: cancelPayload}},
 				DatabaseTime: now,
 			})
-		case "/api/v1/agent-runtime/v2/runs/" + runtimeV2TestRunID + "/cancel-ack":
+		case "/api/v1/agent-runtime/runs/" + runtimeV2TestRunID + "/cancel-ack":
 			var ack RuntimeV2RunCancelAckPayload
 			decodeRuntimeV2TestBody(t, req, &ack)
 			if ack.CancellationID != runtimeV2TestCancellationID || ack.CancelState != RuntimeV2CancelUnsupported ||
@@ -106,8 +106,8 @@ func TestRuntimeV2CommandsAndCancelAck(t *testing.T) {
 		got = append(got, step)
 	}
 	want := []string{
-		"/api/v1/agent-runtime/v2/commands?runtime_session_id=" + runtimeV2TestSessionID + "&wait=17",
-		"/api/v1/agent-runtime/v2/runs/" + runtimeV2TestRunID + "/cancel-ack",
+		"/api/v1/agent-runtime/commands?runtime_session_id=" + runtimeV2TestSessionID + "&wait=17",
+		"/api/v1/agent-runtime/runs/" + runtimeV2TestRunID + "/cancel-ack",
 	}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("steps = %#v, want %#v", got, want)

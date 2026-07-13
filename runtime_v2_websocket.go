@@ -198,7 +198,7 @@ func (r *Runtime) dialRuntimeV2WebSocket(ctx context.Context) (*websocket.Conn, 
 		HandshakeTimeout:  runtimeV2WSHandshakeWait,
 		EnableCompression: false,
 	}
-	target, err := url.Parse(r.client.endpoint("/agent-runtime/v2/ws", nil))
+	target, err := url.Parse(r.client.endpoint("/agent-runtime/ws", nil))
 	if err != nil {
 		return nil, nil, fmt.Errorf("openlinker: parse runtime WebSocket URL: %w", err)
 	}

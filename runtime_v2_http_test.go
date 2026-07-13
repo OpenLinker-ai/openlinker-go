@@ -38,7 +38,7 @@ func TestRuntimeV2HTTPFlowRequiresExplicitAssignmentConfirmation(t *testing.T) {
 		steps = append(steps, req.URL.Path)
 		mu.Unlock()
 		switch req.URL.Path {
-		case "/api/v1/agent-runtime/v2/sessions":
+		case "/api/v1/agent-runtime/sessions":
 			var hello RuntimeV2HelloPayload
 			decodeRuntimeV2TestBody(t, req, &hello)
 			if hello.RuntimeSessionID != runtimeV2TestSessionID {
@@ -48,7 +48,7 @@ func TestRuntimeV2HTTPFlowRequiresExplicitAssignmentConfirmation(t *testing.T) {
 				CoreInstanceID: runtimeV2TestCoreID, Features: RuntimeRequiredFeatures(),
 				OfferTTLSeconds: 30, LeaseTTLSeconds: 60, DatabaseTime: now,
 			})
-		case "/api/v1/agent-runtime/v2/runs/claim":
+		case "/api/v1/agent-runtime/runs/claim":
 			if req.URL.Query().Get("wait") != "12" {
 				t.Errorf("wait = %q", req.URL.Query().Get("wait"))
 			}
@@ -58,19 +58,19 @@ func TestRuntimeV2HTTPFlowRequiresExplicitAssignmentConfirmation(t *testing.T) {
 				Input: map[string]any{"q": "hello"}, NodeEnvelope: "ol_ctx_v2.current.payload.signature",
 				AgentInvocationToken: "ol_inv_v2.current.payload.signature",
 			})
-		case "/api/v1/agent-runtime/v2/runs/" + runtimeV2TestRunID + "/assignment-ack":
+		case "/api/v1/agent-runtime/runs/" + runtimeV2TestRunID + "/assignment-ack":
 			var ack RuntimeV2AssignmentAckPayload
 			decodeRuntimeV2TestBody(t, req, &ack)
 			writeRuntimeV2TestJSON(t, w, RuntimeV2AssignmentConfirmedPayload{
 				AttemptIdentity: ack.AttemptIdentity, AttemptNo: 1, LeaseExpiresAt: now.Add(time.Minute),
 			})
-		case "/api/v1/agent-runtime/v2/runs/" + runtimeV2TestRunID + "/events":
+		case "/api/v1/agent-runtime/runs/" + runtimeV2TestRunID + "/events":
 			var event RuntimeV2RunEventPayload
 			decodeRuntimeV2TestBody(t, req, &event)
 			writeRuntimeV2TestJSON(t, w, RuntimeV2RunEventAckPayload{
 				ClientEventID: event.ClientEventID, ClientEventSeq: event.ClientEventSeq, Sequence: 4,
 			})
-		case "/api/v1/agent-runtime/v2/runs/" + runtimeV2TestRunID + "/result":
+		case "/api/v1/agent-runtime/runs/" + runtimeV2TestRunID + "/result":
 			var result RuntimeV2RunResultPayload
 			decodeRuntimeV2TestBody(t, req, &result)
 			writeRuntimeV2TestJSON(t, w, RuntimeV2RunResultAckPayload{
@@ -122,11 +122,11 @@ func TestRuntimeV2HTTPFlowRequiresExplicitAssignmentConfirmation(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	want := []string{
-		"/api/v1/agent-runtime/v2/sessions",
-		"/api/v1/agent-runtime/v2/runs/claim",
-		"/api/v1/agent-runtime/v2/runs/" + runtimeV2TestRunID + "/assignment-ack",
-		"/api/v1/agent-runtime/v2/runs/" + runtimeV2TestRunID + "/events",
-		"/api/v1/agent-runtime/v2/runs/" + runtimeV2TestRunID + "/result",
+		"/api/v1/agent-runtime/sessions",
+		"/api/v1/agent-runtime/runs/claim",
+		"/api/v1/agent-runtime/runs/" + runtimeV2TestRunID + "/assignment-ack",
+		"/api/v1/agent-runtime/runs/" + runtimeV2TestRunID + "/events",
+		"/api/v1/agent-runtime/runs/" + runtimeV2TestRunID + "/result",
 	}
 	if len(steps) != len(want) {
 		t.Fatalf("steps = %#v", steps)

@@ -25,7 +25,7 @@
     "max_pull_wait_seconds": 30
   },
   "websocket": {
-    "path": "/api/v1/agent-runtime/v2/ws",
+    "path": "/api/v1/agent-runtime/ws",
     "auth": "agent_principal_and_node_device",
     "envelope_schema": {
       "$ref": "#/$defs/RuntimeMessage"
@@ -203,7 +203,7 @@
     {
       "client_method": "createRuntimeSession",
       "http_method": "POST",
-      "path": "/api/v1/agent-runtime/v2/sessions",
+      "path": "/api/v1/agent-runtime/sessions",
       "request_body_schema": {
         "$ref": "#/$defs/RuntimeHelloPayload"
       },
@@ -217,7 +217,7 @@
     {
       "client_method": "claimRuntimeRun",
       "http_method": "POST",
-      "path": "/api/v1/agent-runtime/v2/runs/claim",
+      "path": "/api/v1/agent-runtime/runs/claim",
       "query": {
         "wait": {
           "type": "integer",
@@ -239,7 +239,7 @@
     {
       "client_method": "ackRuntimeAssignment",
       "http_method": "POST",
-      "path": "/api/v1/agent-runtime/v2/runs/{id}/assignment-ack",
+      "path": "/api/v1/agent-runtime/runs/{id}/assignment-ack",
       "request_body_schema": {
         "$ref": "#/$defs/RunAssignmentAckPayload"
       },
@@ -253,7 +253,7 @@
     {
       "client_method": "rejectRuntimeAssignment",
       "http_method": "POST",
-      "path": "/api/v1/agent-runtime/v2/runs/{id}/assignment-reject",
+      "path": "/api/v1/agent-runtime/runs/{id}/assignment-reject",
       "request_body_schema": {
         "$ref": "#/$defs/RunAssignmentRejectPayload"
       },
@@ -267,7 +267,7 @@
     {
       "client_method": "renewRuntimeLease",
       "http_method": "POST",
-      "path": "/api/v1/agent-runtime/v2/runs/{id}/lease-renew",
+      "path": "/api/v1/agent-runtime/runs/{id}/lease-renew",
       "request_body_schema": {
         "$ref": "#/$defs/RunLeaseRenewPayload"
       },
@@ -281,7 +281,7 @@
     {
       "client_method": "sendRuntimeEvent",
       "http_method": "POST",
-      "path": "/api/v1/agent-runtime/v2/runs/{id}/events",
+      "path": "/api/v1/agent-runtime/runs/{id}/events",
       "request_body_schema": {
         "$ref": "#/$defs/RunEventPayload"
       },
@@ -295,7 +295,7 @@
     {
       "client_method": "completeRuntimeRun",
       "http_method": "POST",
-      "path": "/api/v1/agent-runtime/v2/runs/{id}/result",
+      "path": "/api/v1/agent-runtime/runs/{id}/result",
       "request_body_schema": {
         "$ref": "#/$defs/RunResultPayload"
       },
@@ -309,7 +309,7 @@
     {
       "client_method": "resumeRuntimeRuns",
       "http_method": "POST",
-      "path": "/api/v1/agent-runtime/v2/runs/resume",
+      "path": "/api/v1/agent-runtime/runs/resume",
       "request_body_schema": {
         "$ref": "#/$defs/RuntimeResumePayload"
       },
@@ -323,7 +323,7 @@
     {
       "client_method": "ackRuntimeCancel",
       "http_method": "POST",
-      "path": "/api/v1/agent-runtime/v2/runs/{id}/cancel-ack",
+      "path": "/api/v1/agent-runtime/runs/{id}/cancel-ack",
       "request_body_schema": {
         "$ref": "#/$defs/RunCancelAckPayload"
       },
@@ -337,7 +337,7 @@
     {
       "client_method": "pollRuntimeCommands",
       "http_method": "GET",
-      "path": "/api/v1/agent-runtime/v2/commands",
+      "path": "/api/v1/agent-runtime/commands",
       "query": {
         "runtime_session_id": {
           "type": "string",
@@ -360,7 +360,7 @@
     {
       "client_method": "callAgent",
       "http_method": "POST",
-      "path": "/api/v1/agent-runtime/v2/call-agent",
+      "path": "/api/v1/agent-runtime/call-agent",
       "required_headers": [
         "Idempotency-Key",
         "OpenLinker-Invocation-Context",

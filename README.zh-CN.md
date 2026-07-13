@@ -2,7 +2,7 @@
 
 `openlinker-go` 是 OpenLinker Core 的 Go SDK。Go 服务使用 `NewClient` 查找和调用 Agent、
 监听运行事件、验证 Webhook，并调用 A2A JSON-RPC、HTTP+JSON/SSE 和 gRPC；Agent
-Node 通过 `NewRuntime` 使用严格的 Runtime v2 协议原语。两者都适用于自托管 Core
+Node 通过 `NewRuntime` 使用严格的 OpenLinker Runtime 协议原语。两者都适用于自托管 Core
 和基于其公开 API 构建的服务。
 
 English documentation: [README.md](./README.md)
@@ -25,14 +25,14 @@ flowchart LR
   Service["Go service / CLI / backend"] --> ClientSDK["openlinker-go Client"]
   ClientSDK -->|"REST client with OPENLINKER_USER_TOKEN"| Core["openlinker-core<br/>registry / runs / events"]
   ClientSDK -->|"A2A JSON-RPC / HTTP+JSON / gRPC"| Core
-  AgentNode["openlinker-agent-node"] --> RuntimeSDK["openlinker-go Runtime v2"]
-  RuntimeSDK -->|"mTLS + Agent Token / v2 WebSocket 或 v2 HTTP Pull"| Core
+  AgentNode["openlinker-agent-node"] --> RuntimeSDK["openlinker-go Runtime"]
+  RuntimeSDK -->|"mTLS + Agent Token / WebSocket 或 HTTP 长轮询"| Core
 
   HostedBridge["Hosted Bridge<br/>可选部署适配层"] -.->|"同一 Core API contract"| Core
 
   Core -->|"direct_http"| HTTPAgent["公网 HTTPS Agent"]
   Core -->|"mcp_server"| MCPAgent["远程 MCP / JSON-RPC server"]
-  Core -->|"Runtime v2 分配与取消"| AgentNode
+  Core -->|"Runtime 分配与取消"| AgentNode
 ```
 
 ## 安装
@@ -115,15 +115,15 @@ err = client.StreamRunEvents(context.Background(), result.RunID, openlinker.Stre
 平台托管 callback 复用 Core run event stream，不需要公网 callback URL。外部 webhook
 callback 适合服务端集成。处理 webhook 时必须先校验原始请求体签名，再解析 payload。
 
-## Runtime v2
+## OpenLinker Runtime
 
-`NewRuntime` 暴露两条严格的 Runtime v2 传输：正常网络默认使用低延迟 WebSocket；
+`NewRuntime` 暴露两条严格的 OpenLinker Runtime 传输：正常网络默认使用低延迟 WebSocket；
 无法稳定维持 WebSocket 的受限网络使用 HTTP long-poll。Runtime 流量必须访问 Core
 独立的 mTLS 地址，同时提供已登记的 Node 设备证书和绑定当前 Agent 的 Agent Token。
 两条通道共享同一套 Session、Lease、Fencing、Resume、Event ACK、Result ACK 和取消语义，
 不存在 v1 fallback。
 
-创建 Runtime v2 client 时必须显式使用 Agent Token：
+创建 OpenLinker Runtime client 时必须显式使用 Agent Token：
 
 ```go
 runtimeClient, err := openlinker.NewRuntime(
@@ -138,8 +138,12 @@ runtimeClient, err := openlinker.NewRuntime(
 `DialRuntimeV2WebSocket` 会先鉴权升级，再发送 `runtime.hello`，并且只在收到关联正确的
 `runtime.ready` 后返回。连接内部只有一个 writer，严格限制完整消息为 4 MiB；Assignment、
 Cancel、Drain 和 Revoke 都以类型化推送交付，业务 ACK 按 `reply_to_message_id` 等待，
-多 Attempt Resume 会收齐每一条决定。它与 HTTP client 实现同一组 Runtime v2 方法，
+多 Attempt Resume 会收齐每一条决定。它与 HTTP client 实现同一组协议方法，
 持久化 worker 可以在不改变执行逻辑的前提下切换 transport。
+
+WebSocket 的标准端点是 `/api/v1/agent-runtime/ws`，HTTP 方法统一使用
+`/api/v1/agent-runtime/` 前缀。协议版本 2 继续由握手 contract 和 `RuntimeV2*` SDK API
+表达，不再写进 URL。
 
 真实 worker 统一使用 `openlinker-agent-node`：它负责持久身份、分配 journal、加密的
 Event/Result spool、续租、resume、取消和优雅 drain。自研 Node 可以使用
@@ -157,7 +161,7 @@ SDK 支持 OpenLinker 托管的 A2A JSON-RPC、HTTP+JSON/SSE 和 gRPC。普通 H
 优先使用 JSON-RPC 或 HTTP+JSON；当 Agent Card 声明 `GRPC` 接口且调用方可以访问 HTTP/2
 gRPC endpoint 时使用 gRPC。
 
-gRPC 是 A2A transport binding，不替代 Agent Node 的 Runtime v2 传输。
+gRPC 是 A2A transport binding，不替代 Agent Node 的 OpenLinker Runtime 传输。
 
 ## 开发
 

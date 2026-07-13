@@ -2,9 +2,9 @@
 
 `openlinker-go` is the Go SDK for OpenLinker Core. Use `NewClient` to discover
 and invoke Agents, stream run events, verify webhooks, and call A2A transports
-including JSON-RPC, HTTP+JSON/SSE, and gRPC. Use `NewRuntime` for Agent runtime
-v2 protocol primitives. Both work with self-hosted Core and services built on
-its public API.
+including JSON-RPC, HTTP+JSON/SSE, and gRPC. Use `NewRuntime` for OpenLinker
+Runtime protocol primitives. Both work with self-hosted Core and services built
+on its public API.
 
 Chinese documentation: [README.zh-CN.md](./README.zh-CN.md)
 
@@ -34,14 +34,14 @@ flowchart LR
   Service["Go service / CLI / backend"] --> ClientSDK["openlinker-go Client"]
   ClientSDK -->|"REST client with OPENLINKER_USER_TOKEN"| Core["openlinker-core<br/>registry / runs / events"]
   ClientSDK -->|"A2A JSON-RPC / HTTP+JSON / gRPC"| Core
-  AgentNode["openlinker-agent-node"] --> RuntimeSDK["openlinker-go Runtime v2"]
-  RuntimeSDK -->|"mTLS + Agent Token / v2 WebSocket or v2 HTTP pull"| Core
+  AgentNode["openlinker-agent-node"] --> RuntimeSDK["openlinker-go Runtime"]
+  RuntimeSDK -->|"mTLS + Agent Token / WebSocket or HTTP long-poll"| Core
 
   HostedBridge["Hosted Bridge<br/>optional deployment adapter"] -.->|"same Core API contract"| Core
 
   Core -->|"direct_http"| HTTPAgent["Public HTTPS Agent"]
   Core -->|"mcp_server"| MCPAgent["Remote MCP / JSON-RPC server"]
-  Core -->|"Runtime v2 assignments and cancellation"| AgentNode
+  Core -->|"Runtime assignments and cancellation"| AgentNode
 ```
 
 ## Quick Start
@@ -153,16 +153,16 @@ if err != nil || !ok {
 _ = body
 ```
 
-## Runtime v2
+## OpenLinker Runtime
 
-`NewRuntime` exposes the two strict Runtime v2 transports: WebSocket for the
+`NewRuntime` exposes the two strict OpenLinker Runtime transports: WebSocket for the
 normal low-latency path and HTTP long-poll for networks that cannot keep a
 WebSocket alive. Runtime traffic must use the dedicated mTLS Core origin, a
 verified Node certificate, and the Agent Token bound to that Agent. Both
 transports use the same session, lease, fencing, resume, Event ACK, Result ACK,
 and cancellation semantics. There is no v1 fallback.
 
-Create a Runtime v2 client with the Agent Token explicitly:
+Create an OpenLinker Runtime client with the Agent Token explicitly:
 
 ```go
 runtimeClient, err := openlinker.NewRuntime(
@@ -179,8 +179,12 @@ name is not accepted as an alias.
 returns only after a correlated `runtime.ready`. The connection has one writer,
 strict 4 MiB envelope decoding, typed assignment/command pushes, correlated
 business ACK waits, multi-message resume, and explicit close-code reporting.
-It also implements the same Runtime v2 method surface as the HTTP client, so a
+It also implements the same protocol method surface as the HTTP client, so a
 durable worker can switch transports without changing execution logic.
+
+The canonical WebSocket endpoint is `/api/v1/agent-runtime/ws`; HTTP methods
+use the `/api/v1/agent-runtime/` prefix. Protocol version 2 remains in the
+handshake contract and `RuntimeV2*` SDK API, not in the URL.
 
 Use `openlinker-agent-node` for real workers. It owns durable identity, the
 assignment journal, encrypted Event/Result spooling, lease renewal, resume,
@@ -219,8 +223,8 @@ if err != nil {
 defer a2a.Close()
 ```
 
-gRPC is an A2A transport binding. It does not replace the Agent Node Runtime v2
-transport.
+gRPC is an A2A transport binding. It does not replace the Agent Node OpenLinker
+Runtime transport.
 
 
 ## Core Surface

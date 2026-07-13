@@ -28,7 +28,7 @@ func TestBuildRuntimeV2InvocationProofMatchesCoreVector(t *testing.T) {
 	}
 	// Generated once with Core's BuildRuntimeInvocationProof. This SDK test
 	// intentionally does not import Core.
-	const want = "NPUA_HnpwGbee56_RoGEAUZl-A8j1ASRsSJU2fBaJk0"
+	const want = "lBuoEqAJKl9ujEr72b0oR3cuuoqJPqCs1vkABcw6zA0"
 	if proof != want {
 		t.Fatalf("proof = %q, want %q", proof, want)
 	}
