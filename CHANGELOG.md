@@ -22,8 +22,9 @@ runtime connector, callback, and A2A contracts are declared stable.
 - Breaking: moved every Runtime HTTP and WebSocket endpoint from the versioned
   URL prefix to `/api/v1/agent-runtime/*`. Protocol version 2, the
   `openlinker.runtime.v2` contract ID, and the `RuntimeV2*` API remain pinned in
-  the handshake contract; the new contract digest is
-  `052ed16553eeb896bc7a88dabd1ada77466a4db0c87b55c997c6b91ab72a72de`.
+  the handshake contract. The contract now binds session heartbeat and close,
+  including the close request body and empty `204` response; its digest is
+  `fb92bb6ddbc65bd3353b5d7c63ad148dd510e4d0ac0a6ca6110461d91e2dec53`.
 - Made Core run creation idempotent by sending `Idempotency-Key` from
   `RunAgent` and `StartAgentRun`. The SDK generates a safe random key when the
   caller does not provide one and exposes Core replay results through

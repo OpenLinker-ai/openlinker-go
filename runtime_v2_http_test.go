@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ func TestRuntimeV2HTTPFlowRequiresExplicitAssignmentConfirmation(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	identity := runtimeV2TestIdentity()
 	var mu sync.Mutex
-	steps := make([]string, 0, 5)
+	steps := make([]string, 0, 7)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if req.Header.Get("Authorization") != "Bearer ol_agent_v2" {
 			t.Errorf("authorization = %q", req.Header.Get("Authorization"))
@@ -48,6 +49,23 @@ func TestRuntimeV2HTTPFlowRequiresExplicitAssignmentConfirmation(t *testing.T) {
 				CoreInstanceID: runtimeV2TestCoreID, Features: RuntimeRequiredFeatures(),
 				OfferTTLSeconds: 30, LeaseTTLSeconds: 60, DatabaseTime: now,
 			})
+		case "/api/v1/agent-runtime/sessions/" + runtimeV2TestSessionID + "/heartbeat":
+			var heartbeat RuntimeV2HelloPayload
+			decodeRuntimeV2TestBody(t, req, &heartbeat)
+			if !reflect.DeepEqual(heartbeat, runtimeV2TestHello()) {
+				t.Errorf("heartbeat = %#v", heartbeat)
+			}
+			writeRuntimeV2TestJSON(t, w, RuntimeV2ReadyPayload{
+				CoreInstanceID: runtimeV2TestCoreID, Features: RuntimeRequiredFeatures(),
+				OfferTTLSeconds: 30, LeaseTTLSeconds: 60, DatabaseTime: now,
+			})
+		case "/api/v1/agent-runtime/sessions/" + runtimeV2TestSessionID + "/close":
+			var closeRequest RuntimeV2SessionCloseRequest
+			decodeRuntimeV2TestBody(t, req, &closeRequest)
+			if closeRequest.RuntimeSessionID != runtimeV2TestSessionID || closeRequest.Status != "offline" || closeRequest.Reason != "process restart" {
+				t.Errorf("close request = %#v", closeRequest)
+			}
+			w.WriteHeader(http.StatusNoContent)
 		case "/api/v1/agent-runtime/runs/claim":
 			if req.URL.Query().Get("wait") != "12" {
 				t.Errorf("wait = %q", req.URL.Query().Get("wait"))
@@ -90,6 +108,9 @@ func TestRuntimeV2HTTPFlowRequiresExplicitAssignmentConfirmation(t *testing.T) {
 	if _, err = runtimeClient.CreateRuntimeV2Session(context.Background(), hello); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = runtimeClient.HeartbeatRuntimeV2Session(context.Background(), hello); err != nil {
+		t.Fatal(err)
+	}
 	assigned, err := runtimeClient.ClaimRuntimeV2Run(context.Background(), 12, RuntimeV2ClaimRequest{
 		RuntimeSessionID: hello.RuntimeSessionID, Capacity: 1, Inflight: 0,
 	})
@@ -118,15 +139,24 @@ func TestRuntimeV2HTTPFlowRequiresExplicitAssignmentConfirmation(t *testing.T) {
 	if err != nil || resultAck.ResultID != runtimeV2TestResultID {
 		t.Fatalf("result ACK = %#v, %v", resultAck, err)
 	}
+	if err = runtimeClient.CloseRuntimeV2Session(context.Background(), RuntimeV2SessionCloseRequest{
+		NodeID: runtimeV2TestNodeID, AgentID: runtimeV2TestAgentID, WorkerID: "worker-a",
+		RuntimeSessionID: runtimeV2TestSessionID, SessionEpoch: 1,
+		Status: "offline", Reason: "process restart",
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	mu.Lock()
 	defer mu.Unlock()
 	want := []string{
 		"/api/v1/agent-runtime/sessions",
+		"/api/v1/agent-runtime/sessions/" + runtimeV2TestSessionID + "/heartbeat",
 		"/api/v1/agent-runtime/runs/claim",
 		"/api/v1/agent-runtime/runs/" + runtimeV2TestRunID + "/assignment-ack",
 		"/api/v1/agent-runtime/runs/" + runtimeV2TestRunID + "/events",
 		"/api/v1/agent-runtime/runs/" + runtimeV2TestRunID + "/result",
+		"/api/v1/agent-runtime/sessions/" + runtimeV2TestSessionID + "/close",
 	}
 	if len(steps) != len(want) {
 		t.Fatalf("steps = %#v", steps)
@@ -135,6 +165,27 @@ func TestRuntimeV2HTTPFlowRequiresExplicitAssignmentConfirmation(t *testing.T) {
 		if steps[index] != want[index] {
 			t.Fatalf("steps = %#v, want %#v", steps, want)
 		}
+	}
+}
+
+func TestRuntimeV2HTTPCloseRequiresNoContent(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	runtimeClient, err := NewRuntime(server.URL, WithAgentToken("ol_agent_v2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runtimeClient.CloseRuntimeV2Session(context.Background(), RuntimeV2SessionCloseRequest{
+		NodeID: runtimeV2TestNodeID, AgentID: runtimeV2TestAgentID, WorkerID: "worker-a",
+		RuntimeSessionID: runtimeV2TestSessionID, SessionEpoch: 1,
+		Status: "closed", Reason: "operator shutdown",
+	})
+	if err == nil {
+		t.Fatal("runtime session close accepted a non-204 response")
 	}
 }
 

@@ -68,6 +68,21 @@ func TestCoreClientV1ContractMapsToImplementedMethods(t *testing.T) {
 
 func TestRuntimeV2ContractMatchesExportedConstants(t *testing.T) {
 	raw := readContractFile(t, "contracts/core-runtime.v2.json")
+	type runtimeEndpointContract struct {
+		ClientMethod      string `json:"client_method"`
+		Method            string `json:"http_method"`
+		Path              string `json:"path"`
+		RequestBodySchema struct {
+			Ref string `json:"$ref"`
+		} `json:"request_body_schema"`
+		SuccessResponseSchema struct {
+			Ref string `json:"$ref"`
+		} `json:"success_response_schema"`
+		EmptyResponseStatus int `json:"empty_response_status"`
+		ErrorResponseSchema struct {
+			Ref string `json:"$ref"`
+		} `json:"error_response_schema"`
+	}
 	var contract struct {
 		Name              string   `json:"name"`
 		Scope             string   `json:"scope"`
@@ -87,10 +102,7 @@ func TestRuntimeV2ContractMatchesExportedConstants(t *testing.T) {
 				} `json:"schema"`
 			} `json:"messages"`
 		} `json:"websocket"`
-		Endpoints []struct {
-			Method string `json:"http_method"`
-			Path   string `json:"path"`
-		} `json:"endpoints"`
+		Endpoints    []runtimeEndpointContract `json:"endpoints"`
 		LegacyRoutes []struct {
 			ResponseStatus int    `json:"response_status"`
 			ErrorCode      string `json:"error_code"`
@@ -150,9 +162,9 @@ func TestRuntimeV2ContractMatchesExportedConstants(t *testing.T) {
 		}
 	}
 
-	paths := make([]string, 0, len(contract.Endpoints))
+	endpoints := make(map[string]runtimeEndpointContract, len(contract.Endpoints))
 	for _, endpoint := range contract.Endpoints {
-		if endpoint.Method == "" || endpoint.Path == "" {
+		if endpoint.ClientMethod == "" || endpoint.Method == "" || endpoint.Path == "" {
 			t.Fatalf("runtime endpoint is incomplete: %#v", endpoint)
 		}
 		if !strings.HasPrefix(endpoint.Path, "/api/v1/agent-runtime/") {
@@ -161,18 +173,63 @@ func TestRuntimeV2ContractMatchesExportedConstants(t *testing.T) {
 		if strings.Contains(endpoint.Path, "/agent-runtime/"+contract.Version+"/") {
 			t.Fatalf("runtime endpoint exposes protocol version: %q", endpoint.Path)
 		}
-		paths = append(paths, endpoint.Path)
+		key := endpoint.Method + " " + endpoint.Path
+		if _, exists := endpoints[key]; exists {
+			t.Fatalf("runtime contract has duplicate endpoint %q", key)
+		}
+		endpoints[key] = endpoint
 	}
-	for _, requiredPath := range []string{
-		"/api/v1/agent-runtime/sessions",
-		"/api/v1/agent-runtime/runs/claim",
-		"/api/v1/agent-runtime/runs/{id}/result",
-		"/api/v1/agent-runtime/runs/resume",
-		"/api/v1/agent-runtime/commands",
-		"/api/v1/agent-runtime/call-agent",
+	requiredEndpoints := []string{
+		"POST /api/v1/agent-runtime/sessions",
+		"POST /api/v1/agent-runtime/sessions/{id}/heartbeat",
+		"POST /api/v1/agent-runtime/sessions/{id}/close",
+		"POST /api/v1/agent-runtime/runs/claim",
+		"POST /api/v1/agent-runtime/runs/{id}/assignment-ack",
+		"POST /api/v1/agent-runtime/runs/{id}/assignment-reject",
+		"POST /api/v1/agent-runtime/runs/{id}/lease-renew",
+		"POST /api/v1/agent-runtime/runs/{id}/events",
+		"POST /api/v1/agent-runtime/runs/{id}/result",
+		"POST /api/v1/agent-runtime/runs/resume",
+		"POST /api/v1/agent-runtime/runs/{id}/cancel-ack",
+		"GET /api/v1/agent-runtime/commands",
+		"POST /api/v1/agent-runtime/call-agent",
+	}
+	if len(endpoints) != len(requiredEndpoints) {
+		t.Fatalf("runtime endpoint count = %d, want %d", len(endpoints), len(requiredEndpoints))
+	}
+	for _, requiredEndpoint := range requiredEndpoints {
+		if _, ok := endpoints[requiredEndpoint]; !ok {
+			t.Fatalf("runtime contract missing endpoint %q", requiredEndpoint)
+		}
+	}
+
+	heartbeat := endpoints["POST /api/v1/agent-runtime/sessions/{id}/heartbeat"]
+	if heartbeat.ClientMethod != "heartbeatRuntimeSession" ||
+		heartbeat.RequestBodySchema.Ref != "#/$defs/RuntimeHelloPayload" ||
+		heartbeat.SuccessResponseSchema.Ref != "#/$defs/RuntimeReadyPayload" ||
+		heartbeat.EmptyResponseStatus != 0 ||
+		heartbeat.ErrorResponseSchema.Ref != "#/$defs/RuntimeError" {
+		t.Fatalf("runtime heartbeat contract = %#v", heartbeat)
+	}
+	closeEndpoint := endpoints["POST /api/v1/agent-runtime/sessions/{id}/close"]
+	if closeEndpoint.ClientMethod != "closeRuntimeSession" ||
+		closeEndpoint.RequestBodySchema.Ref != "#/$defs/RuntimeSessionCloseRequest" ||
+		closeEndpoint.SuccessResponseSchema.Ref != "" ||
+		closeEndpoint.EmptyResponseStatus != 204 ||
+		closeEndpoint.ErrorResponseSchema.Ref != "#/$defs/RuntimeError" {
+		t.Fatalf("runtime close contract = %#v", closeEndpoint)
+	}
+
+	for _, definition := range []string{
+		"AttemptIdentity",
+		"RunResultPayload",
+		"ResumeAttempt",
+		"PendingCommand",
+		"RuntimeCommandsResponse",
+		"RuntimeSessionCloseRequest",
 	} {
-		if !slices.Contains(paths, requiredPath) {
-			t.Fatalf("runtime contract missing endpoint %q", requiredPath)
+		if _, ok := contract.Definitions[definition]; !ok {
+			t.Fatalf("runtime contract missing definition %q", definition)
 		}
 	}
 
@@ -181,11 +238,6 @@ func TestRuntimeV2ContractMatchesExportedConstants(t *testing.T) {
 	}
 	if len(contract.StableErrorCodes) == 0 {
 		t.Fatal("runtime contract has no stable error codes")
-	}
-	for _, definition := range []string{"AttemptIdentity", "RunResultPayload", "ResumeAttempt", "PendingCommand", "RuntimeCommandsResponse"} {
-		if _, ok := contract.Definitions[definition]; !ok {
-			t.Fatalf("runtime contract missing definition %q", definition)
-		}
 	}
 }
 
