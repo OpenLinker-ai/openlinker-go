@@ -310,6 +310,9 @@ func (c *RuntimeWebSocket) AckRuntimeCancel(
 	if err = c.writeMessage(raw); err != nil {
 		return nil, err
 	}
+	if request.CancelState == RuntimeCancelStopped || request.CancelState == RuntimeCancelUnsupported || request.CancelState == RuntimeCancelFailed {
+		c.removeCancellation(request)
+	}
 	return &RuntimeRunCancellationState{
 		CancellationID: request.CancellationID,
 		CancelState:    request.CancelState,
@@ -357,6 +360,13 @@ func (c *RuntimeWebSocket) cancellationMessageID(request RuntimeRunCancelAckPayl
 		return "", errors.New("openlinker: runtime cancellation has no WebSocket command correlation")
 	}
 	return messageID, nil
+}
+
+func (c *RuntimeWebSocket) removeCancellation(request RuntimeRunCancelAckPayload) {
+	key := request.CancellationID + "\x00" + runtimeAttemptKey(request.AttemptIdentity)
+	c.correlationMu.Lock()
+	delete(c.cancellations, key)
+	c.correlationMu.Unlock()
 }
 
 func runtimeHelloEqual(left, right RuntimeHelloPayload) bool {

@@ -54,6 +54,7 @@ func (node *RuntimeWorker) handleDecodedCommand(command RuntimeDecodedPendingCom
 		node.loops.Add(1)
 		go func() {
 			defer node.loops.Done()
+			defer node.finishCancellation(command.Cancel.CancellationID)
 			node.handleCancelCommand(*command.Cancel)
 		}()
 	case RuntimeDrain:
@@ -63,6 +64,12 @@ func (node *RuntimeWorker) handleDecodedCommand(command RuntimeDecodedPendingCom
 			node.handleLeaseRevoke(*command.Revoke)
 		}
 	}
+}
+
+func (node *RuntimeWorker) finishCancellation(cancellationID string) {
+	node.stateMu.Lock()
+	delete(node.cancellations, cancellationID)
+	node.stateMu.Unlock()
 }
 
 func (node *RuntimeWorker) beginCancellation(cancellationID string) bool {

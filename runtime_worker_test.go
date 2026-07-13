@@ -439,6 +439,11 @@ func TestRuntimeCancelACKsStoppedOnlyAfterAdapterExited(t *testing.T) {
 	node := newRuntimeWorkerForTest(dataDir, client, adapter)
 	errCh := startRuntimeWorkerForTest(node)
 	waitForTestSignal(t, stoppedACK, 4*time.Second, "cancel stopped ACK")
+	eventuallyForTest(t, time.Second, func() bool {
+		node.stateMu.RLock()
+		defer node.stateMu.RUnlock()
+		return len(node.cancellations) == 0
+	}, "completed cancellation to leave the in-flight dedupe set")
 	eventuallyForTest(t, 2*time.Second, func() bool {
 		record, err := node.store.Assignment(deterministicRuntimeUUID("assignment", testAttemptID, testLeaseID))
 		return err == nil && record.State == AssignmentStateRevoked

@@ -83,6 +83,17 @@ func TestRuntimeWebSocketHandshakeAssignmentAndCancelCorrelation(t *testing.T) {
 		if err != nil || cancelAck.CancelState != RuntimeCancelStopping {
 			return fmt.Errorf("cancel ACK = %#v, %w", cancelAck, err)
 		}
+		terminalAckEnvelope, err := readRuntimeSDKWSEnvelope(conn)
+		if err != nil {
+			return err
+		}
+		if terminalAckEnvelope.Type != RuntimeRunCancelAck || terminalAckEnvelope.ReplyToMessageID != cancelMessageID {
+			return fmt.Errorf("terminal cancel ACK correlation = %#v", terminalAckEnvelope.RuntimeEnvelopeFields)
+		}
+		terminalAck, err := decodeRuntimeWSPayload[RuntimeRunCancelAckPayload](terminalAckEnvelope, RuntimeRunCancelAck)
+		if err != nil || terminalAck.CancelState != RuntimeCancelStopped {
+			return fmt.Errorf("terminal cancel ACK = %#v, %w", terminalAck, err)
+		}
 		return nil
 	}, serverErr)
 	defer server.Close()
@@ -126,6 +137,19 @@ func TestRuntimeWebSocketHandshakeAssignmentAndCancelCorrelation(t *testing.T) {
 	})
 	if err != nil || state.CancelState != RuntimeCancelStopping {
 		t.Fatalf("cancel state = %#v, %v", state, err)
+	}
+	state, err = connection.AckRuntimeCancel(context.Background(), RuntimeRunCancelAckPayload{
+		CancellationID: decoded.Cancel.CancellationID, AttemptIdentity: decoded.Cancel.AttemptIdentity,
+		CancelState: RuntimeCancelStopped,
+	})
+	if err != nil || state.CancelState != RuntimeCancelStopped {
+		t.Fatalf("terminal cancel state = %#v, %v", state, err)
+	}
+	connection.correlationMu.RLock()
+	remainingCancellations := len(connection.cancellations)
+	connection.correlationMu.RUnlock()
+	if remainingCancellations != 0 {
+		t.Fatalf("terminal cancellation correlations = %d, want 0", remainingCancellations)
 	}
 	if err = <-serverErr; err != nil {
 		t.Fatal(err)
