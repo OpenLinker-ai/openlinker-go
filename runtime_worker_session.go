@@ -52,7 +52,7 @@ func (node *RuntimeWorker) createSessionWithRetryClient(parent context.Context, 
 			}
 			return ready, nil
 		}
-		if runtimeErrorIsPermanent(err) || durableRuntimeErrorIsFatal(err) {
+		if (runtimeErrorIsPermanent(err) && !runtimeAttachErrorIsRetryable(err)) || durableRuntimeErrorIsFatal(err) {
 			return nil, scrubRuntimeError(err)
 		}
 		if err := node.waitRetry(parent, attempt); err != nil {
@@ -606,6 +606,10 @@ func runtimeErrorIsPermanent(err error) bool {
 	}
 	var runtimeErr *Error
 	return errors.As(err, &runtimeErr) && runtimeErr.StatusCode >= 400 && runtimeErr.StatusCode < 500 && runtimeErr.StatusCode != 408 && runtimeErr.StatusCode != 409 && runtimeErr.StatusCode != 429
+}
+
+func runtimeAttachErrorIsRetryable(err error) bool {
+	return runtimeErrorCode(err) == "RUNTIME_SESSION_CONFLICT"
 }
 
 func runtimeErrorCode(err error) string {

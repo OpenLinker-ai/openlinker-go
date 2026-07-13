@@ -70,6 +70,9 @@ func TestRuntimeCommandsAndCancelAck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	runtimeClient.attachmentMu.Lock()
+	runtimeClient.attachmentID = runtimeTestAttachmentID
+	runtimeClient.attachmentMu.Unlock()
 	if _, err = runtimeClient.PollRuntimeCommands(context.Background(), "not-a-uuid", 17); err == nil {
 		t.Fatal("invalid runtime_session_id reached command transport")
 	}

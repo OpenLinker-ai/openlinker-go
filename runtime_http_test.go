@@ -7,20 +7,22 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 const (
-	runtimeTestNodeID    = "11111111-1111-4111-8111-111111111111"
-	runtimeTestAgentID   = "22222222-2222-4222-8222-222222222222"
-	runtimeTestSessionID = "33333333-3333-4333-8333-333333333333"
-	runtimeTestRunID     = "44444444-4444-4444-8444-444444444444"
-	runtimeTestAttemptID = "55555555-5555-4555-8555-555555555555"
-	runtimeTestLeaseID   = "66666666-6666-4666-8666-666666666666"
-	runtimeTestEventID   = "77777777-7777-4777-8777-777777777777"
-	runtimeTestResultID  = "88888888-8888-4888-8888-888888888888"
-	runtimeTestCoreID    = "99999999-9999-4999-8999-999999999999"
+	runtimeTestNodeID       = "11111111-1111-4111-8111-111111111111"
+	runtimeTestAgentID      = "22222222-2222-4222-8222-222222222222"
+	runtimeTestSessionID    = "33333333-3333-4333-8333-333333333333"
+	runtimeTestRunID        = "44444444-4444-4444-8444-444444444444"
+	runtimeTestAttemptID    = "55555555-5555-4555-8555-555555555555"
+	runtimeTestLeaseID      = "66666666-6666-4666-8666-666666666666"
+	runtimeTestEventID      = "77777777-7777-4777-8777-777777777777"
+	runtimeTestResultID     = "88888888-8888-4888-8888-888888888888"
+	runtimeTestCoreID       = "99999999-9999-4999-8999-999999999999"
+	runtimeTestAttachmentID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 )
 
 func TestRuntimeHTTPFlowRequiresExplicitAssignmentConfirmation(t *testing.T) {
@@ -40,23 +42,29 @@ func TestRuntimeHTTPFlowRequiresExplicitAssignmentConfirmation(t *testing.T) {
 		mu.Unlock()
 		switch req.URL.Path {
 		case "/api/v1/agent-runtime/sessions":
+			if got := req.Header.Get(RuntimeAttachmentHeader); got != "" {
+				t.Errorf("create attachment header = %q", got)
+			}
 			var hello RuntimeHelloPayload
 			decodeRuntimeTestBody(t, req, &hello)
 			if hello.RuntimeSessionID != runtimeTestSessionID {
 				t.Errorf("hello = %#v", hello)
 			}
 			writeRuntimeTestJSON(t, w, RuntimeReadyPayload{
-				CoreInstanceID: runtimeTestCoreID, Features: RuntimeRequiredFeatures(),
+				CoreInstanceID: runtimeTestCoreID, AttachmentID: runtimeTestAttachmentID, Features: RuntimeRequiredFeatures(),
 				OfferTTLSeconds: 30, LeaseTTLSeconds: 60, DatabaseTime: now,
 			})
 		case "/api/v1/agent-runtime/sessions/" + runtimeTestSessionID + "/heartbeat":
+			if got := req.Header.Get(RuntimeAttachmentHeader); got != runtimeTestAttachmentID {
+				t.Errorf("heartbeat attachment header = %q", got)
+			}
 			var heartbeat RuntimeHelloPayload
 			decodeRuntimeTestBody(t, req, &heartbeat)
 			if !reflect.DeepEqual(heartbeat, runtimeTestHello()) {
 				t.Errorf("heartbeat = %#v", heartbeat)
 			}
 			writeRuntimeTestJSON(t, w, RuntimeReadyPayload{
-				CoreInstanceID: runtimeTestCoreID, Features: RuntimeRequiredFeatures(),
+				CoreInstanceID: runtimeTestCoreID, AttachmentID: runtimeTestAttachmentID, Features: RuntimeRequiredFeatures(),
 				OfferTTLSeconds: 30, LeaseTTLSeconds: 60, DatabaseTime: now,
 			})
 		case "/api/v1/agent-runtime/sessions/" + runtimeTestSessionID + "/close":
@@ -96,6 +104,9 @@ func TestRuntimeHTTPFlowRequiresExplicitAssignmentConfirmation(t *testing.T) {
 			})
 		default:
 			http.NotFound(w, req)
+		}
+		if req.URL.Path != "/api/v1/agent-runtime/sessions" && req.Header.Get(RuntimeAttachmentHeader) != runtimeTestAttachmentID {
+			t.Errorf("%s attachment header = %q", req.URL.Path, req.Header.Get(RuntimeAttachmentHeader))
 		}
 	}))
 	defer server.Close()
@@ -179,6 +190,9 @@ func TestRuntimeHTTPCloseRequiresNoContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	runtimeClient.attachmentMu.Lock()
+	runtimeClient.attachmentID = runtimeTestAttachmentID
+	runtimeClient.attachmentMu.Unlock()
 	err = runtimeClient.CloseRuntimeSession(context.Background(), RuntimeSessionCloseRequest{
 		NodeID: runtimeTestNodeID, AgentID: runtimeTestAgentID, WorkerID: "worker-a",
 		RuntimeSessionID: runtimeTestSessionID, SessionEpoch: 1,
@@ -186,6 +200,117 @@ func TestRuntimeHTTPCloseRequiresNoContent(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("runtime session close accepted a non-204 response")
+	}
+}
+
+func TestRuntimeHTTPHeartbeatRejectsAttachmentRotation(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	rotatedAttachmentID := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch req.URL.Path {
+		case "/api/v1/agent-runtime/sessions":
+			writeRuntimeTestJSON(t, w, RuntimeReadyPayload{
+				CoreInstanceID: runtimeTestCoreID, AttachmentID: runtimeTestAttachmentID,
+				Features: RuntimeRequiredFeatures(), OfferTTLSeconds: 30, LeaseTTLSeconds: 60, DatabaseTime: now,
+			})
+		case "/api/v1/agent-runtime/sessions/" + runtimeTestSessionID + "/heartbeat":
+			if got := req.Header.Get(RuntimeAttachmentHeader); got != runtimeTestAttachmentID {
+				t.Errorf("heartbeat attachment header = %q", got)
+			}
+			writeRuntimeTestJSON(t, w, RuntimeReadyPayload{
+				CoreInstanceID: runtimeTestCoreID, AttachmentID: rotatedAttachmentID,
+				Features: RuntimeRequiredFeatures(), OfferTTLSeconds: 30, LeaseTTLSeconds: 60, DatabaseTime: now,
+			})
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	defer server.Close()
+
+	runtimeClient, err := NewRuntime(server.URL, WithAgentToken("ol_agent_v2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = runtimeClient.CreateRuntimeSession(context.Background(), runtimeTestHello()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = runtimeClient.HeartbeatRuntimeSession(context.Background(), runtimeTestHello()); err == nil {
+		t.Fatal("heartbeat accepted a rotated attachment generation")
+	}
+	runtimeClient.attachmentMu.RLock()
+	got := runtimeClient.attachmentID
+	runtimeClient.attachmentMu.RUnlock()
+	if got != runtimeTestAttachmentID {
+		t.Fatalf("attachment after rejected heartbeat = %q", got)
+	}
+}
+
+func TestRuntimeHTTPSerializesConcurrentSessionCreation(t *testing.T) {
+	firstStarted := make(chan struct{})
+	secondStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var calls atomic.Int32
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	secondAttachmentID := "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/api/v1/agent-runtime/sessions" {
+			http.NotFound(w, req)
+			return
+		}
+		call := calls.Add(1)
+		attachmentID := runtimeTestAttachmentID
+		if call == 1 {
+			close(firstStarted)
+			<-releaseFirst
+		} else {
+			attachmentID = secondAttachmentID
+			if call == 2 {
+				close(secondStarted)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		writeRuntimeTestJSON(t, w, RuntimeReadyPayload{
+			CoreInstanceID: runtimeTestCoreID, AttachmentID: attachmentID,
+			Features: RuntimeRequiredFeatures(), OfferTTLSeconds: 30, LeaseTTLSeconds: 60, DatabaseTime: now,
+		})
+	}))
+	defer server.Close()
+
+	runtimeClient, err := NewRuntime(server.URL, WithAgentToken("ol_agent_v2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstDone := make(chan error, 1)
+	secondDone := make(chan error, 1)
+	go func() {
+		_, createErr := runtimeClient.CreateRuntimeSession(context.Background(), runtimeTestHello())
+		firstDone <- createErr
+	}()
+	<-firstStarted
+	go func() {
+		_, createErr := runtimeClient.CreateRuntimeSession(context.Background(), runtimeTestHello())
+		secondDone <- createErr
+	}()
+	select {
+	case <-secondStarted:
+		t.Fatal("second create crossed the attachment lifecycle gate")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseFirst)
+	if err = <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+	if err = <-secondDone; err != nil {
+		t.Fatal(err)
+	}
+	runtimeClient.attachmentMu.RLock()
+	got := runtimeClient.attachmentID
+	runtimeClient.attachmentMu.RUnlock()
+	if got != secondAttachmentID {
+		t.Fatalf("final attachment = %q, want %q", got, secondAttachmentID)
 	}
 }
 

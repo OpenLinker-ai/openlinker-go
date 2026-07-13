@@ -141,6 +141,106 @@ func TestRuntimeTransportAutoFallsBackWhenInitialWebSocketIsUnavailable(t *testi
 	}
 }
 
+func TestRuntimeTransportPullRetriesSessionConflict(t *testing.T) {
+	pull := newFakeRuntimeClient()
+	var creates atomic.Int32
+	attached := make(chan struct{})
+	pull.createFn = func(context.Context, RuntimeHelloPayload) (*RuntimeReadyPayload, error) {
+		if creates.Add(1) == 1 {
+			return nil, runtimeSessionConflictTestError()
+		}
+		select {
+		case <-attached:
+		default:
+			close(attached)
+		}
+		return pull.readyPayload(), nil
+	}
+	node := newRuntimeWorkerForTest(t.TempDir(), pull, testRuntimeHandlerFunc(func(context.Context, any, RuntimeContext) (any, error) {
+		return RuntimeJSONMap{"unused": true}, nil
+	}))
+	node.Transport = RuntimeTransportPull
+	node.runtimeDialer = &fakeRuntimeTransportDialer{}
+	node.RetryMinimum = time.Millisecond
+	node.RetryMaximum = 5 * time.Millisecond
+	runDone := make(chan error, 1)
+	go func() { runDone <- node.Start(context.Background()) }()
+	select {
+	case <-attached:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Pull did not retry the transient attachment conflict")
+	}
+	waitForRuntimeTransport(t, node, RuntimeTransportPullActive)
+	stopRuntimeWorkerTest(t, node, runDone)
+	if creates.Load() < 2 {
+		t.Fatalf("Pull create calls = %d", creates.Load())
+	}
+}
+
+func TestRuntimeTransportWebSocketRetriesSessionConflict(t *testing.T) {
+	conflictedClient := newFakeRuntimeClient()
+	conflictedClient.createFn = func(context.Context, RuntimeHelloPayload) (*RuntimeReadyPayload, error) {
+		return nil, runtimeSessionConflictTestError()
+	}
+	conflicted := newFakeRuntimeDuplex(conflictedClient)
+	connected := newFakeRuntimeDuplex(newFakeRuntimeClient())
+	dialer := &fakeRuntimeTransportDialer{connections: []RuntimeDuplexClient{conflicted, connected}}
+	pull := newFakeRuntimeClient()
+	node := newRuntimeWorkerForTest(t.TempDir(), pull, testRuntimeHandlerFunc(func(context.Context, any, RuntimeContext) (any, error) {
+		return RuntimeJSONMap{"unused": true}, nil
+	}))
+	node.Transport = RuntimeTransportWebSocket
+	node.runtimeDialer = dialer
+	node.RetryMinimum = time.Millisecond
+	node.RetryMaximum = 5 * time.Millisecond
+	runDone := make(chan error, 1)
+	go func() { runDone <- node.Start(context.Background()) }()
+	select {
+	case <-connected.ready:
+	case <-time.After(3 * time.Second):
+		t.Fatal("WebSocket did not retry the transient attachment conflict")
+	}
+	waitForRuntimeTransport(t, node, RuntimeTransportWebSocketActive)
+	stopRuntimeWorkerTest(t, node, runDone)
+}
+
+func TestRuntimeTransportAutoRestoresPullAfterWebSocketSessionConflict(t *testing.T) {
+	pull := newFakeRuntimeClient()
+	var pullCreates atomic.Int32
+	pull.createFn = func(context.Context, RuntimeHelloPayload) (*RuntimeReadyPayload, error) {
+		pullCreates.Add(1)
+		return pull.readyPayload(), nil
+	}
+	dialer := &fakeRuntimeTransportDialer{}
+	node := newRuntimeWorkerForTest(t.TempDir(), pull, testRuntimeHandlerFunc(func(context.Context, any, RuntimeContext) (any, error) {
+		return RuntimeJSONMap{"unused": true}, nil
+	}))
+	node.Transport = RuntimeTransportAuto
+	node.runtimeDialer = dialer
+	node.RetryMinimum = time.Millisecond
+	node.RetryMaximum = 5 * time.Millisecond
+	runDone := make(chan error, 1)
+	go func() { runDone <- node.Start(context.Background()) }()
+	waitForRuntimeTransport(t, node, RuntimeTransportPullActive)
+
+	conflictedClient := newFakeRuntimeClient()
+	conflictedClient.createFn = func(context.Context, RuntimeHelloPayload) (*RuntimeReadyPayload, error) {
+		return nil, runtimeSessionConflictTestError()
+	}
+	dialer.mu.Lock()
+	dialer.connections = append(dialer.connections,
+		newFakeRuntimeDuplex(conflictedClient),
+		newFakeRuntimeDuplex(newFakeRuntimeClient()),
+	)
+	dialer.mu.Unlock()
+	dialer.allowProbe.Store(true)
+	waitForRuntimeTransport(t, node, RuntimeTransportWebSocketActive)
+	stopRuntimeWorkerTest(t, node, runDone)
+	if pullCreates.Load() < 2 {
+		t.Fatalf("Pull was not restored after the failed WebSocket attach; create calls = %d", pullCreates.Load())
+	}
+}
+
 func TestSwitchingRuntimeClientCancelsOldGenerationBeforePublishingNew(t *testing.T) {
 	oldClient := newFakeRuntimeClient()
 	entered := make(chan struct{})
@@ -343,12 +443,41 @@ func waitForRuntimeTransport(t *testing.T, node *RuntimeWorker, expected Runtime
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		_, state, _ := node.transport.snapshot()
+		node.lifecycleMu.Lock()
+		transport := node.transport
+		node.lifecycleMu.Unlock()
+		if transport == nil {
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
+		_, state, _ := transport.snapshot()
 		if state == expected {
 			return
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	_, state, _ := node.transport.snapshot()
+	node.lifecycleMu.Lock()
+	transport := node.transport
+	node.lifecycleMu.Unlock()
+	if transport == nil {
+		t.Fatalf("runtime transport was not initialized; want %s", expected)
+	}
+	_, state, _ := transport.snapshot()
 	t.Fatalf("runtime transport state = %s, want %s", state, expected)
+}
+
+func runtimeSessionConflictTestError() error {
+	return &Error{StatusCode: 409, Code: "RUNTIME_SESSION_CONFLICT", Message: "attachment is owned elsewhere"}
+}
+
+func stopRuntimeWorkerTest(t *testing.T, node *RuntimeWorker, runDone <-chan error) {
+	t.Helper()
+	stopCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := node.Stop(stopCtx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
 }

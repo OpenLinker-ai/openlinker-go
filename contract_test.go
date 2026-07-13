@@ -69,9 +69,10 @@ func TestCoreClientV1ContractMapsToImplementedMethods(t *testing.T) {
 func TestRuntimeContractMatchesExportedConstants(t *testing.T) {
 	raw := readContractFile(t, "contracts/core-runtime.json")
 	type runtimeEndpointContract struct {
-		ClientMethod      string `json:"client_method"`
-		Method            string `json:"http_method"`
-		Path              string `json:"path"`
+		ClientMethod      string   `json:"client_method"`
+		Method            string   `json:"http_method"`
+		Path              string   `json:"path"`
+		RequiredHeaders   []string `json:"required_headers"`
 		RequestBodySchema struct {
 			Ref string `json:"$ref"`
 		} `json:"request_body_schema"`
@@ -200,6 +201,23 @@ func TestRuntimeContractMatchesExportedConstants(t *testing.T) {
 	for _, requiredEndpoint := range requiredEndpoints {
 		if _, ok := endpoints[requiredEndpoint]; !ok {
 			t.Fatalf("runtime contract missing endpoint %q", requiredEndpoint)
+		}
+	}
+	for key, endpoint := range endpoints {
+		if key == "POST /api/v1/agent-runtime/sessions" {
+			if len(endpoint.RequiredHeaders) != 0 {
+				t.Fatalf("%s must not require an attachment header: %#v", key, endpoint.RequiredHeaders)
+			}
+			continue
+		}
+		if key == "POST /api/v1/agent-runtime/call-agent" {
+			if slices.Contains(endpoint.RequiredHeaders, RuntimeAttachmentHeader) {
+				t.Fatalf("%s must not require an attachment header: %#v", key, endpoint.RequiredHeaders)
+			}
+			continue
+		}
+		if !slices.Equal(endpoint.RequiredHeaders, []string{RuntimeAttachmentHeader}) {
+			t.Fatalf("%s attachment headers = %#v", key, endpoint.RequiredHeaders)
 		}
 	}
 

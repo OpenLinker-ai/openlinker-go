@@ -345,6 +345,13 @@ func (c *Client) newRuntimeRequest(ctx context.Context, method, path string, que
 	return c.newRequestWithToken(ctx, method, path, query, body, accept, c.agentToken)
 }
 
+func (c *Client) newRuntimeRequestWithHeaders(ctx context.Context, method, path string, query url.Values, body any, accept string, headers http.Header) (*http.Response, error) {
+	if err := c.requireRuntime(); err != nil {
+		return nil, err
+	}
+	return c.newRequestWithTokenAndHeaders(ctx, method, path, query, body, accept, c.agentToken, headers)
+}
+
 func (c *Client) requireRuntime() error {
 	if c == nil {
 		return errors.New("openlinker: runtime client is nil")

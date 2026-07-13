@@ -37,7 +37,7 @@ func TestRuntimeWebSocketHandshakeAssignmentAndCancelCorrelation(t *testing.T) {
 			return err
 		}
 		if err = writeRuntimeSDKWSEnvelope(conn, RuntimeReady, helloEnvelope.MessageID, RuntimeReadyPayload{
-			CoreInstanceID: runtimeTestCoreID, Features: RuntimeRequiredFeatures(),
+			CoreInstanceID: runtimeTestCoreID, AttachmentID: runtimeTestAttachmentID, Features: RuntimeRequiredFeatures(),
 			OfferTTLSeconds: 30, LeaseTTLSeconds: 60, DatabaseTime: now,
 		}); err != nil {
 			return err
@@ -429,7 +429,7 @@ func serveRuntimeSDKWSReady(conn *websocket.Conn, now time.Time) error {
 		return err
 	}
 	return writeRuntimeSDKWSEnvelope(conn, RuntimeReady, hello.MessageID, RuntimeReadyPayload{
-		CoreInstanceID: runtimeTestCoreID, Features: RuntimeRequiredFeatures(),
+		CoreInstanceID: runtimeTestCoreID, AttachmentID: runtimeTestAttachmentID, Features: RuntimeRequiredFeatures(),
 		OfferTTLSeconds: 30, LeaseTTLSeconds: 60, DatabaseTime: now,
 	})
 }

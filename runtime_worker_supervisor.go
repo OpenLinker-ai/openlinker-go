@@ -22,7 +22,7 @@ func (node *RuntimeWorker) startInitialRuntimeTransport(parent context.Context) 
 			node.logf("runtime transport active: ws")
 			return ready, nil
 		}
-		if runtimeErrorIsPermanent(err) {
+		if runtimeErrorIsPermanent(err) && !runtimeAttachErrorIsRetryable(err) {
 			return nil, scrubRuntimeError(err)
 		}
 		node.logf("runtime WebSocket unavailable; activating HTTPS long-poll: %v", scrubRuntimeError(err))
@@ -92,7 +92,7 @@ func (node *RuntimeWorker) transportSupervisorLoop(ctx context.Context) {
 			cancel()
 			if err != nil {
 				node.transport.setState(RuntimeTransportPullActive)
-				if runtimeErrorIsPermanent(err) {
+				if runtimeErrorIsPermanent(err) && !runtimeAttachErrorIsRetryable(err) {
 					node.reportFatal(scrubRuntimeError(err))
 					return
 				}
@@ -103,7 +103,7 @@ func (node *RuntimeWorker) transportSupervisorLoop(ctx context.Context) {
 				if ctx.Err() != nil {
 					return
 				}
-				if runtimeErrorIsPermanent(err) {
+				if runtimeErrorIsPermanent(err) && !runtimeAttachErrorIsRetryable(err) {
 					node.reportFatal(scrubRuntimeError(err))
 					return
 				}
@@ -155,7 +155,7 @@ func (node *RuntimeWorker) switchToWebSocket(ctx context.Context) error {
 	if connection != nil {
 		node.closeTransport(connection, "transport_switch_failed")
 	}
-	if runtimeErrorIsPermanent(err) {
+	if runtimeErrorIsPermanent(err) && !runtimeAttachErrorIsRetryable(err) {
 		return err
 	}
 	// Pull was deliberately detached before the WS attach attempt. Restore it
@@ -223,7 +223,7 @@ func (node *RuntimeWorker) activateWebSocketWithRetry(parent context.Context, re
 		if connection != nil {
 			node.closeTransport(connection, "websocket_attach_failed")
 		}
-		if runtimeErrorIsPermanent(err) {
+		if runtimeErrorIsPermanent(err) && !runtimeAttachErrorIsRetryable(err) {
 			return nil, err
 		}
 		if waitErr := node.waitRetry(parent, attempt); waitErr != nil {

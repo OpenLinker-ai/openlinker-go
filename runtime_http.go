@@ -16,17 +16,25 @@ import (
 	"unicode/utf8"
 )
 
+const RuntimeAttachmentHeader = "OpenLinker-Runtime-Attachment"
+
 func (r *Runtime) CreateRuntimeSession(ctx context.Context, hello RuntimeHelloPayload) (*RuntimeReadyPayload, error) {
 	if err := validateRuntimeHello(hello); err != nil {
 		return nil, err
 	}
+	if r == nil || r.client == nil {
+		return nil, errors.New("openlinker: runtime client is nil")
+	}
+	r.attachmentMu.Lock()
+	defer r.attachmentMu.Unlock()
 	var ready RuntimeReadyPayload
-	if _, err := r.doRuntime(ctx, http.MethodPost, "/agent-runtime/sessions", nil, hello, &ready); err != nil {
+	if _, err := r.doRuntimeWithAttachment(ctx, http.MethodPost, "/agent-runtime/sessions", nil, hello, &ready, ""); err != nil {
 		return nil, err
 	}
 	if err := validateRuntimeReady(ready); err != nil {
 		return nil, err
 	}
+	r.attachmentID = ready.AttachmentID
 	return &ready, nil
 }
 
@@ -34,14 +42,27 @@ func (r *Runtime) HeartbeatRuntimeSession(ctx context.Context, hello RuntimeHell
 	if err := validateRuntimeHello(hello); err != nil {
 		return nil, err
 	}
+	if r == nil || r.client == nil {
+		return nil, errors.New("openlinker: runtime client is nil")
+	}
+	r.attachmentMu.Lock()
+	defer r.attachmentMu.Unlock()
+	attachmentID := r.attachmentID
+	if !runtimeUUID(attachmentID) {
+		return nil, errors.New("openlinker: runtime attachment is not established")
+	}
 	var ready RuntimeReadyPayload
 	path := "/agent-runtime/sessions/" + url.PathEscape(hello.RuntimeSessionID) + "/heartbeat"
-	if _, err := r.doRuntime(ctx, http.MethodPost, path, nil, hello, &ready); err != nil {
+	if _, err := r.doRuntimeWithAttachment(ctx, http.MethodPost, path, nil, hello, &ready, attachmentID); err != nil {
 		return nil, err
 	}
 	if err := validateRuntimeReady(ready); err != nil {
 		return nil, err
 	}
+	if ready.AttachmentID != attachmentID {
+		return nil, errors.New("openlinker: runtime heartbeat attachment mismatch")
+	}
+	r.attachmentID = ready.AttachmentID
 	return &ready, nil
 }
 
@@ -49,14 +70,24 @@ func (r *Runtime) CloseRuntimeSession(ctx context.Context, request RuntimeSessio
 	if err := validateRuntimeSessionClose(request); err != nil {
 		return err
 	}
+	if r == nil || r.client == nil {
+		return errors.New("openlinker: runtime client is nil")
+	}
+	r.attachmentMu.Lock()
+	defer r.attachmentMu.Unlock()
+	attachmentID := r.attachmentID
+	if !runtimeUUID(attachmentID) {
+		return errors.New("openlinker: runtime attachment is not established")
+	}
 	path := "/agent-runtime/sessions/" + url.PathEscape(request.RuntimeSessionID) + "/close"
-	status, err := r.doRuntime(ctx, http.MethodPost, path, nil, request, nil)
+	status, err := r.doRuntimeWithAttachment(ctx, http.MethodPost, path, nil, request, nil, attachmentID)
 	if err != nil {
 		return err
 	}
 	if status != http.StatusNoContent {
 		return errors.New("openlinker: runtime close did not return 204")
 	}
+	r.attachmentID = ""
 	return nil
 }
 
@@ -267,7 +298,26 @@ func (r *Runtime) doRuntime(
 	if r == nil || r.client == nil {
 		return 0, errors.New("openlinker: runtime client is nil")
 	}
-	response, err := r.client.newRuntimeRequest(ctx, method, path, query, body, "application/json")
+	r.attachmentMu.RLock()
+	defer r.attachmentMu.RUnlock()
+	return r.doRuntimeWithAttachment(ctx, method, path, query, body, out, r.attachmentID)
+}
+
+func (r *Runtime) doRuntimeWithAttachment(
+	ctx context.Context,
+	method, path string,
+	query url.Values,
+	body, out any,
+	attachmentID string,
+) (int, error) {
+	headers := make(http.Header)
+	if path != "/agent-runtime/sessions" {
+		if !runtimeUUID(attachmentID) {
+			return 0, errors.New("openlinker: runtime attachment is not established")
+		}
+		headers.Set(RuntimeAttachmentHeader, attachmentID)
+	}
+	response, err := r.client.newRuntimeRequestWithHeaders(ctx, method, path, query, body, "application/json", headers)
 	if err != nil {
 		return 0, err
 	}
@@ -344,7 +394,7 @@ func validateRuntimeHello(value RuntimeHelloPayload) error {
 }
 
 func validateRuntimeReady(value RuntimeReadyPayload) error {
-	if !runtimeUUID(value.CoreInstanceID) || value.OfferTTLSeconds < 1 || value.LeaseTTLSeconds < 1 ||
+	if !runtimeUUID(value.CoreInstanceID) || !runtimeUUID(value.AttachmentID) || value.OfferTTLSeconds < 1 || value.LeaseTTLSeconds < 1 ||
 		value.DatabaseTime.IsZero() || !hasRuntimeFeatures(value.Features, RuntimeRequiredFeatures()) {
 		return errors.New("openlinker: invalid runtime ready response")
 	}

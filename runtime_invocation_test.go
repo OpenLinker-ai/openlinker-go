@@ -90,6 +90,9 @@ func TestCallRuntimeAgentSignsAndSendsTheSameBody(t *testing.T) {
 		if got := req.Header.Get(runtimeInvocationHeader); got != authorization.NodeEnvelope {
 			t.Errorf("context = %q", got)
 		}
+		if got := req.Header.Get(RuntimeAttachmentHeader); got != "" {
+			t.Errorf("call-agent attachment header = %q", got)
+		}
 		body, readErr := io.ReadAll(req.Body)
 		if readErr != nil {
 			t.Fatal(readErr)

@@ -80,6 +80,7 @@ type RuntimeHelloPayload struct {
 
 type RuntimeReadyPayload struct {
 	CoreInstanceID  string    `json:"core_instance_id"`
+	AttachmentID    string    `json:"attachment_id"`
 	Features        []string  `json:"features"`
 	OfferTTLSeconds int64     `json:"offer_ttl_seconds"`
 	LeaseTTLSeconds int64     `json:"lease_ttl_seconds"`

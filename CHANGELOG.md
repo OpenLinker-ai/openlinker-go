@@ -27,9 +27,10 @@ runtime connector, callback, and A2A contracts are declared stable.
   `/api/v1/agent-runtime/*`; Runtime URLs no longer carry a protocol generation.
   The wire handshake keeps protocol version 2 and the
   `openlinker.runtime.v2` contract ID. Public Go types and methods now use
-  generation-free `Runtime*` names. The contract now binds session heartbeat
-  and close, including the close request body and empty `204` response; its digest is
-  `fb92bb6ddbc65bd3353b5d7c63ad148dd510e4d0ac0a6ca6110461d91e2dec53`.
+  generation-free `Runtime*` names. Pull requests after Session creation now
+  carry the exact attachment generation so a replaced transport cannot mutate
+  Runtime state; `call-agent` remains assignment-capability-bound. The contract
+  digest is `3f84df167bbe211efdc6362ad5ec876aeedf881cbfb9677606982af63c7423e9`.
 - Made Core run creation idempotent by sending `Idempotency-Key` from
   `RunAgent` and `StartAgentRun`. The SDK generates a safe random key when the
   caller does not provide one and exposes Core replay results through

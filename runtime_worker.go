@@ -130,8 +130,11 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 		node.httpClient = httpClient
 	}
 	if node.runtimeDialer != nil {
-		node.transport = newSwitchingRuntimeClient(node.runtimeClient)
-		node.runtimeClient = node.transport
+		transport := newSwitchingRuntimeClient(node.runtimeClient)
+		node.lifecycleMu.Lock()
+		node.transport = transport
+		node.lifecycleMu.Unlock()
+		node.runtimeClient = transport
 	}
 
 	var ready *RuntimeReadyPayload

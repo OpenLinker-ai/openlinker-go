@@ -55,6 +55,7 @@ func TestRuntimeClientUsesTLS13MTLSAndExactInvocationProof(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(RuntimeReadyPayload{
 				CoreInstanceID:  testCoreInstanceID,
+				AttachmentID:    testAttachmentID,
 				Features:        RuntimeRequiredFeatures(),
 				OfferTTLSeconds: 30,
 				LeaseTTLSeconds: 60,
