@@ -157,6 +157,10 @@ func (node *RuntimeWorker) executeAttempt(attempt *activeRuntimeAttempt) {
 	result := RuntimeResult{Status: "success"}
 	func() {
 		defer func() {
+			attempt.finished.Store(true)
+			stopHandler()
+		}()
+		defer func() {
 			if recovered := recover(); recovered != nil {
 				result.Status = "failed"
 				result.Error = &RuntimeHandlerError{Code: "HANDLER_PANIC", Message: "runtime handler panicked"}
@@ -175,8 +179,6 @@ func (node *RuntimeWorker) executeAttempt(attempt *activeRuntimeAttempt) {
 		result.Events = normalized.Events
 	}()
 
-	attempt.finished.Store(true)
-	stopHandler()
 	if attempt.canceled.Load() {
 		return
 	}

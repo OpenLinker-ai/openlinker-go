@@ -80,8 +80,10 @@ func TestRuntimeReliableFlowReplaysStableEventAndResult(t *testing.T) {
 	}
 
 	var adapterCalls atomic.Int32
+	savedContext := make(chan RuntimeContext, 1)
 	adapter := testRuntimeHandlerFunc(func(ctx context.Context, _ any, runCtx RuntimeContext) (any, error) {
 		adapterCalls.Add(1)
+		savedContext <- runCtx
 		if runCtx.Metadata["source"] != "test" {
 			return nil, fmt.Errorf("assignment metadata = %#v", runCtx.Metadata)
 		}
@@ -98,6 +100,12 @@ func TestRuntimeReliableFlowReplaysStableEventAndResult(t *testing.T) {
 	errCh := startRuntimeWorkerForTest(node)
 
 	waitForTestSignal(t, resultDone, 7*time.Second, "typed Result ACK")
+	retainedContext := <-savedContext
+	if _, err := retainedContext.CallAgent(context.Background(), testTargetAgentID, RuntimeJSONMap{"question": "too late"}, RuntimeCallOptions{
+		IdempotencyKey: "after-handler-return",
+	}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("retained RuntimeContext CallAgent error = %v, want context.Canceled", err)
+	}
 	stopRuntimeWorkerForTest(t, node, errCh)
 
 	if adapterCalls.Load() != 1 {
