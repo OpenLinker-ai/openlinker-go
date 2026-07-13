@@ -997,6 +997,16 @@ func TestRuntimeWorkerIsSingleUse(t *testing.T) {
 	}
 }
 
+func TestRuntimeDeterministicIdentityDomainIsSDKOwned(t *testing.T) {
+	joined := joinRuntimeIdentityParts([]string{"assignment", testAttemptID, testLeaseID})
+	if !strings.HasPrefix(joined, "openlinker/runtime/deterministic-id\x00") {
+		t.Fatalf("deterministic identity domain = %q", joined)
+	}
+	if strings.Contains(joined, "agent-node") {
+		t.Fatalf("temporary Adapter leaked into SDK identity domain: %q", joined)
+	}
+}
+
 func waitForTestSignal(t *testing.T, signal <-chan struct{}, timeout time.Duration, label string) {
 	t.Helper()
 	select {

@@ -502,9 +502,9 @@ func deterministicRuntimeUUID(parts ...string) string {
 }
 
 func joinRuntimeIdentityParts(parts []string) string {
-	// Keep the original deterministic domain so in-flight durable attempts
-	// survive the Agent Node to SDK ownership cutover without changing IDs.
-	value := "openlinker-agent-node/runtime-v2"
+	// IDs belong to the SDK Runtime contract, not to any temporary Adapter.
+	// This pre-1.0 cutover intentionally does not preserve the Agent Node domain.
+	value := "openlinker/runtime/deterministic-id"
 	for _, part := range parts {
 		value += "\x00" + part
 	}
