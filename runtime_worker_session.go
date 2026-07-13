@@ -35,7 +35,7 @@ func (node *RuntimeWorker) runtimeHello() RuntimeHelloPayload {
 }
 
 func (node *RuntimeWorker) createSessionWithRetry(parent context.Context) (*RuntimeReadyPayload, error) {
-	return node.createSessionWithRetryClient(parent, node.RuntimeClient)
+	return node.createSessionWithRetryClient(parent, node.runtimeClient)
 }
 
 func (node *RuntimeWorker) createSessionWithRetryClient(parent context.Context, client RuntimeClient) (*RuntimeReadyPayload, error) {
@@ -81,12 +81,12 @@ func (node *RuntimeWorker) heartbeatLoop() {
 }
 
 func (node *RuntimeWorker) heartbeatOnce(ctx context.Context) error {
-	if node.store == nil || node.RuntimeClient == nil {
+	if node.store == nil || node.runtimeClient == nil {
 		return nil
 	}
 	callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	ready, err := node.RuntimeClient.HeartbeatRuntimeSession(callCtx, node.runtimeHello())
+	ready, err := node.runtimeClient.HeartbeatRuntimeSession(callCtx, node.runtimeHello())
 	if err != nil {
 		return err
 	}
@@ -112,7 +112,7 @@ func (node *RuntimeWorker) claimLoop() {
 			}
 			continue
 		}
-		assigned, err := node.RuntimeClient.ClaimRuntimeRun(node.runtimeCtx, durationSeconds(node.ClaimWait), RuntimeClaimRequest{
+		assigned, err := node.runtimeClient.ClaimRuntimeRun(node.runtimeCtx, durationSeconds(node.ClaimWait), RuntimeClaimRequest{
 			RuntimeSessionID: node.store.Identity().RuntimeSessionID,
 			Capacity:         capacity,
 			Inflight:         inflight,
@@ -237,7 +237,7 @@ func (node *RuntimeWorker) handleClaimedAssignment(assigned *RuntimeRunAssignedP
 
 func (node *RuntimeWorker) ackAssignmentWithRetry(identity AttemptIdentity) (*RuntimeAssignmentConfirmedPayload, error) {
 	for attempt := 0; ; attempt++ {
-		confirmed, err := node.RuntimeClient.AckRuntimeAssignment(node.runtimeCtx, RuntimeAssignmentAckPayload{
+		confirmed, err := node.runtimeClient.AckRuntimeAssignment(node.runtimeCtx, RuntimeAssignmentAckPayload{
 			AttemptIdentity: sdkAttemptIdentity(identity),
 		})
 		if err == nil {
@@ -264,7 +264,7 @@ func (node *RuntimeWorker) rejectAssignment(record AssignmentJournalRecord) erro
 		reason = RuntimeRejectNodeDraining
 	}
 	for attempt := 0; ; attempt++ {
-		_, err := node.RuntimeClient.RejectRuntimeAssignment(node.runtimeCtx, RuntimeAssignmentRejectPayload{
+		_, err := node.runtimeClient.RejectRuntimeAssignment(node.runtimeCtx, RuntimeAssignmentRejectPayload{
 			AttemptIdentity: sdkAttemptIdentity(record.Identity),
 			ReasonCode:      reason,
 			Capacity:        capacity,
@@ -285,7 +285,7 @@ func (node *RuntimeWorker) rejectAssignment(record AssignmentJournalRecord) erro
 }
 
 func (node *RuntimeWorker) resumeDurableState(parent context.Context) error {
-	return node.resumeDurableStateWithClient(parent, node.RuntimeClient, false)
+	return node.resumeDurableStateWithClient(parent, node.runtimeClient, false)
 }
 
 func (node *RuntimeWorker) resumeDurableStateWithClient(parent context.Context, client RuntimeClient, reconnect bool) error {

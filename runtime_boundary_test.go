@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -72,5 +73,14 @@ func TestNewRuntimeWorkerAcceptsInjectedStoreWithoutDataDir(t *testing.T) {
 	}
 	if worker.NodeVersion != runtimeWorkerSDKAgent || worker.Transport != RuntimeTransportAuto {
 		t.Fatalf("worker defaults = node_version %q transport %q", worker.NodeVersion, worker.Transport)
+	}
+}
+
+func TestRuntimeWorkerDoesNotExposeTransportInjectionFields(t *testing.T) {
+	typeOfWorker := reflect.TypeOf(RuntimeWorker{})
+	for _, fieldName := range []string{"RuntimeClient", "RuntimeDialer"} {
+		if _, ok := typeOfWorker.FieldByName(fieldName); ok {
+			t.Fatalf("RuntimeWorker must not expose the test seam %s", fieldName)
+		}
 	}
 }

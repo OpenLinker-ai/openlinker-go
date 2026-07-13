@@ -246,7 +246,7 @@ func newRuntimeWorkerForTest(dataDir string, client RuntimeClient, adapter Runti
 		RetryMinimum:      5 * time.Millisecond,
 		RetryMaximum:      20 * time.Millisecond,
 		Handler:           adapter,
-		RuntimeClient:     client,
+		runtimeClient:     client,
 		jitter:            func(value time.Duration) time.Duration { return value },
 	}
 }

@@ -43,7 +43,7 @@ func TestRuntimeTransportAutoConfirmsBeforeExecuteAndSwitchesWSPullWS(t *testing
 	adapter := newBlockingSwitchAdapter()
 	node := newRuntimeWorkerForTest(t.TempDir(), pull, adapter)
 	node.Transport = RuntimeTransportAuto
-	node.RuntimeDialer = dialer
+	node.runtimeDialer = dialer
 	node.HeartbeatInterval = time.Hour
 	node.RetryMinimum = 5 * time.Millisecond
 	node.RetryMaximum = 20 * time.Millisecond
@@ -120,7 +120,7 @@ func TestRuntimeTransportAutoFallsBackWhenInitialWebSocketIsUnavailable(t *testi
 		return RuntimeJSONMap{"unused": true}, nil
 	}))
 	node.Transport = RuntimeTransportAuto
-	node.RuntimeDialer = dialer
+	node.runtimeDialer = dialer
 	node.RetryMinimum = 5 * time.Millisecond
 	node.RetryMaximum = 20 * time.Millisecond
 	runDone := make(chan error, 1)

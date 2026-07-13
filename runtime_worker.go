@@ -21,6 +21,8 @@ const (
 	RuntimeWorkerDefaultRetryMaximum            = 15 * time.Second
 )
 
+// RuntimeWorker runs one reliable Runtime session. A worker is single-use;
+// construct a new worker after Start returns.
 type RuntimeWorker struct {
 	PlatformURL string
 	RuntimeURL  string
@@ -43,13 +45,12 @@ type RuntimeWorker struct {
 	Store   RuntimeStore
 	Logger  *log.Logger
 
-	// RuntimeClient is an injection seam for deterministic tests. Production
-	// configuration leaves it nil and always builds a TLS 1.3 mTLS client.
-	RuntimeClient RuntimeClient
-	RuntimeDialer RuntimeTransportDialer
+	runtimeClient RuntimeClient
+	runtimeDialer RuntimeTransportDialer
 
 	lifecycleMu   sync.Mutex
 	started       bool
+	completed     bool
 	done          chan struct{}
 	runtimeCtx    context.Context
 	runtimeStop   context.CancelFunc
@@ -78,16 +79,6 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 	if parent == nil {
 		parent = context.Background()
 	}
-	if err := node.applyDefaultsAndValidate(); err != nil {
-		return err
-	}
-	if node.RuntimeClient == nil {
-		runtimeURL, err := resolveRuntimeURL(parent, node.PlatformURL, node.RuntimeURL)
-		if err != nil {
-			return err
-		}
-		node.RuntimeURL = runtimeURL
-	}
 	if err := node.beginLifecycle(); err != nil {
 		return err
 	}
@@ -99,6 +90,16 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 			retErr = shutdownErr
 		}
 	}()
+	if err := node.applyDefaultsAndValidate(); err != nil {
+		return err
+	}
+	if node.runtimeClient == nil {
+		runtimeURL, err := resolveRuntimeURL(parent, node.PlatformURL, node.RuntimeURL)
+		if err != nil {
+			return err
+		}
+		node.RuntimeURL = runtimeURL
+	}
 	startupCtx, cancelStartup := context.WithCancel(parent)
 	defer cancelStartup()
 	go func() {
@@ -119,18 +120,18 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 	}
 	node.store = node.Store
 
-	if node.RuntimeClient == nil {
+	if node.runtimeClient == nil {
 		runtimeClient, httpClient, err := newRuntimeClient(node.RuntimeURL, node.AgentToken, node.MTLS)
 		if err != nil {
 			return err
 		}
-		node.RuntimeClient = runtimeClient
-		node.RuntimeDialer = sdkRuntimeTransportDialer{runtime: runtimeClient}
+		node.runtimeClient = runtimeClient
+		node.runtimeDialer = sdkRuntimeTransportDialer{runtime: runtimeClient}
 		node.httpClient = httpClient
 	}
-	if node.RuntimeDialer != nil {
-		node.transport = newSwitchingRuntimeClient(node.RuntimeClient)
-		node.RuntimeClient = node.transport
+	if node.runtimeDialer != nil {
+		node.transport = newSwitchingRuntimeClient(node.runtimeClient)
+		node.runtimeClient = node.transport
 	}
 
 	var ready *RuntimeReadyPayload
@@ -192,6 +193,9 @@ func (node *RuntimeWorker) beginLifecycle() error {
 	if node.started {
 		return errors.New("runtime worker is already started")
 	}
+	if node.completed {
+		return errors.New("runtime worker cannot be restarted")
+	}
 	node.started = true
 	node.done = make(chan struct{})
 	node.runtimeCtx, node.runtimeStop = context.WithCancel(context.Background())
@@ -214,7 +218,7 @@ func (node *RuntimeWorker) applyDefaultsAndValidate() error {
 	if node.NodeVersion == "" {
 		node.NodeVersion = runtimeWorkerSDKAgent
 	}
-	if node.RuntimeClient == nil {
+	if node.runtimeClient == nil {
 		if node.RuntimeURL != "" {
 			if _, err := validateRuntimeOrigin(node.RuntimeURL); err != nil {
 				return err
@@ -243,7 +247,7 @@ func (node *RuntimeWorker) applyDefaultsAndValidate() error {
 	if !validRuntimeUUID(node.AgentID) {
 		return errors.New("Agent ID must be a non-zero lowercase UUID")
 	}
-	if node.AgentToken == "" && node.RuntimeClient == nil {
+	if node.AgentToken == "" && node.runtimeClient == nil {
 		return errors.New("Agent Token is required")
 	}
 	if node.Store == nil && node.DataDir == "" {
@@ -252,7 +256,7 @@ func (node *RuntimeWorker) applyDefaultsAndValidate() error {
 	if node.Handler == nil {
 		return errors.New("runtime handler is required")
 	}
-	if node.RuntimeClient == nil && (node.MTLS.CertFile == "" || node.MTLS.KeyFile == "" || node.MTLS.CAFile == "") {
+	if node.runtimeClient == nil && (node.MTLS.CertFile == "" || node.MTLS.KeyFile == "" || node.MTLS.CAFile == "") {
 		return errors.New("runtime mTLS cert, key, and CA files are required")
 	}
 	if node.Capacity == 0 {
@@ -318,9 +322,9 @@ func (node *RuntimeWorker) shutdown(ctx context.Context) error {
 		}
 	}
 
-	if node.store != nil && node.RuntimeClient != nil {
+	if node.store != nil && node.runtimeClient != nil {
 		identity := node.store.Identity()
-		closeClient := node.RuntimeClient
+		closeClient := node.runtimeClient
 		if node.transport != nil {
 			_, closeClient = node.transport.stop()
 		}
@@ -358,6 +362,7 @@ func (node *RuntimeWorker) shutdown(ctx context.Context) error {
 	node.lifecycleMu.Lock()
 	if node.started {
 		node.started = false
+		node.completed = true
 		close(node.done)
 	}
 	node.transport = nil

@@ -13,7 +13,7 @@ func (node *RuntimeWorker) commandLoop() {
 		if node.runtimeCtx.Err() != nil {
 			return
 		}
-		response, err := node.RuntimeClient.PollRuntimeCommands(
+		response, err := node.runtimeClient.PollRuntimeCommands(
 			node.runtimeCtx,
 			node.store.Identity().RuntimeSessionID,
 			durationSeconds(node.CommandWait),
@@ -128,7 +128,7 @@ func (node *RuntimeWorker) handleCancelCommand(command RuntimeRunCancelPayload) 
 func (node *RuntimeWorker) ackCancelOnce(command RuntimeRunCancelPayload, state RuntimeCancelState, errorCode string) error {
 	ctx, cancel := context.WithTimeout(node.runtimeCtx, 2*time.Second)
 	defer cancel()
-	_, err := node.RuntimeClient.AckRuntimeCancel(ctx, RuntimeRunCancelAckPayload{
+	_, err := node.runtimeClient.AckRuntimeCancel(ctx, RuntimeRunCancelAckPayload{
 		CancellationID:  command.CancellationID,
 		AttemptIdentity: command.AttemptIdentity,
 		CancelState:     state,
@@ -145,7 +145,7 @@ func (node *RuntimeWorker) ackCancelUntil(command RuntimeRunCancelPayload, state
 		if !deadline.IsZero() {
 			ctx, cancel = context.WithDeadline(node.runtimeCtx, deadline)
 		}
-		_, err := node.RuntimeClient.AckRuntimeCancel(ctx, RuntimeRunCancelAckPayload{
+		_, err := node.runtimeClient.AckRuntimeCancel(ctx, RuntimeRunCancelAckPayload{
 			CancellationID:  command.CancellationID,
 			AttemptIdentity: command.AttemptIdentity,
 			CancelState:     state,
@@ -210,7 +210,7 @@ func (node *RuntimeWorker) renewAttemptLease(attempt *activeRuntimeAttempt) {
 		} else {
 			renewCtx, cancelRenew = context.WithTimeout(node.runtimeCtx, 10*time.Second)
 		}
-		renewed, err := node.RuntimeClient.RenewRuntimeLease(renewCtx, RuntimeLeaseRenewPayload{
+		renewed, err := node.runtimeClient.RenewRuntimeLease(renewCtx, RuntimeLeaseRenewPayload{
 			AttemptIdentity:    sdkAttemptIdentity(attempt.identity),
 			LastClientEventSeq: record.LastClientEventSeq,
 			Capacity:           capacity,

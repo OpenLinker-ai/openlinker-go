@@ -95,7 +95,7 @@ func (node *RuntimeWorker) flushAttemptSpool(record AssignmentJournalRecord, per
 			if err := enforceRuntimeMessageLimit(request); err != nil {
 				return err
 			}
-			ack, err := node.RuntimeClient.AppendRuntimeEvent(node.runtimeCtx, request)
+			ack, err := node.runtimeClient.AppendRuntimeEvent(node.runtimeCtx, request)
 			if err != nil {
 				return err
 			}
@@ -137,7 +137,7 @@ func (node *RuntimeWorker) flushAttemptSpool(record AssignmentJournalRecord, per
 	}
 	var ack *RuntimeRunResultAckPayload
 	for repairs := 0; ; repairs++ {
-		ack, err = node.RuntimeClient.FinalizeRuntimeResult(node.runtimeCtx, request)
+		ack, err = node.runtimeClient.FinalizeRuntimeResult(node.runtimeCtx, request)
 		if err == nil {
 			break
 		}
@@ -184,7 +184,7 @@ func (node *RuntimeWorker) replayMissingEvents(record AssignmentJournalRecord, r
 			EventType:       event.EventType,
 			Payload:         payload,
 		}
-		ack, err := node.RuntimeClient.AppendRuntimeEvent(node.runtimeCtx, request)
+		ack, err := node.runtimeClient.AppendRuntimeEvent(node.runtimeCtx, request)
 		if err != nil {
 			return err
 		}

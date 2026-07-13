@@ -316,7 +316,7 @@ func (node *RuntimeWorker) callAgentForAttempt(
 		stop()
 		cancel()
 	}()
-	summary, err := node.RuntimeClient.CallRuntimeAgent(callCtx, RuntimeCallAgentAuthorization{
+	summary, err := node.runtimeClient.CallRuntimeAgent(callCtx, RuntimeCallAgentAuthorization{
 		NodeEnvelope:         attempt.payload.NodeEnvelope,
 		AgentInvocationToken: attempt.payload.AgentInvocationToken,
 		IdempotencyKey:       idempotencyKey,

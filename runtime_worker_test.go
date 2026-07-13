@@ -567,7 +567,7 @@ func TestDelegatedAgentCallRequiresExplicitIntentKey(t *testing.T) {
 		},
 		ctx: ctx,
 	}
-	node := &RuntimeWorker{RuntimeClient: client}
+	node := &RuntimeWorker{runtimeClient: client}
 	body := RuntimeJSONMap{"same": "body"}
 	if _, err := node.callAgentForAttempt(ctx, attempt, testTargetAgentID, body, RuntimeCallOptions{}); err == nil || !strings.Contains(err.Error(), "idempotency key is required") {
 		t.Fatalf("missing key error = %v", err)
@@ -617,7 +617,7 @@ func TestRuntimeTypedACKMismatchNeverClearsSpool(t *testing.T) {
 			ClientEventID: "dddddddd-dddd-4ddd-8ddd-dddddddddddd", ClientEventSeq: request.ClientEventSeq, Sequence: 1,
 		}, nil
 	}
-	node := &RuntimeWorker{store: store, RuntimeClient: client, runtimeCtx: context.Background()}
+	node := &RuntimeWorker{store: store, runtimeClient: client, runtimeCtx: context.Background()}
 	record, err := store.Assignment(identity.AssignmentMessageID)
 	if err != nil {
 		t.Fatal(err)
@@ -705,7 +705,7 @@ func TestRuntimeResultEventsMissingReplaysRetainedRangeBeforeRetry(t *testing.T)
 		}
 		return successfulResultACK(request.ResultID), nil
 	}
-	node := &RuntimeWorker{store: store, RuntimeClient: client, runtimeCtx: context.Background()}
+	node := &RuntimeWorker{store: store, runtimeClient: client, runtimeCtx: context.Background()}
 	record, err := store.Assignment(identity.AssignmentMessageID)
 	if err != nil {
 		t.Fatal(err)
@@ -836,7 +836,7 @@ func TestRuntimeExpiredAttemptDeadlineDoesNotInvokeAdapter(t *testing.T) {
 			adapterCalls.Add(1)
 			return RuntimeJSONMap{}, nil
 		}),
-		RuntimeClient: newFakeRuntimeClient(),
+		runtimeClient: newFakeRuntimeClient(),
 		store:         store,
 		runtimeCtx:    context.Background(),
 		active:        make(map[string]*activeRuntimeAttempt),
@@ -976,6 +976,24 @@ func stopRuntimeWorkerForTest(t *testing.T, node *RuntimeWorker, errCh <-chan er
 		}
 	case <-ctx.Done():
 		t.Fatalf("runtime node did not return: %v", ctx.Err())
+	}
+}
+
+func TestRuntimeWorkerIsSingleUse(t *testing.T) {
+	client := newFakeRuntimeClient()
+	worker := newRuntimeWorkerForTest(t.TempDir(), client, RuntimeHandlerFunc(func(
+		context.Context,
+		RuntimeContext,
+	) (RuntimeResult, error) {
+		return RuntimeResult{Status: "succeeded"}, nil
+	}))
+
+	runDone := startRuntimeWorkerForTest(worker)
+	waitForTestSignal(t, client.ready, time.Second, "Runtime session creation")
+	stopRuntimeWorkerForTest(t, worker, runDone)
+
+	if err := worker.Start(context.Background()); err == nil || !strings.Contains(err.Error(), "cannot be restarted") {
+		t.Fatalf("second Start error = %v, want single-use rejection", err)
 	}
 }
 

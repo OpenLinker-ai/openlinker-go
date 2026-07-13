@@ -33,7 +33,7 @@ func (node *RuntimeWorker) startInitialRuntimeTransport(parent context.Context) 
 }
 
 func (node *RuntimeWorker) startTransportSupervisor() {
-	if node.transport == nil || node.RuntimeDialer == nil || RuntimeTransportMode(node.Transport) == RuntimeTransportPull {
+	if node.transport == nil || node.runtimeDialer == nil || RuntimeTransportMode(node.Transport) == RuntimeTransportPull {
 		return
 	}
 	ctx, cancel := context.WithCancel(node.runtimeCtx)
@@ -88,7 +88,7 @@ func (node *RuntimeWorker) transportSupervisorLoop(ctx context.Context) {
 			}
 			node.transport.setState(RuntimeTransportProbingWS)
 			probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			err := node.RuntimeDialer.ProbeRuntimeWebSocket(probeCtx)
+			err := node.runtimeDialer.ProbeRuntimeWebSocket(probeCtx)
 			cancel()
 			if err != nil {
 				node.transport.setState(RuntimeTransportPullActive)
@@ -233,11 +233,11 @@ func (node *RuntimeWorker) activateWebSocketWithRetry(parent context.Context, re
 }
 
 func (node *RuntimeWorker) dialWebSocketOnce(parent context.Context) (RuntimeDuplexClient, *RuntimeReadyPayload, error) {
-	if node.RuntimeDialer == nil {
+	if node.runtimeDialer == nil {
 		return nil, nil, errors.New("runtime WebSocket dialer is unavailable")
 	}
 	callCtx, cancel := context.WithTimeout(parent, 20*time.Second)
-	connection, err := node.RuntimeDialer.DialRuntimeWebSocket(callCtx, node.runtimeHello())
+	connection, err := node.runtimeDialer.DialRuntimeWebSocket(callCtx, node.runtimeHello())
 	cancel()
 	if err != nil {
 		return nil, nil, err
