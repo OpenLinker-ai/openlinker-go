@@ -289,6 +289,105 @@ func TestRuntimeWebSocketResumeCollectsEveryCorrelatedDecision(t *testing.T) {
 	}
 }
 
+func TestRuntimeWebSocketResumeRejectsPartialDecisionsOnClose(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	hello := runtimeTestHello()
+	first := runtimeTestIdentity()
+	second := first
+	second.RunID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	second.AttemptID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	second.LeaseID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+	serverErr := make(chan error, 1)
+	server := newRuntimeSDKWSServer(t, func(_ *http.Request, conn *websocket.Conn) error {
+		if err := serveRuntimeSDKWSReady(conn, now); err != nil {
+			return err
+		}
+		resumeEnvelope, err := readRuntimeSDKWSEnvelope(conn)
+		if err != nil {
+			return err
+		}
+		leaseExpiry := now.Add(time.Minute)
+		return writeRuntimeSDKWSEnvelope(conn, RuntimeResumeAccepted, resumeEnvelope.MessageID, RuntimeResumeAcceptedPayload{
+			AttemptIdentity: first, Decision: RuntimeResumeContinue, LeaseExpiresAt: &leaseExpiry,
+			AllowedActions: []RuntimeResumeAction{RuntimeActionContinueExecution, RuntimeActionUploadEvents, RuntimeActionUploadResult},
+		})
+	}, serverErr)
+	defer server.Close()
+	runtimeClient, _ := NewRuntime(server.URL, WithAgentToken("ol_agent_v2"))
+	connection, err := runtimeClient.DialRuntimeWebSocket(context.Background(), hello)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	response, err := connection.ResumeRuntimeRuns(context.Background(), RuntimeResumePayload{
+		NodeID: hello.NodeID, AgentID: hello.AgentID, WorkerID: hello.WorkerID,
+		RuntimeSessionID: hello.RuntimeSessionID,
+		Attempts: []RuntimeResumeAttempt{
+			{AttemptIdentity: first, PendingClientEventRanges: []RuntimeEventRange{}},
+			{AttemptIdentity: second, PendingClientEventRanges: []RuntimeEventRange{}},
+		},
+	})
+	if err == nil || response != nil {
+		t.Fatalf("partial resume response = %#v, %v", response, err)
+	}
+	if err = <-serverErr; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRuntimeWebSocketResumePreservesErrorAfterPartialDecision(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	hello := runtimeTestHello()
+	first := runtimeTestIdentity()
+	second := first
+	second.RunID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	second.AttemptID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	second.LeaseID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+	serverErr := make(chan error, 1)
+	server := newRuntimeSDKWSServer(t, func(_ *http.Request, conn *websocket.Conn) error {
+		if err := serveRuntimeSDKWSReady(conn, now); err != nil {
+			return err
+		}
+		resumeEnvelope, err := readRuntimeSDKWSEnvelope(conn)
+		if err != nil {
+			return err
+		}
+		leaseExpiry := now.Add(time.Minute)
+		if err = writeRuntimeSDKWSEnvelope(conn, RuntimeResumeAccepted, resumeEnvelope.MessageID, RuntimeResumeAcceptedPayload{
+			AttemptIdentity: first, Decision: RuntimeResumeContinue, LeaseExpiresAt: &leaseExpiry,
+			AllowedActions: []RuntimeResumeAction{RuntimeActionContinueExecution, RuntimeActionUploadEvents, RuntimeActionUploadResult},
+		}); err != nil {
+			return err
+		}
+		return writeRuntimeSDKWSEnvelope(conn, RuntimeError, resumeEnvelope.MessageID, RuntimeErrorBody{
+			Code: "EVENTS_MISSING", Message: "Event range is missing",
+			MissingEventRanges: []RuntimeEventRange{{Start: 1, End: 1}},
+		})
+	}, serverErr)
+	defer server.Close()
+	runtimeClient, _ := NewRuntime(server.URL, WithAgentToken("ol_agent_v2"))
+	connection, err := runtimeClient.DialRuntimeWebSocket(context.Background(), hello)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	response, err := connection.ResumeRuntimeRuns(context.Background(), RuntimeResumePayload{
+		NodeID: hello.NodeID, AgentID: hello.AgentID, WorkerID: hello.WorkerID,
+		RuntimeSessionID: hello.RuntimeSessionID,
+		Attempts: []RuntimeResumeAttempt{
+			{AttemptIdentity: first, PendingClientEventRanges: []RuntimeEventRange{}},
+			{AttemptIdentity: second, PendingClientEventRanges: []RuntimeEventRange{}},
+		},
+	})
+	var runtimeErr *Error
+	if response != nil || !errors.As(err, &runtimeErr) || runtimeErr.Code != "EVENTS_MISSING" {
+		t.Fatalf("resume error = %#v, %#v", response, err)
+	}
+	if err = <-serverErr; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRuntimeWebSocketCanceledRequestsDoNotLeakPendingEntries(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	hello := runtimeTestHello()

@@ -430,12 +430,12 @@ func (c *RuntimeWebSocket) routeReply(envelope RuntimeEnvelope) error {
 		}
 		reply.err = &Error{Code: body.Code, Message: body.Message, Details: body}
 	}
-	select {
-	case <-c.ctx.Done():
-		return c.ctx.Err()
-	case pending.replies <- reply:
-		return nil
-	}
+	// The channel is sized to the request's exact reply count, and remaining
+	// prevents more than that many replies from reaching it. Once a reply has
+	// been validated and claimed above, publish it even if the connection closes
+	// concurrently; otherwise the request can lose a response it already owns.
+	pending.replies <- reply
+	return nil
 }
 
 func (c *RuntimeWebSocket) writeLoop() {
@@ -530,18 +530,45 @@ func (c *RuntimeWebSocket) request(
 	}
 
 	replies := make([]RuntimeEnvelope, 0, replyCount)
+	consumeReply := func(reply runtimeWSReply) error {
+		if reply.err != nil {
+			return reply.err
+		}
+		replies = append(replies, reply.envelope)
+		return nil
+	}
 	for len(replies) < replyCount {
+		// A peer may close immediately after writing the final response. Drain an
+		// already-routed reply before observing c.done so a completed request is
+		// not turned into an abnormal-closure error by select scheduling.
+		select {
+		case reply := <-pending.replies:
+			if err = consumeReply(reply); err != nil {
+				return nil, envelope.MessageID, err
+			}
+			continue
+		default:
+		}
 		select {
 		case <-ctx.Done():
 			c.abandonPending(envelope.MessageID)
 			return nil, envelope.MessageID, ctx.Err()
 		case <-c.done:
-			return nil, envelope.MessageID, c.closedError()
-		case reply := <-pending.replies:
-			if reply.err != nil {
-				return nil, envelope.MessageID, reply.err
+			// readLoop routes every frame before it closes done. One final drain
+			// therefore preserves replies received before the close boundary.
+			select {
+			case reply := <-pending.replies:
+				if err = consumeReply(reply); err != nil {
+					return nil, envelope.MessageID, err
+				}
+				continue
+			default:
+				return nil, envelope.MessageID, c.closedError()
 			}
-			replies = append(replies, reply.envelope)
+		case reply := <-pending.replies:
+			if err = consumeReply(reply); err != nil {
+				return nil, envelope.MessageID, err
+			}
 		}
 	}
 	return replies, envelope.MessageID, nil
