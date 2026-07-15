@@ -44,6 +44,7 @@ type RuntimeWorker struct {
 	Handler RuntimeHandler
 	Store   RuntimeStore
 	Logger  *log.Logger
+	OnReady func(RuntimeReadyPayload)
 
 	runtimeClient RuntimeClient
 	runtimeDialer RuntimeTransportDialer
@@ -159,6 +160,9 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 	if err := node.resumeDurableState(startupCtx); err != nil {
 		return err
 	}
+	if node.OnReady != nil {
+		node.OnReady(*ready)
+	}
 
 	node.startTransportSupervisor()
 	node.startRuntimeLoops()
@@ -171,6 +175,9 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 		return err
 	}
 }
+
+// Run is the facade-friendly alias for Start.
+func (node *RuntimeWorker) Run(ctx context.Context) error { return node.Start(ctx) }
 
 func (node *RuntimeWorker) Stop(ctx context.Context) error {
 	if ctx == nil {

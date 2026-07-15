@@ -2,6 +2,8 @@
 .env
 .env.local
 .env.*.local
+.openlinker/
+._*
 
 # Build outputs
 bin/

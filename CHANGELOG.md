@@ -9,6 +9,12 @@ runtime connector, callback, and A2A contracts are declared stable.
 
 ### Added
 
+- Added the high-level `WithAgent`, `WithFunc`, and `Native` facades over the
+  canonical reliable `RuntimeWorker`, including event/progress helpers,
+  assignment context, retryable failures, explicit registration, environment
+  configuration, and `RunOrRegister`.
+- Added creator and pending-token Agent registration clients, `AgentSpec`,
+  registration policies, and a durable `.env` registration store.
 - Added `RuntimeWorker`, the SDK-owned reliable worker for Runtime discovery,
   mTLS, WebSocket and HTTP pull recovery, Session lifecycle, assignment
   confirmation, lease renewal, resume, cancellation, drain, and encrypted
@@ -23,6 +29,10 @@ runtime connector, callback, and A2A contracts are declared stable.
 
 ### Changed
 
+- Reconciled the high-level API-mode work with the remote reliable worker. The
+  encrypted `RuntimeStore`, transport generation fencing, assignment journal,
+  spool, resume, cancel, and drain implementations remain the single canonical
+  state machine; the high-level APIs are facades rather than a second worker.
 - Breaking: standardized every Runtime HTTP and WebSocket endpoint under
   `/api/v1/agent-runtime/*`; Runtime URLs no longer carry a protocol generation.
   The wire handshake keeps protocol version 2 and the
@@ -44,9 +54,10 @@ runtime connector, callback, and A2A contracts are declared stable.
 - Breaking: removed the `WithRuntimeToken` compatibility alias. Runtime
   clients now accept Agent credentials only through `WithAgentToken`.
 - Breaking: removed the legacy heartbeat, pull claim/result, delegated-call
-  API, pull/WebSocket connectors, Native runners, Blades wrapper, and legacy
-  Runtime examples. `Runtime` now exposes the strict protocol primitives, while
-  `RuntimeWorker` owns reliable process execution.
+  API, pull/WebSocket connectors, Blades wrapper, and legacy Runtime examples.
+  `Runtime` exposes strict protocol primitives, `RuntimeWorker` owns reliable
+  process execution, and the new `Native` facade adapts framework handlers to
+  that worker without restoring the legacy state machine.
 
 ### Documentation
 

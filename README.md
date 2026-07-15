@@ -164,6 +164,27 @@ _ = body
 
 ## OpenLinker Runtime
 
+Most Go Agents should start with the minimal facade. It loads the standard
+environment, opens the encrypted Runtime store, and runs the canonical worker:
+
+```go
+type MyAgent struct{}
+
+func (MyAgent) Run(ctx context.Context, input string) (string, error) {
+	return "processed: " + input, nil
+}
+
+if err := openlinker.WithAgent(MyAgent{}).Run(context.Background()); err != nil {
+	log.Fatal(err)
+}
+```
+
+Registration is explicit through `RunOrRegister` or `WithRegistration`; merely
+setting a User Token never creates platform resources. Frameworks that need
+assignment identity, metadata, custom events, progress, deadlines, or delegated
+calls use `Native(handler)`. Infrastructure code can construct `RuntimeWorker`
+directly or use the lower-level `NewRuntime` protocol client.
+
 `RuntimeWorker` owns discovery, mTLS, Session lifecycle, WebSocket-to-pull
 recovery, assignment confirmation, lease renewal, resume, cancellation, drain,
 and the encrypted assignment/Event/Result store. A handler runs only after Core
@@ -220,6 +241,10 @@ worker. Applications that need those primitives can build on:
 `openlinker-agent-node` is an optional Adapter shell. It injects an HTTP,
 command, Codex, or A2A handler into this SDK worker; it does not own a second
 Runtime state machine.
+
+API layering and registration details are documented in
+[Runtime API modes](./docs/runtime-api-modes.md) and
+[Native Runtime registration (Chinese)](./docs/runtime-native-registration.zh-CN.md).
 
 ## A2A Transports
 
