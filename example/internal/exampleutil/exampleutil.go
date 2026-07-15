@@ -79,3 +79,14 @@ func IsTerminalRunStatus(status string) bool {
 		return false
 	}
 }
+
+// SplitCSV returns trimmed non-empty comma-separated values.
+func SplitCSV(value string) []string {
+	var values []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			values = append(values, item)
+		}
+	}
+	return values
+}

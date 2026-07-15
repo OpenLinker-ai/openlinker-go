@@ -62,3 +62,10 @@ func TestPrintJSONAndTerminalStatus(t *testing.T) {
 		t.Fatal("running is terminal")
 	}
 }
+
+func TestSplitCSV(t *testing.T) {
+	got := SplitCSV(" agent, runtime ,,tools ")
+	if len(got) != 3 || got[0] != "agent" || got[1] != "runtime" || got[2] != "tools" {
+		t.Fatalf("SplitCSV() = %#v", got)
+	}
+}

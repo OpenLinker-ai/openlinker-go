@@ -8,7 +8,7 @@
 |---|---|---|
 | 普通 Agent 开发者 | [`runtime/agent-generic`](runtime/agent-generic/) | 可运行 |
 | 调用 OpenLinker Agent 的 Client | [`client`](client/) | 可运行 |
-| 需要自动注册 Agent | [`registration`](registration/) | 后续阶段补齐 |
+| 需要自动注册 Agent | [`registration`](registration/) | 可运行 |
 | Agent 框架开发者 | [`runtime`](runtime/) 中的 Native 示例 | 后续阶段补齐 |
 | Runtime 基础设施开发者 | [`runtime`](runtime/) 中的 Managed Worker / Protocol 示例 | 后续阶段补齐 |
 | A2A 或 Webhook 集成开发者 | [`a2a`](a2a/) / [`webhook`](webhook/) | 后续阶段补齐 |
@@ -26,6 +26,18 @@ go run ./client/run-sync
 ```
 
 六个 Client 示例的用途、环境变量和资源影响见 [`client/README.md`](client/README.md)。
+
+### Agent 注册和 Token 管理
+
+`registration/ensure-agent` 显式创建或复用 Agent；`registration/token-management` 默认只读，写操作需要 `--confirm-write`：
+
+```bash
+cd example
+go run ./registration/ensure-agent
+go run ./registration/token-management
+```
+
+运行前请先阅读 [`registration/README.md`](registration/README.md) 中的资源影响和 Token 安全说明。
 
 ### 极简 Agent
 
