@@ -58,7 +58,7 @@ func loadConfig() (config, error) {
 func run(ctx context.Context, cfg config, output io.Writer) error {
 	registration, err := openlinker.EnsureAgent(ctx, openlinker.AgentSpec{
 		Slug: cfg.Slug, Name: cfg.Name, Description: cfg.Description,
-		Tags: cfg.Tags, Visibility: "private", ConnectionMode: "runtime_ws",
+		Tags: cfg.Tags, Visibility: "private", ConnectionMode: "runtime",
 	},
 		openlinker.WithRegistrationAPIBase(cfg.APIBase),
 		openlinker.WithRegistrationUserToken(cfg.UserToken),

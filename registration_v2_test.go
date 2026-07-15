@@ -28,7 +28,7 @@ func TestRegisterAgentViaTokenUsesBearerAndPrivateDefault(t *testing.T) {
 		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body.Visibility != "private" || body.Name != "Demo Agent" {
+		if body.Visibility != "private" || body.Name != "Demo Agent" || body.ConnectionMode != "runtime" {
 			t.Fatalf("body = %#v", body)
 		}
 		writeRuntimeTestJSON(t, w, RegisterAgentViaTokenResponse{
@@ -43,6 +43,18 @@ func TestRegisterAgentViaTokenUsesBearerAndPrivateDefault(t *testing.T) {
 	}
 	if registered.Agent.ID != testAgentID {
 		t.Fatalf("registered = %#v", registered)
+	}
+}
+
+func TestNormalizeRegistrationConnectionMode(t *testing.T) {
+	t.Parallel()
+	for input, want := range map[string]string{
+		"": "runtime", "runtime": "runtime", "runtime_ws": "runtime",
+		"runtime_pull": "runtime", "agent_node": "runtime", "direct_http": "direct_http",
+	} {
+		if got := normalizeRegistrationConnectionMode(input); got != want {
+			t.Fatalf("normalizeRegistrationConnectionMode(%q) = %q, want %q", input, got, want)
+		}
 	}
 }
 

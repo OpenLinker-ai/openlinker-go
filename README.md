@@ -1,13 +1,68 @@
 # openlinker-go
 
-`openlinker-go` is the Go SDK for OpenLinker Core. Use `NewClient` to discover
-and invoke Agents, stream run events, verify webhooks, and call A2A transports.
-Use `NewRuntimeWorker` to run an Agent handler with durable Runtime delivery.
-`NewRuntime` remains available for lower-level Runtime protocol access.
+`openlinker-go` is the Go SDK for building and calling OpenLinker Agents. Most
+Agent projects should start with the minimal facade below and let the SDK own
+Runtime configuration, mTLS, durable state, lease, cancel, resume, reconnect,
+transport switching, and graceful shutdown.
 
 Chinese documentation: [README.zh-CN.md](./README.zh-CN.md)
 
-Runnable single-concept examples: [example/README.md](./example/README.md).
+## Minimal Agent Quick Start
+
+```bash
+go get github.com/OpenLinker-ai/openlinker-go@v0.2.0-rc.1
+```
+
+```go
+package main
+
+import (
+	"context"
+	"log"
+
+	openlinker "github.com/OpenLinker-ai/openlinker-go"
+)
+
+type MyAgent struct{}
+
+func (MyAgent) Run(ctx context.Context, input string) (string, error) {
+	return "processed: " + input, nil
+}
+
+func main() {
+	if err := openlinker.WithAgent(MyAgent{}).Run(context.Background()); err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
+The function form is `openlinker.WithFunc(fn).Run(ctx)`. See the runnable
+[minimal Agent demo](./example/runtime/agent-generic), then use the
+[example index](./example/README.md) to find one focused example per concept.
+
+## Choose the API Mode
+
+1. **Minimal Agent** — `WithAgent` / `WithFunc`; recommended for ordinary Go Agents.
+2. **Explicit registration and run** — attach `RunOrRegister` or `WithRegistration`; registration never happens merely because a User Token exists.
+3. **Native Runtime** — `Native(handler)` for metadata, events, progress, delegation, deadlines, and custom results; the SDK still owns the worker lifecycle.
+4. **Managed Worker / protocol** — `NewRuntimeWorker` for advanced embedding; `NewRuntime` only for infrastructure that intentionally owns journal, lease, spool, resume, cancel, reconnect, and transport switching.
+
+Recommended examples: [registration](./example/runtime/agent-register),
+[Native events](./example/runtime/native-events),
+[Managed RuntimeWorker](./example/runtime/worker-managed), and
+[low-level protocol](./example/runtime/protocol-http).
+
+## Transport Is Independent
+
+API mode and network transport are separate choices. Minimal Agent, explicit
+registration, and Native Runtime all support:
+
+- `TransportAuto` (default): prefer WebSocket, use HTTP long-poll only for transport availability, and safely probe WebSocket recovery.
+- `TransportWebSocket`: strict WebSocket only.
+- `TransportHTTP`: strict HTTP long-poll only.
+
+Authentication, mTLS, permission, payload, and contract errors never trigger
+fallback. See [Runtime API modes](./docs/runtime-api-modes.md) for the full layering.
 
 ## Status
 
@@ -55,7 +110,7 @@ flowchart LR
   Core -->|"Runtime assignments and cancellation"| RuntimeSDK
 ```
 
-## Quick Start
+## Client Quick Start
 
 ```go
 package main
@@ -247,6 +302,8 @@ Runtime state machine.
 API layering and registration details are documented in
 [Runtime API modes](./docs/runtime-api-modes.md) and
 [Native Runtime registration (Chinese)](./docs/runtime-native-registration.zh-CN.md).
+The downstream layout migration is documented in
+[openlinker-agent-layout migration (Chinese)](./docs/openlinker-agent-layout-migration.zh-CN.md).
 
 ## A2A Transports
 

@@ -201,9 +201,7 @@ func normalizeEnsureAgentRequest(req EnsureAgentRequest) EnsureAgentRequest {
 	if req.Visibility == "" {
 		req.Visibility = "private"
 	}
-	if req.ConnectionMode == "" {
-		req.ConnectionMode = "runtime_ws"
-	}
+	req.ConnectionMode = normalizeRegistrationConnectionMode(req.ConnectionMode)
 	if req.TokenName == "" {
 		req.TokenName = firstNonEmpty(req.Name, req.Slug, "Go runtime worker")
 	}
@@ -214,6 +212,15 @@ func normalizeEnsureAgentRequest(req EnsureAgentRequest) EnsureAgentRequest {
 		req.Tags = []string{"agent", "runtime"}
 	}
 	return req
+}
+
+func normalizeRegistrationConnectionMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "runtime", "runtime_ws", "runtime_pull", "agent_node":
+		return "runtime"
+	default:
+		return strings.TrimSpace(value)
+	}
 }
 
 func (c *Client) ensureCreatorAgent(ctx context.Context, req EnsureAgentRequest, stored *AgentRegistration) (*AgentResponse, error) {

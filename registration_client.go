@@ -106,6 +106,7 @@ func RegisterAgentViaToken(
 	if req.Visibility == "" {
 		req.Visibility = "private"
 	}
+	req.ConnectionMode = normalizeRegistrationConnectionMode(req.ConnectionMode)
 	var out RegisterAgentViaTokenResponse
 	response, err := client.newRequestWithToken(ctx, http.MethodPost, "/agent-registration/agents", nil, req, "application/json", agentToken)
 	if err != nil {

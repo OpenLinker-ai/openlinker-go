@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	defaultSDKAgent      = "openlinker-go/0.1.3"
+	defaultSDKAgent      = "openlinker-go/0.2.0-rc.1"
 	maxResponseBodyBytes = int64(4 << 20)
 )
 

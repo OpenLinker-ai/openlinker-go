@@ -36,7 +36,7 @@ func TestRunCreatesThenReusesStoredRegistration(t *testing.T) {
 			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 				t.Fatal(err)
 			}
-			if body.Slug != "demo-agent" || body.Visibility != "private" || body.ConnectionMode != "runtime_ws" {
+			if body.Slug != "demo-agent" || body.Visibility != "private" || body.ConnectionMode != "runtime" {
 				t.Fatalf("agent body = %#v", body)
 			}
 			_ = json.NewEncoder(w).Encode(openlinker.AgentResponse{ID: agentID, Slug: "demo-agent", Name: "Demo Agent"})

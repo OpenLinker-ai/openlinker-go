@@ -4,6 +4,8 @@ This document freezes the public API layering targeted by `v0.2.0`. The API
 mode describes how much Runtime behavior the SDK manages; it is independent
 from whether the connection uses WebSocket or HTTP.
 
+Chinese documentation: [runtime-api-modes.zh-CN.md](./runtime-api-modes.zh-CN.md).
+
 ## 1. Minimal Agent
 
 Use `WithAgent` or `WithFunc`. The SDK owns configuration, mTLS, durable state,

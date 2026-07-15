@@ -185,6 +185,16 @@
   - 验收：每个公开 API 大类至少有一个可运行 demo；每个叶子目录只演示一个核心概念；新用户不阅读 SDK 内部实现即可从索引找到正确入口；示例 module 可独立完成 test/vet，且 smoke test 不泄露或提交任何真实凭证。
 
 [ ] 11. 更新文档、示例索引并按 RC → 下游验证 → 正式版发布。
+  - 阶段进度：
+    - [x] README 第一屏切换为极简 Agent，并补齐四层 API、推荐示例和传输正交说明；中英文同步。
+    - [x] 新增 `openlinker-agent-layout` 中文迁移、依赖清理和回滚说明。
+    - [x] `openlinker-agent-layout` 已迁移到 `Native(agent.Handle)`，本地全量测试通过；已移除 vendor，RC 发布前仅保留临时本地 replace。
+    - [x] 新增 `v0.2.0-rc.1` 中文发布/验证清单，并补齐 CHANGELOG 的默认值、breaking、兼容和回滚信息。
+    - [x] 对照本地 `openlinker-core main` 完成 contract、路由、注册 connection mode 和定向测试核对；记录见 `runtime-core-compatibility.zh-CN.md`。
+    - [x] SDK `go test` / race / vet、example module test / vet、layout test / vet 与 Core 定向测试全部通过；真实测试环境 smoke test 留在 RC 发布门槛。
+    - [ ] 获得明确确认后创建并推送 `v0.2.0-rc.1`；发布后删除 layout 临时 replace 并以正常 Go module 依赖复验。
+    - [ ] 收集 RC 反馈后发布 `v0.2.0`。
+    - `openlinker-agent-node` 实施迁移按用户要求不在本轮修改，保留为后续独立工作；本 Item 不以修改该仓库作为当前执行范围。
   - README 第一屏仅展示极简 `WithAgent(...).Run()`；随后依次说明显式自动注册、Native Runtime、Managed RuntimeWorker 和底层协议，避免普通 Agent 用户误入协议原语。
   - 从 README 链接到 `example/README.md`，并选择少量推荐 demo 作为主文档入口；完整示例留在 example 索引，避免 README 被所有场景代码淹没。
   - 增加四种模式的使用说明以及传输配置章节，明确“API 开发模式”和“WebSocket/HTTP 传输模式”互相独立；中英文文档保持同步。
