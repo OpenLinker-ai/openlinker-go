@@ -114,7 +114,7 @@
 [ ] 10. 按 Blades 的单概念颗粒度建立 `example/` demo 体系，并优先补齐 Client 侧 API。
   - 阶段进度：
     - [x] 建立共享 `example` module、分类目录、中文索引和 `internal/exampleutil`，迁移 `runtime/agent-generic`。
-    - [ ] 实现 Client 侧六个单概念示例及离线协议测试。
+    - [x] 实现 Client 侧六个单概念示例及离线协议测试。
     - [ ] 实现 Registration 示例及显式资源变更保护。
     - [ ] 实现极简、注册、Native、Managed Worker 和底层 Protocol Runtime 示例。
     - [ ] 实现 A2A 与 Webhook 示例。

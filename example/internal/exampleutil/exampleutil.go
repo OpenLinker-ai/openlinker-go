@@ -4,11 +4,15 @@ package exampleutil
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // SignalContext returns a context canceled by SIGINT or SIGTERM.
@@ -34,4 +38,44 @@ func EnvBool(key string) bool {
 	}
 	enabled, err := strconv.ParseBool(value)
 	return err == nil && enabled
+}
+
+// RequiredEnv returns a trimmed environment value or a configuration error.
+func RequiredEnv(key string) (string, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return "", fmt.Errorf("缺少必填环境变量 %s", key)
+	}
+	return value, nil
+}
+
+// EnvDuration reads a duration such as 30s or 2m and uses fallback when empty.
+func EnvDuration(key string, fallback time.Duration) (time.Duration, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback, nil
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil || duration <= 0 {
+		return 0, fmt.Errorf("环境变量 %s 必须是正数 duration: %q", key, value)
+	}
+	return duration, nil
+}
+
+// PrintJSON writes indented JSON to output.
+func PrintJSON(output io.Writer, value any) error {
+	encoder := json.NewEncoder(output)
+	encoder.SetIndent("", "  ")
+	encoder.SetEscapeHTML(false)
+	return encoder.Encode(value)
+}
+
+// IsTerminalRunStatus reports whether a Client Run no longer needs polling.
+func IsTerminalRunStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "success", "completed", "failed", "canceled", "cancelled":
+		return true
+	default:
+		return false
+	}
 }

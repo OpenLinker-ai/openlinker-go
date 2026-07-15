@@ -7,13 +7,25 @@
 | 使用者 | 推荐入口 | 状态 |
 |---|---|---|
 | 普通 Agent 开发者 | [`runtime/agent-generic`](runtime/agent-generic/) | 可运行 |
-| 调用 OpenLinker Agent 的 Client | [`client`](client/) | 后续阶段补齐 |
+| 调用 OpenLinker Agent 的 Client | [`client`](client/) | 可运行 |
 | 需要自动注册 Agent | [`registration`](registration/) | 后续阶段补齐 |
 | Agent 框架开发者 | [`runtime`](runtime/) 中的 Native 示例 | 后续阶段补齐 |
 | Runtime 基础设施开发者 | [`runtime`](runtime/) 中的 Managed Worker / Protocol 示例 | 后续阶段补齐 |
 | A2A 或 Webhook 集成开发者 | [`a2a`](a2a/) / [`webhook`](webhook/) | 后续阶段补齐 |
 
 ## 当前可运行示例
+
+### Client 调用
+
+Client 调用方建议依次查看 Agent discovery、同步 Run 和异步/流式 Run：
+
+```bash
+cd example
+go run ./client/agent-discovery
+go run ./client/run-sync
+```
+
+六个 Client 示例的用途、环境变量和资源影响见 [`client/README.md`](client/README.md)。
 
 ### 极简 Agent
 
