@@ -112,6 +112,13 @@
   - 验收：所有已知不可逆窗口都有确定测试；测试能证明重连、resume 和 spool replay 不依赖进程重启或偶然时序。
 
 [ ] 10. 按 Blades 的单概念颗粒度建立 `example/` demo 体系，并优先补齐 Client 侧 API。
+  - 阶段进度：
+    - [x] 建立共享 `example` module、分类目录、中文索引和 `internal/exampleutil`，迁移 `runtime/agent-generic`。
+    - [ ] 实现 Client 侧六个单概念示例及离线协议测试。
+    - [ ] 实现 Registration 示例及显式资源变更保护。
+    - [ ] 实现极简、注册、Native、Managed Worker 和底层 Protocol Runtime 示例。
+    - [ ] 实现 A2A 与 Webhook 示例。
+    - [ ] 补齐示例总索引、根 README/CI、全量测试与 smoke test 说明，完成 Item 10 验收。
   - 参考 [go-kratos/blades examples](https://github.com/go-kratos/blades/tree/main/examples) 的组织原则：整个示例集合使用一个共享 module，每个叶子目录只回答一个问题，普通示例以单个 `main.go` 为主，只有场景本身需要时才增加同目录 helper、配置文件或测试。
   - 保留仓库现有的 `example/` 单数目录，不为了对齐参考项目而做无收益的目录重命名；将当前 `example/runtime/agent-generic` 的独立 `go.mod` / `go.sum` 合并到 `example/go.mod` / `example/go.sum`，并使用 `replace github.com/OpenLinker-ai/openlinker-go => ../` 测试当前工作树。
   - 使用“API 大类目录 + 单概念叶子目录”的两级结构，避免 OpenLinker 的 Client、Runtime、A2A 与 Webhook 示例全部平铺；计划目录如下：

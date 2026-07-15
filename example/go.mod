@@ -1,8 +1,8 @@
-module agent-generic
+module github.com/OpenLinker-ai/openlinker-go/example
 
 go 1.25.0
 
-require github.com/OpenLinker-ai/openlinker-go v0.1.4
+require github.com/OpenLinker-ai/openlinker-go v0.0.0
 
 require (
 	github.com/gorilla/websocket v1.5.3 // indirect
@@ -15,4 +15,4 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/OpenLinker-ai/openlinker-go v0.1.4 => ../../..
+replace github.com/OpenLinker-ai/openlinker-go => ../

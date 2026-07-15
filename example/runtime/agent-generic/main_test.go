@@ -41,15 +41,3 @@ func TestGenericAgentPanic(t *testing.T) {
 
 	_, _ = (GenericAgent{Panic: true}).Run(context.Background(), "task")
 }
-
-func TestEnvBool(t *testing.T) {
-	t.Setenv("GENERIC_AGENT_PANIC", "true")
-	if !envBool("GENERIC_AGENT_PANIC") {
-		t.Fatal("envBool() = false, want true")
-	}
-
-	t.Setenv("GENERIC_AGENT_PANIC", "0")
-	if envBool("GENERIC_AGENT_PANIC") {
-		t.Fatal("envBool() = true, want false")
-	}
-}

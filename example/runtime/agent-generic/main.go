@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
-	"strconv"
 	"strings"
-	"syscall"
 
 	openlinker "github.com/OpenLinker-ai/openlinker-go"
+	"github.com/OpenLinker-ai/openlinker-go/example/internal/exampleutil"
 )
 
 const sdkAgent = "openlinker-go/example/agent-generic"
@@ -51,13 +49,13 @@ func (a GenericAgent) Run(ctx context.Context, input string) (string, error) {
 }
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := exampleutil.SignalContext()
 	defer stop()
 
 	agent := GenericAgent{
-		Name:   firstNonEmpty(os.Getenv("GENERIC_AGENT_NAME"), "Generic Agent"),
+		Name:   exampleutil.FirstNonEmpty(os.Getenv("GENERIC_AGENT_NAME"), "Generic Agent"),
 		Prefix: strings.TrimSpace(os.Getenv("GENERIC_AGENT_PREFIX")),
-		Panic:  envBool("GENERIC_AGENT_PANIC"),
+		Panic:  exampleutil.EnvBool("GENERIC_AGENT_PANIC"),
 	}
 
 	log.Printf("generic native agent starting name=%q", agent.Name)
@@ -67,22 +65,4 @@ func main() {
 		log.Fatalf("generic native agent failed: %v", err)
 	}
 	log.Print("generic native agent stopped")
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
-
-func envBool(key string) bool {
-	value := strings.TrimSpace(os.Getenv(key))
-	if value == "" {
-		return false
-	}
-	enabled, err := strconv.ParseBool(value)
-	return err == nil && enabled
 }
