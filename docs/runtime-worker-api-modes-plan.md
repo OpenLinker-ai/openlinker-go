@@ -100,13 +100,14 @@
   - 涉及文件：`runtime_store_*.go`、`runtime_worker_spool.go`、`runtime_worker_attempt.go` 和相关并发/故障测试。
   - 验收：capacity 4 并发下通过 race test，无全局磁盘写锁导致的明显串行化；故障日志足以定位阶段且不包含密钥或 invocation credential。
 
-[ ] 9. 建立 Runtime v2 chaos、契约和回归测试矩阵。
+[x] 9. 建立 Runtime v2 chaos、契约和回归测试矩阵。
   - 扩展 fake transport 为可编排的 chaos transport，可在 session create、claim、assignment ACK、lease、Event、Result、command、resume 和 close 的请求前后注入断线、ACK 丢失、重试错误或永久错误。
   - 覆盖：HTTP heartbeat、WebSocket 重连、fallback/promotion、assignment 落盘后 ACK 前崩溃、ACK 后本地保存失败、Event/Result ACK 丢失、lease 超时/revoke、deadline、cancel deadline、drain、Store 损坏、capacity 4、多 attempt resume 和 retryable Result ACK。
   - 对 stable ID 和 sequence 增加断言：重放不得生成新 EventID/ResultID，Event sequence 必须单调，Result final sequence 必须与 ACK 状态一致。
   - 增加 mTLS/env config 单测，使用临时证书验证缺文件、错误 CA、key mismatch、server name 和显式 client override。
   - 保持 Runtime contract digest、HTTP/WebSocket semantic tests 和 registration contract tests；如需跨 Core 验证，提供可选 integration test，而不让普通 `go test ./...` 依赖外部服务。
   - 在 CI 中固定执行 `go test ./...`、`go test -race ./...`、`go vet ./...`，并对关键 supervisor/chaos 用例执行重复测试以发现时序问题。
+  - 中文测试矩阵、故障注入语义和本地/Core 验证命令见 `runtime-chaos-test-matrix.zh-CN.md`。
   - 涉及文件：`runtime_worker_test.go` 拆分后的测试文件、transport fakes、TLS tests、contract tests、CI 配置。
   - 验收：所有已知不可逆窗口都有确定测试；测试能证明重连、resume 和 spool replay 不依赖进程重启或偶然时序。
 

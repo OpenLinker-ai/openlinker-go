@@ -3,6 +3,8 @@ name: CI
 on:
   pull_request:
   push:
+    branches:
+      - main
     tags:
       - "v*"
 
@@ -25,11 +27,23 @@ jobs:
       - name: Test
         run: go test ./...
 
+      - name: Race test
+        run: go test -race ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Repeat Runtime supervisor and chaos tests
+        run: >-
+          go test -race .
+          -run '^(TestRuntimeChaosACKLossPreservesStableIDsAndExecutesOnce|TestRuntimeCapacityFourResumesFourAttemptsConcurrently|TestRuntimeTransportAutoConfirmsBeforeExecuteAndSwitchesWSPullWS|TestSwitchingRuntimeClientCancelsOldGenerationBeforePublishingNew)$'
+          -count=5
+
       - name: Verify nested modules
         shell: bash
         run: |
           set -euo pipefail
           find . -mindepth 2 -name go.mod -not -path './.git/*' -print | sort | while IFS= read -r gomod; do
             mod="$(dirname "${gomod}")"
-            (cd "${mod}" && go test ./...)
+            (cd "${mod}" && go test ./... && go vet ./...)
           done
