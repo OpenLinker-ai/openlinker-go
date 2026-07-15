@@ -7,6 +7,8 @@ Use `NewRuntimeWorker` to run an Agent handler with durable Runtime delivery.
 
 Chinese documentation: [README.zh-CN.md](./README.zh-CN.md)
 
+Runnable single-concept examples: [example/README.md](./example/README.md).
+
 ## Status
 
 This SDK is pre-1.0. The package tracks the Core API and runtime contracts while

@@ -69,3 +69,13 @@ func TestSplitCSV(t *testing.T) {
 		t.Fatalf("SplitCSV() = %#v", got)
 	}
 }
+
+func TestNewUUID(t *testing.T) {
+	value, err := NewUUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(value) != 36 || value[14] != '4' || !strings.Contains("89ab", strings.ToLower(value[19:20])) {
+		t.Fatalf("NewUUID() = %q", value)
+	}
+}

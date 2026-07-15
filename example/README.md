@@ -9,9 +9,9 @@
 | 普通 Agent 开发者 | [`runtime/agent-generic`](runtime/agent-generic/) | 可运行 |
 | 调用 OpenLinker Agent 的 Client | [`client`](client/) | 可运行 |
 | 需要自动注册 Agent | [`registration`](registration/) | 可运行 |
-| Agent 框架开发者 | [`runtime`](runtime/) 中的 Native 示例 | 后续阶段补齐 |
-| Runtime 基础设施开发者 | [`runtime`](runtime/) 中的 Managed Worker / Protocol 示例 | 后续阶段补齐 |
-| A2A 或 Webhook 集成开发者 | [`a2a`](a2a/) / [`webhook`](webhook/) | 后续阶段补齐 |
+| Agent 框架开发者 | [`runtime`](runtime/) 中的 Native 示例 | 可运行 |
+| Runtime 基础设施开发者 | [`runtime`](runtime/) 中的 Managed Worker / Protocol 示例 | 可运行 |
+| A2A 或 Webhook 集成开发者 | [`a2a`](a2a/) / [`webhook`](webhook/) | 可运行 |
 
 ## 当前可运行示例
 
@@ -50,6 +50,20 @@ go run ./runtime/agent-generic
 
 运行前需要配置 Agent Runtime 身份和 mTLS 文件，完整变量见 [`runtime/agent-generic/README.md`](runtime/agent-generic/README.md)。
 
+框架开发者继续查看 [`runtime/native-events`](runtime/native-events/)；Agent Node/daemon 查看 [`runtime/worker-managed`](runtime/worker-managed/)；只有协议实现者才需要查看 `protocol-http` 和 `protocol-websocket`。完整分层见 [`runtime/README.md`](runtime/README.md)。
+
+### A2A 和 Webhook
+
+```bash
+cd example
+go run ./a2a/jsonrpc
+go run ./a2a/http-json-sse
+go run ./a2a/grpc
+go run ./webhook/verify-request
+```
+
+A2A binding 选择见 [`a2a/README.md`](a2a/README.md)，Webhook 原始请求体验签见 [`webhook/README.md`](webhook/README.md)。
+
 ## 离线验证
 
 示例 module 可以独立编译和测试：
@@ -61,6 +75,8 @@ go vet ./...
 ```
 
 示例测试使用本地 handler、`httptest` 或 fake transport，不要求连接真实 OpenLinker Core。需要创建平台资源或连接测试租户的 smoke test 会保持显式 opt-in。
+
+发布前测试租户 smoke 流程见 [`smoke/README.md`](smoke/README.md)。脚本要求 `OPENLINKER_EXAMPLE_SMOKE=1`，不会在普通 test/CI 中自动运行。
 
 ## 目录约束
 

@@ -6,6 +6,9 @@
 
 English documentation: [README.md](./README.md)
 
+可运行的单概念示例索引：[example/README.md](./example/README.md)。建议普通调用方从
+`client/agent-discovery` 开始，普通 Agent 从 `runtime/agent-generic` 开始。
+
 ## 状态
 
 本 SDK 目前是 pre-1.0。它跟随 Core API 和 runtime 契约演进。升级前请固定版本或

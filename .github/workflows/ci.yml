@@ -39,11 +39,8 @@ jobs:
           -run '^(TestRuntimeChaosACKLossPreservesStableIDsAndExecutesOnce|TestRuntimeCapacityFourResumesFourAttemptsConcurrently|TestRuntimeTransportAutoConfirmsBeforeExecuteAndSwitchesWSPullWS|TestSwitchingRuntimeClientCancelsOldGenerationBeforePublishingNew)$'
           -count=5
 
-      - name: Verify nested modules
-        shell: bash
+      - name: Verify example module
+        working-directory: example
         run: |
-          set -euo pipefail
-          find . -mindepth 2 -name go.mod -not -path './.git/*' -print | sort | while IFS= read -r gomod; do
-            mod="$(dirname "${gomod}")"
-            (cd "${mod}" && go test ./... && go vet ./...)
-          done
+          go test ./...
+          go vet ./...
