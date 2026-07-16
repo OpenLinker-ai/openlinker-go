@@ -30,10 +30,15 @@ type RuntimeWorkerConfig struct {
 	RetryMinimum      time.Duration
 	RetryMaximum      time.Duration
 	Logger            *log.Logger
+	OnReady           func(RuntimeReadyPayload)
 }
 
 // NewRuntimeWorker validates config and returns a worker ready to Start.
 func NewRuntimeWorker(config RuntimeWorkerConfig) (*RuntimeWorker, error) {
+	return newRuntimeWorker(config, nil, nil)
+}
+
+func newRuntimeWorker(config RuntimeWorkerConfig, client RuntimeClient, dialer RuntimeTransportDialer) (*RuntimeWorker, error) {
 	worker := &RuntimeWorker{
 		PlatformURL:       config.PlatformURL,
 		RuntimeURL:        config.RuntimeURL,
@@ -53,6 +58,9 @@ func NewRuntimeWorker(config RuntimeWorkerConfig) (*RuntimeWorker, error) {
 		RetryMinimum:      config.RetryMinimum,
 		RetryMaximum:      config.RetryMaximum,
 		Logger:            config.Logger,
+		OnReady:           config.OnReady,
+		runtimeClient:     client,
+		runtimeDialer:     dialer,
 	}
 	if err := worker.applyDefaultsAndValidate(); err != nil {
 		return nil, err
@@ -73,8 +81,9 @@ type RuntimeEvent struct {
 // RuntimeHandlerError is a stable, bounded application failure returned to
 // Core as part of a Runtime result.
 type RuntimeHandlerError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	Retryable bool   `json:"retryable,omitempty"`
 }
 
 // RuntimeResult is the terminal result returned by a RuntimeHandler.
@@ -97,13 +106,25 @@ type RuntimeCallOptions struct {
 // Emit and CallAgent remain scoped to the active Attempt and stop accepting
 // work after cancellation or terminal completion.
 type RuntimeContext struct {
-	RunID    string
-	AgentID  string
-	Input    any
-	Metadata RuntimeJSONMap
+	RunID             string
+	AgentID           string
+	AttemptIdentity   RuntimeAttemptIdentity
+	AttemptDeadlineAt time.Time
+	RunDeadlineAt     time.Time
+	Input             any
+	Metadata          RuntimeJSONMap
 
 	emit      func(eventType string, payload any) error
 	callAgent func(context.Context, string, any, RuntimeCallOptions) (any, error)
+}
+
+// Deadline returns the earlier of the Attempt and Run deadlines.
+func (runtime RuntimeContext) Deadline() (time.Time, bool) {
+	deadline := runtime.AttemptDeadlineAt
+	if deadline.IsZero() || (!runtime.RunDeadlineAt.IsZero() && runtime.RunDeadlineAt.Before(deadline)) {
+		deadline = runtime.RunDeadlineAt
+	}
+	return deadline, !deadline.IsZero()
 }
 
 // Emit durably journals an event before scheduling it for upload.

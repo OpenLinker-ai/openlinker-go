@@ -20,6 +20,9 @@ func TestRuntimePublicSurfaceHasNoGenerationName(t *testing.T) {
 	files := token.NewFileSet()
 	for _, entry := range entries {
 		name := entry.Name()
+		if strings.HasPrefix(name, "._") {
+			continue
+		}
 		if strings.Contains(strings.ToLower(name), "runtime_v2") {
 			t.Fatalf("generation name remains in active filename %q", name)
 		}

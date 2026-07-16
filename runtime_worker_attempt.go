@@ -120,10 +120,13 @@ func (node *RuntimeWorker) executeAttempt(attempt *activeRuntimeAttempt) {
 	}
 	handlerCtx, stopHandler := context.WithCancel(attempt.ctx)
 	runCtx := RuntimeContext{
-		RunID:    attempt.identity.RunID,
-		AgentID:  attempt.identity.AgentID,
-		Input:    input,
-		Metadata: metadata,
+		RunID:             attempt.identity.RunID,
+		AgentID:           attempt.identity.AgentID,
+		AttemptIdentity:   sdkAttemptIdentity(attempt.identity),
+		AttemptDeadlineAt: attempt.payload.AttemptDeadlineAt,
+		RunDeadlineAt:     attempt.payload.RunDeadlineAt,
+		Input:             input,
+		Metadata:          metadata,
 	}
 	runCtx.emit = func(eventType string, payload any) error {
 		if attempt.finished.Load() || attempt.canceled.Load() {
@@ -433,7 +436,9 @@ func runtimeResultPayload(identity AttemptIdentity, result RuntimeResult) (Runti
 		if agentErr == nil {
 			agentErr = &RuntimeHandlerError{Code: "HANDLER_ERROR", Message: "runtime handler returned a failed result"}
 		}
-		return runtimeFailurePayload(identity, agentErr.Code, agentErr.Message, result.DurationMS), nil
+		payload := runtimeFailurePayload(identity, agentErr.Code, agentErr.Message, result.DurationMS)
+		payload.Error.RetryableHint = agentErr.Retryable
+		return payload, nil
 	}
 	output, err := runtimeObject(result.Output)
 	if err != nil {

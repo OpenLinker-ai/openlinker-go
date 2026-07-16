@@ -1,0 +1,16 @@
+{
+  "name": "openlinker-registration",
+  "version": "v1",
+  "scope": "core-registration",
+  "endpoints": [
+    {"client_method":"createAgent","http_method":"POST","path":"/api/v1/creator/agents","auth":"user_token"},
+    {"client_method":"listMyAgents","http_method":"GET","path":"/api/v1/creator/agents","auth":"user_token"},
+    {"client_method":"getMyAgent","http_method":"GET","path":"/api/v1/creator/agents/{id}","auth":"user_token"},
+    {"client_method":"getMyAgentBySlug","http_method":"GET","path":"/api/v1/creator/agents/by-slug/{slug}","auth":"user_token"},
+    {"client_method":"updateAgent","http_method":"PATCH","path":"/api/v1/creator/agents/{id}","auth":"user_token"},
+    {"client_method":"createAgentToken","http_method":"POST","path":"/api/v1/creator/agent-tokens","auth":"user_token"},
+    {"client_method":"listAgentTokens","http_method":"GET","path":"/api/v1/creator/agent-tokens","auth":"user_token"},
+    {"client_method":"revokeAgentToken","http_method":"DELETE","path":"/api/v1/creator/agent-tokens/{id}","auth":"user_token"},
+    {"client_method":"registerAgentViaToken","http_method":"POST","path":"/api/v1/agent-registration/agents","auth":"agent_token"}
+  ]
+}

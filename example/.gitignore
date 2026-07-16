@@ -1,0 +1,18 @@
+# Local environment and Runtime state
+.env
+.env.local
+.env.*.local
+.openlinker/
+
+# Build and test outputs
+bin/
+coverage.out
+*.cover.out
+*.test
+/runtime/agent-generic/agent-generic
+
+# Editor / OS
+.DS_Store
+._*
+.idea/
+.vscode/

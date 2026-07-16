@@ -267,6 +267,54 @@ func TestRuntimeRequiredFeaturesReturnsCopy(t *testing.T) {
 	}
 }
 
+func TestRegistrationContractMapsToImplementedMethods(t *testing.T) {
+	raw := readContractFile(t, "contracts/core-registration.v1.json")
+	var contract struct {
+		Scope     string `json:"scope"`
+		Endpoints []struct {
+			ClientMethod string `json:"client_method"`
+			Method       string `json:"http_method"`
+			Path         string `json:"path"`
+			Auth         string `json:"auth"`
+		} `json:"endpoints"`
+	}
+	if err := json.Unmarshal(raw, &contract); err != nil {
+		t.Fatal(err)
+	}
+	if contract.Scope != "core-registration" || len(contract.Endpoints) == 0 {
+		t.Fatalf("registration contract = %#v", contract)
+	}
+	clientType := reflect.TypeOf(&Client{})
+	for _, endpoint := range contract.Endpoints {
+		if endpoint.Method == "" || !strings.HasPrefix(endpoint.Path, "/api/v1/") {
+			t.Fatalf("invalid registration endpoint: %#v", endpoint)
+		}
+		if endpoint.Auth != "user_token" && endpoint.Auth != "agent_token" {
+			t.Fatalf("invalid registration auth: %#v", endpoint)
+		}
+		if endpoint.ClientMethod == "registerAgentViaToken" {
+			continue
+		}
+		if _, ok := clientType.MethodByName(exportedMethodName(endpoint.ClientMethod)); !ok {
+			t.Fatalf("Client missing registration method %s", endpoint.ClientMethod)
+		}
+	}
+}
+
+func TestRuntimeProtocolSourcesDoNotDependOnManagedWorker(t *testing.T) {
+	for _, path := range []string{
+		"runtime_client.go", "runtime_http.go", "runtime_websocket.go",
+		"runtime_websocket_client.go", "runtime_invocation.go",
+	} {
+		raw := readContractFile(t, path)
+		for _, forbidden := range []string{"RuntimeWorker", "NativeRun", "NativeResult"} {
+			if strings.Contains(string(raw), forbidden) {
+				t.Fatalf("low-level protocol source %s depends on managed symbol %s", path, forbidden)
+			}
+		}
+	}
+}
+
 func readContractFile(t *testing.T, path string) []byte {
 	t.Helper()
 	raw, err := os.ReadFile(path)
