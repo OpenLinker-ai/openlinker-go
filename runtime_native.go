@@ -382,7 +382,7 @@ func (runner *NativeAgentRunner) buildWorker(ctx context.Context) (*RuntimeWorke
 	var dialer RuntimeTransportDialer
 	if runner.runtime != nil {
 		runtimeClient = runner.runtime
-		dialer = sdkRuntimeTransportDialer{runtime: runner.runtime}
+		dialer = &sdkRuntimeTransportDialer{runtime: runner.runtime}
 	} else if runtimeClient == nil && runner.httpClient != nil {
 		if config.RuntimeURL == "" {
 			return nil, errors.New("openlinker: Runtime URL is required with an injected HTTP client")
@@ -394,7 +394,7 @@ func (runner *NativeAgentRunner) buildWorker(ctx context.Context) (*RuntimeWorke
 			return nil, runtimeErr
 		}
 		runtimeClient = runtime
-		dialer = sdkRuntimeTransportDialer{runtime: runtime}
+		dialer = &sdkRuntimeTransportDialer{runtime: runtime}
 	}
 	if err = config.Validate(runtimeClient == nil); err != nil {
 		return nil, err

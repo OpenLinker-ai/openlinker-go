@@ -25,6 +25,63 @@ const (
 	runtimeTestAttachmentID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 )
 
+func TestRuntimeFallbackReasonHeaderIsBoundedAndCreateOnly(t *testing.T) {
+	var mu sync.Mutex
+	var observed []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		mu.Lock()
+		observed = append(observed, request.URL.Path+"="+request.Header.Get(RuntimeFallbackReasonHeader))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		writeRuntimeTestJSON(t, w, RuntimeReadyPayload{
+			CoreInstanceID: runtimeTestCoreID, AttachmentID: runtimeTestAttachmentID,
+			Features: RuntimeRequiredFeatures(), OfferTTLSeconds: 30, LeaseTTLSeconds: 60,
+			DatabaseTime: time.Now().UTC(),
+		})
+	}))
+	defer server.Close()
+	runtimeClient, err := NewRuntime(
+		server.URL,
+		WithAgentToken("ol_agent_v2"),
+		WithHeader(RuntimeFallbackReasonHeader, "private_network_error"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, reason := range []runtimeFallbackReason{
+		runtimeFallbackExplicit,
+		runtimeFallbackWebSocketUnavailable,
+		runtimeFallbackPolicyForced,
+		runtimeFallbackRecovery,
+	} {
+		ctx := withRuntimeFallbackReason(context.Background(), reason)
+		if _, err = runtimeClient.CreateRuntimeSession(ctx, runtimeTestHello()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	invalidContext := context.WithValue(context.Background(), runtimeFallbackReasonContextKey{}, runtimeFallbackReason("private_network_error"))
+	if _, err = runtimeClient.CreateRuntimeSession(invalidContext, runtimeTestHello()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = runtimeClient.HeartbeatRuntimeSession(withRuntimeFallbackReason(context.Background(), runtimeFallbackRecovery), runtimeTestHello()); err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{
+		"/api/v1/agent-runtime/sessions=explicit",
+		"/api/v1/agent-runtime/sessions=websocket_unavailable",
+		"/api/v1/agent-runtime/sessions=policy_forced",
+		"/api/v1/agent-runtime/sessions=recovery",
+		"/api/v1/agent-runtime/sessions=",
+		"/api/v1/agent-runtime/sessions/" + runtimeTestSessionID + "/heartbeat=",
+	}
+	if !reflect.DeepEqual(observed, want) {
+		t.Fatalf("fallback reason headers = %#v, want %#v", observed, want)
+	}
+}
+
 func TestRuntimeHTTPFlowRequiresExplicitAssignmentConfirmation(t *testing.T) {
 	t.Parallel()
 

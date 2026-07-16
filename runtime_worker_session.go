@@ -62,13 +62,13 @@ func (node *RuntimeWorker) createSessionWithRetryClient(parent context.Context, 
 }
 
 func (node *RuntimeWorker) heartbeatLoop() {
-	ticker := time.NewTicker(node.HeartbeatInterval)
-	defer ticker.Stop()
 	for {
+		timer := time.NewTimer(node.runtimeHeartbeatInterval())
 		select {
 		case <-node.runtimeCtx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			if err := node.heartbeatOnce(node.runtimeCtx); err != nil {
 				if runtimeErrorIsPermanent(err) || durableRuntimeErrorIsFatal(err) {
 					node.reportFatal(scrubRuntimeError(err))
@@ -556,15 +556,16 @@ func (node *RuntimeWorker) waitRetry(ctx context.Context, attempt int) error {
 }
 
 func (node *RuntimeWorker) retryDelay(attempt int) time.Duration {
-	delay := node.RetryMinimum
-	for index := 0; index < attempt && delay < node.RetryMaximum; index++ {
-		if delay > node.RetryMaximum/2 {
-			return node.RetryMaximum
+	minimum, maximum := node.runtimeRetryPolicy()
+	delay := minimum
+	for index := 0; index < attempt && delay < maximum; index++ {
+		if delay > maximum/2 {
+			return maximum
 		}
 		delay *= 2
 	}
-	if delay > node.RetryMaximum {
-		return node.RetryMaximum
+	if delay > maximum {
+		return maximum
 	}
 	return delay
 }
@@ -603,6 +604,10 @@ func firstContextError(contexts ...context.Context) error {
 }
 
 func runtimeErrorIsPermanent(err error) bool {
+	var recoveryErr *runtimePolicyRecoveryError
+	if errors.As(err, &recoveryErr) || runtimePolicyRecoverySignal(err) {
+		return true
+	}
 	code := runtimeErrorCode(err)
 	switch code {
 	case "UNAUTHORIZED", "FORBIDDEN", "PERMISSION_DENIED", "RUNTIME_CLIENT_UPGRADE_REQUIRED", "RUNTIME_REQUIRED_FEATURE_MISSING", "RUNTIME_SESSION_CONFLICT":

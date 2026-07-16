@@ -156,22 +156,9 @@ func runtimePolicyAllows(policy runtimeTransportPolicy, mode RuntimeTransportMod
 }
 
 func (node *RuntimeWorker) applyRuntimeTransportPolicy(policy runtimeTransportPolicy) error {
-	configured := RuntimeTransportMode(node.Transport)
-	if configured != RuntimeTransportAuto && !runtimePolicyAllows(policy, configured) {
-		return fmt.Errorf("configured Runtime transport %q is not allowed by OpenLinker", configured)
-	}
-	effective := configured
-	if effective == RuntimeTransportAuto {
-		effective = policy.Default
-	}
-	if effective != RuntimeTransportAuto {
-		if !runtimePolicyAllows(policy, effective) {
-			return fmt.Errorf("OpenLinker Runtime default transport %q is not allowed", effective)
-		}
-		node.Transport = effective
-		node.transportOrder = []RuntimeTransportMode{effective}
-	} else {
-		node.transportOrder = append([]RuntimeTransportMode(nil), policy.Allowed...)
+	order, err := node.runtimeTransportOrder(policy)
+	if err != nil {
+		return err
 	}
 	if policy.HeartbeatIntervalSet {
 		node.HeartbeatInterval = policy.HeartbeatInterval
@@ -197,17 +184,137 @@ func (node *RuntimeWorker) applyRuntimeTransportPolicy(policy runtimeTransportPo
 	if node.sessionStaleAfter > 0 && node.HeartbeatInterval >= node.sessionStaleAfter {
 		return errors.New("OpenLinker Runtime heartbeat interval must be below the Session stale interval")
 	}
+	node.transportPolicyMu.Lock()
+	node.transportOrder = order
+	node.policyHeartbeat = node.HeartbeatInterval
+	node.policyRetryMinimum = node.RetryMinimum
+	node.policyRetryMaximum = node.RetryMaximum
+	node.policySessionStale = node.sessionStaleAfter
+	node.policyProbeInterval = node.webSocketProbeInterval
+	node.policyProbeTimeout = node.webSocketProbeTimeout
+	node.transportPolicyMu.Unlock()
 	return nil
+}
+
+func (node *RuntimeWorker) runtimeTransportOrder(policy runtimeTransportPolicy) ([]RuntimeTransportMode, error) {
+	configured := RuntimeTransportMode(node.Transport)
+	if configured != RuntimeTransportAuto && !runtimePolicyAllows(policy, configured) {
+		return nil, fmt.Errorf("configured Runtime transport %q is not allowed by OpenLinker", configured)
+	}
+	effective := configured
+	if effective == RuntimeTransportAuto {
+		effective = policy.Default
+	}
+	if effective != RuntimeTransportAuto {
+		if !runtimePolicyAllows(policy, effective) {
+			return nil, fmt.Errorf("OpenLinker Runtime default transport %q is not allowed", effective)
+		}
+		return []RuntimeTransportMode{effective}, nil
+	}
+	return append([]RuntimeTransportMode(nil), policy.Allowed...), nil
+}
+
+func (node *RuntimeWorker) applyRecoveredRuntimeTransportPolicy(policy runtimeTransportPolicy) error {
+	order, err := node.runtimeTransportOrder(policy)
+	if err != nil {
+		return err
+	}
+	node.transportPolicyMu.Lock()
+	defer node.transportPolicyMu.Unlock()
+	heartbeat := node.policyHeartbeat
+	retryMinimum := node.policyRetryMinimum
+	retryMaximum := node.policyRetryMaximum
+	staleAfter := node.policySessionStale
+	probeInterval := node.policyProbeInterval
+	probeTimeout := node.policyProbeTimeout
+	if heartbeat <= 0 {
+		heartbeat = node.HeartbeatInterval
+	}
+	if retryMinimum <= 0 {
+		retryMinimum = node.RetryMinimum
+	}
+	if retryMaximum <= 0 {
+		retryMaximum = node.RetryMaximum
+	}
+	if probeTimeout <= 0 {
+		probeTimeout = node.webSocketProbeTimeout
+	}
+	if policy.HeartbeatIntervalSet {
+		heartbeat = policy.HeartbeatInterval
+	}
+	if policy.RetryMinimumSet {
+		retryMinimum = policy.RetryMinimum
+	}
+	if policy.RetryMaximumSet {
+		retryMaximum = policy.RetryMaximum
+	}
+	if policy.SessionStaleAfterSet {
+		staleAfter = policy.SessionStaleAfter
+	}
+	if policy.WebSocketProbeIntervalSet {
+		probeInterval = policy.WebSocketProbeInterval
+	}
+	if policy.WebSocketProbeTimeoutSet {
+		probeTimeout = policy.WebSocketProbeTimeout
+	}
+	if retryMaximum < retryMinimum {
+		return errors.New("OpenLinker Runtime retry maximum is below retry minimum")
+	}
+	if staleAfter > 0 && heartbeat >= staleAfter {
+		return errors.New("OpenLinker Runtime heartbeat interval must be below the Session stale interval")
+	}
+	node.transportOrder = order
+	node.policyHeartbeat = heartbeat
+	node.policyRetryMinimum = retryMinimum
+	node.policyRetryMaximum = retryMaximum
+	node.policySessionStale = staleAfter
+	node.policyProbeInterval = probeInterval
+	node.policyProbeTimeout = probeTimeout
+	return nil
+}
+
+func (node *RuntimeWorker) runtimeHeartbeatInterval() time.Duration {
+	node.transportPolicyMu.RLock()
+	defer node.transportPolicyMu.RUnlock()
+	if node.policyHeartbeat > 0 {
+		return node.policyHeartbeat
+	}
+	return node.HeartbeatInterval
+}
+
+func (node *RuntimeWorker) runtimeRetryPolicy() (time.Duration, time.Duration) {
+	node.transportPolicyMu.RLock()
+	defer node.transportPolicyMu.RUnlock()
+	minimum, maximum := node.policyRetryMinimum, node.policyRetryMaximum
+	if minimum <= 0 {
+		minimum = node.RetryMinimum
+	}
+	if maximum <= 0 {
+		maximum = node.RetryMaximum
+	}
+	return minimum, maximum
+}
+
+func (node *RuntimeWorker) runtimeProbePolicy() (time.Duration, time.Duration) {
+	node.transportPolicyMu.RLock()
+	defer node.transportPolicyMu.RUnlock()
+	interval, timeout := node.policyProbeInterval, node.policyProbeTimeout
+	if timeout <= 0 {
+		timeout = node.webSocketProbeTimeout
+	}
+	return interval, timeout
 }
 
 func (node *RuntimeWorker) orderedRuntimeTransports() []RuntimeTransportMode {
 	if RuntimeTransportMode(node.Transport) != RuntimeTransportAuto {
 		return []RuntimeTransportMode{RuntimeTransportMode(node.Transport)}
 	}
+	node.transportPolicyMu.RLock()
+	defer node.transportPolicyMu.RUnlock()
 	if len(node.transportOrder) == 0 {
 		return []RuntimeTransportMode{RuntimeTransportWebSocket, RuntimeTransportPull}
 	}
-	return node.transportOrder
+	return append([]RuntimeTransportMode(nil), node.transportOrder...)
 }
 
 func (node *RuntimeWorker) autoPrefersWebSocket() bool {
@@ -216,10 +323,11 @@ func (node *RuntimeWorker) autoPrefersWebSocket() bool {
 }
 
 func (node *RuntimeWorker) autoAllowsPullFallback() bool {
-	if !node.autoPrefersWebSocket() {
+	order := node.orderedRuntimeTransports()
+	if RuntimeTransportMode(node.Transport) != RuntimeTransportAuto || len(order) == 0 || order[0] != RuntimeTransportWebSocket {
 		return false
 	}
-	for _, mode := range node.orderedRuntimeTransports()[1:] {
+	for _, mode := range order[1:] {
 		if mode == RuntimeTransportPull {
 			return true
 		}

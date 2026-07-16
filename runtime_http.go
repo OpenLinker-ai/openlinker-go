@@ -16,7 +16,46 @@ import (
 	"unicode/utf8"
 )
 
-const RuntimeAttachmentHeader = "OpenLinker-Runtime-Attachment"
+const (
+	RuntimeAttachmentHeader     = "OpenLinker-Runtime-Attachment"
+	RuntimeFallbackReasonHeader = "OpenLinker-Runtime-Fallback-Reason"
+)
+
+type runtimeFallbackReason string
+
+const (
+	runtimeFallbackExplicit             runtimeFallbackReason = "explicit"
+	runtimeFallbackWebSocketUnavailable runtimeFallbackReason = "websocket_unavailable"
+	runtimeFallbackPolicyForced         runtimeFallbackReason = "policy_forced"
+	runtimeFallbackRecovery             runtimeFallbackReason = "recovery"
+)
+
+type runtimeFallbackReasonContextKey struct{}
+
+func withRuntimeFallbackReason(ctx context.Context, reason runtimeFallbackReason) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	switch reason {
+	case runtimeFallbackExplicit, runtimeFallbackWebSocketUnavailable, runtimeFallbackPolicyForced, runtimeFallbackRecovery:
+		return context.WithValue(ctx, runtimeFallbackReasonContextKey{}, reason)
+	default:
+		return ctx
+	}
+}
+
+func runtimeFallbackReasonFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	reason, _ := ctx.Value(runtimeFallbackReasonContextKey{}).(runtimeFallbackReason)
+	switch reason {
+	case runtimeFallbackExplicit, runtimeFallbackWebSocketUnavailable, runtimeFallbackPolicyForced, runtimeFallbackRecovery:
+		return string(reason)
+	default:
+		return ""
+	}
+}
 
 func (r *Runtime) CreateRuntimeSession(ctx context.Context, hello RuntimeHelloPayload) (*RuntimeReadyPayload, error) {
 	if err := validateRuntimeHello(hello); err != nil {
@@ -310,6 +349,14 @@ func (r *Runtime) doRuntimeWithAttachment(
 	attachmentID string,
 ) (int, error) {
 	headers := make(http.Header)
+	// Reserve the SDK-owned header even when no reason applies so a caller
+	// default cannot inject an unbounded value on create or any later request.
+	headers[http.CanonicalHeaderKey(RuntimeFallbackReasonHeader)] = nil
+	if path == "/agent-runtime/sessions" {
+		if reason := runtimeFallbackReasonFromContext(ctx); reason != "" {
+			headers.Set(RuntimeFallbackReasonHeader, reason)
+		}
+	}
 	if path != "/agent-runtime/sessions" {
 		if !runtimeUUID(attachmentID) {
 			return 0, errors.New("openlinker: runtime attachment is not established")

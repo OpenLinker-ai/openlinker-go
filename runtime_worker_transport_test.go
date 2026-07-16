@@ -86,6 +86,9 @@ func TestRuntimeTransportAutoConfirmsBeforeExecuteAndSwitchesWSPullWS(t *testing
 		t.Fatal("durable state was not resumed on replacement WebSocket")
 	}
 	waitForRuntimeTransport(t, node, RuntimeTransportWebSocketActive)
+	if reason, _ := dialer.probeReason.Load().(string); reason != string(runtimeFallbackRecovery) {
+		t.Fatalf("WebSocket recovery probe reason = %q", reason)
+	}
 	if adapter.count.Load() != 1 {
 		t.Fatalf("adapter executions after WS to pull to WS = %d", adapter.count.Load())
 	}
@@ -458,6 +461,7 @@ type fakeRuntimeTransportDialer struct {
 	mu          sync.Mutex
 	connections []RuntimeDuplexClient
 	allowProbe  atomic.Bool
+	probeReason atomic.Value
 }
 
 func (dialer *fakeRuntimeTransportDialer) DialRuntimeWebSocket(
@@ -474,7 +478,8 @@ func (dialer *fakeRuntimeTransportDialer) DialRuntimeWebSocket(
 	return connection, nil
 }
 
-func (dialer *fakeRuntimeTransportDialer) ProbeRuntimeWebSocket(context.Context) error {
+func (dialer *fakeRuntimeTransportDialer) ProbeRuntimeWebSocket(ctx context.Context) error {
+	dialer.probeReason.Store(runtimeFallbackReasonFromContext(ctx))
 	if !dialer.allowProbe.Load() {
 		return errors.New("WebSocket is still unavailable")
 	}

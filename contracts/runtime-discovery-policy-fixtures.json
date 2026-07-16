@@ -161,5 +161,137 @@
       "configured": "ws",
       "error": "not allowed"
     }
+  ],
+  "policy_recovery": {
+    "http": [
+      {
+        "name": "transport_forbidden",
+        "status": 403,
+        "code": "FORBIDDEN",
+        "message": "RUNTIME_TRANSPORT_FORBIDDEN",
+        "recover": true
+      },
+      {
+        "name": "policy_changed",
+        "status": 403,
+        "code": "FORBIDDEN",
+        "message": "RUNTIME_POLICY_CHANGED",
+        "recover": true
+      },
+      {
+        "name": "wrong_code",
+        "status": 403,
+        "code": "PERMISSION_DENIED",
+        "message": "RUNTIME_POLICY_CHANGED",
+        "recover": false
+      },
+      {
+        "name": "near_message",
+        "status": 403,
+        "code": "FORBIDDEN",
+        "message": "RUNTIME_POLICY_CHANGED ",
+        "recover": false
+      },
+      {
+        "name": "lowercase_message",
+        "status": 403,
+        "code": "FORBIDDEN",
+        "message": "runtime_policy_changed",
+        "recover": false
+      },
+      {
+        "name": "wrong_status",
+        "status": 401,
+        "code": "FORBIDDEN",
+        "message": "RUNTIME_POLICY_CHANGED",
+        "recover": false
+      }
+    ],
+    "websocket_close": [
+      {
+        "name": "policy_changed",
+        "code": 1008,
+        "reason": "RUNTIME_POLICY_CHANGED",
+        "recover": true
+      },
+      {
+        "name": "wrong_code",
+        "code": 1011,
+        "reason": "RUNTIME_POLICY_CHANGED",
+        "recover": false
+      },
+      {
+        "name": "near_reason",
+        "code": 1008,
+        "reason": "RUNTIME_POLICY_CHANGED ",
+        "recover": false
+      }
+    ],
+    "retry": [
+      {
+        "name": "once_then_success",
+        "outcomes": ["signal", "success"],
+        "operation_calls": 2,
+        "discovery_calls": 1,
+        "success": true
+      },
+      {
+        "name": "second_signal_fails",
+        "outcomes": ["signal", "signal"],
+        "operation_calls": 2,
+        "discovery_calls": 1,
+        "success": false
+      }
+    ]
+  },
+  "fallback_reason_cases": [
+    {
+      "name": "explicit_initial_websocket",
+      "configured": "ws",
+      "transition": "policy_selected",
+      "reason": "explicit"
+    },
+    {
+      "name": "explicit_same_transport_reconnect",
+      "configured": "ws",
+      "transition": "same_transport_reconnect",
+      "reason": "explicit"
+    },
+    {
+      "name": "explicit_allowed_after_rediscovery",
+      "configured": "pull",
+      "transition": "policy_rediscovery",
+      "reason": "explicit"
+    },
+    {
+      "name": "auto_initial_policy_selection",
+      "configured": "auto",
+      "transition": "policy_selected",
+      "reason": "policy_forced"
+    },
+    {
+      "name": "auto_policy_rediscovery",
+      "configured": "auto",
+      "transition": "policy_rediscovery",
+      "reason": "policy_forced"
+    },
+    {
+      "name": "websocket_falls_back_to_long_poll",
+      "configured": "auto",
+      "transition": "websocket_to_long_poll",
+      "reason": "websocket_unavailable"
+    },
+    {
+      "name": "failed_websocket_probe_restores_long_poll",
+      "configured": "auto",
+      "transition": "failed_websocket_probe_restore_long_poll",
+      "reason": "websocket_unavailable"
+    },
+    {
+      "name": "long_poll_recovers_websocket",
+      "configured": "auto",
+      "transition": "long_poll_to_websocket",
+      "reason": "recovery"
+    }
   ]
 }

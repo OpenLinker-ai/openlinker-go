@@ -139,7 +139,7 @@ func TestNativeRunnerExplicitHTTPClientOverridesMTLSFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if worker.runtimeClient == nil || runner.httpClient != explicitClient {
-		t.Fatalf("worker runtime=%#v explicit client=%#v", worker.runtimeClient, runner.httpClient)
+	if worker.runtimeClient == nil || runner.httpClient != explicitClient || worker.httpClient != explicitClient {
+		t.Fatalf("worker runtime=%#v worker HTTP=%#v explicit client=%#v", worker.runtimeClient, worker.httpClient, runner.httpClient)
 	}
 }

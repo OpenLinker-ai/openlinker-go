@@ -222,12 +222,18 @@ func (r *Runtime) dialRuntimeWebSocket(ctx context.Context) (*websocket.Conn, *h
 		return nil, nil, errors.New("openlinker: runtime WebSocket URL must use http or https")
 	}
 	headers := make(http.Header)
-	headers.Set("Authorization", "Bearer "+r.client.agentToken)
-	headers.Set("X-OpenLinker-SDK", r.client.sdkAgent)
 	for name, values := range r.client.headers {
 		for _, value := range values {
 			headers.Add(name, value)
 		}
+	}
+	// Runtime identity and bounded transition metadata are SDK-owned. Apply
+	// them after caller defaults so they cannot be duplicated or spoofed.
+	headers.Set("Authorization", "Bearer "+r.client.agentToken)
+	headers.Set("X-OpenLinker-SDK", r.client.sdkAgent)
+	headers.Del(RuntimeFallbackReasonHeader)
+	if reason := runtimeFallbackReasonFromContext(ctx); reason != "" {
+		headers.Set(RuntimeFallbackReasonHeader, reason)
 	}
 	return dialer.DialContext(ctx, target.String(), headers)
 }

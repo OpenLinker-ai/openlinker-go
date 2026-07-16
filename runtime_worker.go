@@ -58,12 +58,28 @@ type RuntimeWorker struct {
 	httpClient             *http.Client
 	transport              *switchingRuntimeClient
 	transportStop          context.CancelFunc
+	transportTransitionMu  sync.Mutex
 	store                  RuntimeStore
 	ready                  *RuntimeReadyPayload
+	transportPolicyMu      sync.RWMutex
 	transportOrder         []RuntimeTransportMode
 	sessionStaleAfter      time.Duration
 	webSocketProbeInterval time.Duration
 	webSocketProbeTimeout  time.Duration
+	policyHeartbeat        time.Duration
+	policyRetryMinimum     time.Duration
+	policyRetryMaximum     time.Duration
+	policySessionStale     time.Duration
+	policyProbeInterval    time.Duration
+	policyProbeTimeout     time.Duration
+	policyRecoveryMu       sync.Mutex
+	policyRevision         uint64
+	policyLastObserved     uint64
+	policyLastReady        *RuntimeReadyPayload
+	policyLastError        error
+	policyTerminalError    error
+	initialResumeComplete  bool
+	runtimeDiscovery       func(context.Context, string) (runtimeConnectionInformation, error)
 
 	stateMu       sync.RWMutex
 	draining      bool
@@ -134,7 +150,7 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 			return err
 		}
 		node.runtimeClient = runtimeClient
-		node.runtimeDialer = sdkRuntimeTransportDialer{runtime: runtimeClient}
+		node.runtimeDialer = &sdkRuntimeTransportDialer{runtime: runtimeClient}
 		node.httpClient = httpClient
 	}
 	if node.runtimeDialer != nil {
@@ -142,12 +158,15 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 		node.lifecycleMu.Lock()
 		node.transport = transport
 		node.lifecycleMu.Unlock()
-		node.runtimeClient = transport
+		node.runtimeClient = &policyRecoveringRuntimeClient{node: node, transport: transport}
 	}
 
 	var ready *RuntimeReadyPayload
 	if node.transport != nil {
 		ready, err = node.startInitialRuntimeTransport(startupCtx)
+		if runtimePolicyRecoverySignal(err) {
+			ready, err = node.recoverRuntimePolicy(startupCtx, node.currentPolicyRevision())
+		}
 	} else {
 		ready, err = node.createSessionWithRetry(startupCtx)
 	}
@@ -160,6 +179,9 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 	if err := node.resumeDurableState(startupCtx); err != nil {
 		return err
 	}
+	node.policyRecoveryMu.Lock()
+	node.initialResumeComplete = true
+	node.policyRecoveryMu.Unlock()
 	if node.OnReady != nil {
 		node.OnReady(*ready)
 	}

@@ -540,6 +540,15 @@ func scrubRuntimeError(err error) error {
 	if err == nil {
 		return nil
 	}
+	// The two server-authoritative policy signals are deliberately exact and
+	// contain no private detail. Preserve their concrete error chain so attach,
+	// supervisor, and startup boundaries can still trigger canonical recovery.
+	// A terminal recovery wrapper must likewise remain terminal rather than
+	// being flattened back into a recoverable FORBIDDEN status.
+	var recoveryErr *runtimePolicyRecoveryError
+	if errors.As(err, &recoveryErr) || runtimePolicyRecoverySignal(err) {
+		return err
+	}
 	var runtimeErr *Error
 	if errors.As(err, &runtimeErr) {
 		return fmt.Errorf("%s (HTTP %d)", runtimeErr.Code, runtimeErr.StatusCode)

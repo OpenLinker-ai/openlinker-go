@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 type runtimeDiscoveryPolicyFixture struct {
@@ -29,6 +32,34 @@ type runtimeDiscoveryPolicyFixture struct {
 		Effective    RuntimeTransportMode         `json:"effective"`
 		Error        string                       `json:"error"`
 	} `json:"configured_transport_cases"`
+	PolicyRecovery struct {
+		HTTP []struct {
+			Name    string `json:"name"`
+			Status  int    `json:"status"`
+			Code    string `json:"code"`
+			Message string `json:"message"`
+			Recover bool   `json:"recover"`
+		} `json:"http"`
+		WebSocketClose []struct {
+			Name    string `json:"name"`
+			Code    int    `json:"code"`
+			Reason  string `json:"reason"`
+			Recover bool   `json:"recover"`
+		} `json:"websocket_close"`
+		Retry []struct {
+			Name           string   `json:"name"`
+			Outcomes       []string `json:"outcomes"`
+			OperationCalls int      `json:"operation_calls"`
+			DiscoveryCalls int      `json:"discovery_calls"`
+			Success        bool     `json:"success"`
+		} `json:"retry"`
+	} `json:"policy_recovery"`
+	FallbackReasonCases []struct {
+		Name       string                    `json:"name"`
+		Configured RuntimeTransportMode      `json:"configured"`
+		Transition runtimeFallbackTransition `json:"transition"`
+		Reason     runtimeFallbackReason     `json:"reason"`
+	} `json:"fallback_reason_cases"`
 }
 
 type runtimeDiscoveryPolicyExpected struct {
@@ -40,6 +71,71 @@ type runtimeDiscoveryPolicyExpected struct {
 	RetryMaximumMS           int64                  `json:"retry_maximum_ms"`
 	WebSocketProbeIntervalMS int64                  `json:"websocket_probe_interval_ms"`
 	WebSocketProbeTimeoutMS  int64                  `json:"websocket_probe_timeout_ms"`
+}
+
+func TestRuntimePolicyRecoveryFixtures(t *testing.T) {
+	fixture := loadRuntimeDiscoveryPolicyFixture(t)
+	for _, test := range fixture.PolicyRecovery.HTTP {
+		t.Run("http_"+test.Name, func(t *testing.T) {
+			err := fmt.Errorf("wrapped: %w", &Error{StatusCode: test.Status, Code: test.Code, Message: test.Message})
+			if got := runtimePolicyRecoverySignal(err); got != test.Recover {
+				t.Fatalf("recovery signal = %t, want %t", got, test.Recover)
+			}
+		})
+	}
+	for _, test := range fixture.PolicyRecovery.WebSocketClose {
+		t.Run("ws_"+test.Name, func(t *testing.T) {
+			err := fmt.Errorf("wrapped: %w", &websocket.CloseError{Code: test.Code, Text: test.Reason})
+			if got := runtimePolicyRecoverySignal(err); got != test.Recover {
+				t.Fatalf("recovery signal = %t, want %t", got, test.Recover)
+			}
+		})
+	}
+	for _, test := range fixture.PolicyRecovery.Retry {
+		t.Run("retry_"+test.Name, func(t *testing.T) {
+			operationCalls := 0
+			discoveryCalls := 0
+			operation := func() (string, error) {
+				outcome := test.Outcomes[operationCalls]
+				operationCalls++
+				if outcome == "signal" {
+					return "", &Error{StatusCode: http.StatusForbidden, Code: "FORBIDDEN", Message: runtimePolicyChangedMessage}
+				}
+				return "ok", nil
+			}
+			value, err := runtimePolicyRecoverOnce(operation, func(error) error {
+				discoveryCalls++
+				return nil
+			})
+			if operationCalls != test.OperationCalls || discoveryCalls != test.DiscoveryCalls {
+				t.Fatalf("calls = operation %d discovery %d, want %d/%d", operationCalls, discoveryCalls, test.OperationCalls, test.DiscoveryCalls)
+			}
+			if (err == nil) != test.Success || (test.Success && value != "ok") {
+				t.Fatalf("result = %q, %v; success want %t", value, err, test.Success)
+			}
+			if !test.Success {
+				var recoveryErr *runtimePolicyRecoveryError
+				if !errors.As(err, &recoveryErr) || runtimePolicyRecoverySignal(err) {
+					t.Fatalf("second policy signal was not terminally wrapped: %T %v", err, err)
+				}
+			}
+		})
+	}
+}
+
+func TestRuntimeFallbackReasonFixtures(t *testing.T) {
+	fixture := loadRuntimeDiscoveryPolicyFixture(t)
+	for _, test := range fixture.FallbackReasonCases {
+		t.Run(test.Name, func(t *testing.T) {
+			node := &RuntimeWorker{Transport: test.Configured}
+			if got := node.runtimeFallbackReason(test.Transition); got != test.Reason {
+				t.Fatalf("fallback reason = %q, want %q", got, test.Reason)
+			}
+		})
+	}
+	if got := (&RuntimeWorker{Transport: RuntimeTransportAuto}).runtimeFallbackReason("unrecognized"); got != "" {
+		t.Fatalf("unrecognized transition emitted fallback reason %q", got)
+	}
 }
 
 func loadRuntimeDiscoveryPolicyFixture(t *testing.T) runtimeDiscoveryPolicyFixture {
@@ -118,8 +214,12 @@ func TestRuntimeDiscoveryPolicyFixtures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if worker.Transport != test.Effective {
-				t.Fatalf("effective transport = %q, want %q", worker.Transport, test.Effective)
+			order := worker.orderedRuntimeTransports()
+			if len(order) == 0 || order[0] != test.Effective {
+				t.Fatalf("effective transport order = %v, want first %q", order, test.Effective)
+			}
+			if worker.Transport != test.Configured {
+				t.Fatalf("configured transport mutated to %q", worker.Transport)
 			}
 		})
 	}

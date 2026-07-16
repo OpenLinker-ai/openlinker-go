@@ -62,6 +62,12 @@ func newRuntimeWorker(config RuntimeWorkerConfig, client RuntimeClient, dialer R
 		runtimeClient:     client,
 		runtimeDialer:     dialer,
 	}
+	if runtimeClient, ok := client.(*Runtime); ok && runtimeClient != nil && runtimeClient.client != nil {
+		worker.httpClient = runtimeClient.client.httpClient
+		if worker.AgentToken == "" {
+			worker.AgentToken = runtimeClient.client.agentToken
+		}
+	}
 	if err := worker.applyDefaultsAndValidate(); err != nil {
 		return nil, err
 	}

@@ -43,18 +43,39 @@ type RuntimeTransportDialer interface {
 }
 
 type sdkRuntimeTransportDialer struct {
+	mu      sync.RWMutex
 	runtime *Runtime
 }
 
-func (dialer sdkRuntimeTransportDialer) DialRuntimeWebSocket(
+func (dialer *sdkRuntimeTransportDialer) setRuntime(runtime *Runtime) {
+	dialer.mu.Lock()
+	dialer.runtime = runtime
+	dialer.mu.Unlock()
+}
+
+func (dialer *sdkRuntimeTransportDialer) current() *Runtime {
+	dialer.mu.RLock()
+	defer dialer.mu.RUnlock()
+	return dialer.runtime
+}
+
+func (dialer *sdkRuntimeTransportDialer) DialRuntimeWebSocket(
 	ctx context.Context,
 	hello RuntimeHelloPayload,
 ) (RuntimeDuplexClient, error) {
-	return dialer.runtime.DialRuntimeWebSocket(ctx, hello)
+	runtime := dialer.current()
+	if runtime == nil {
+		return nil, errors.New("runtime WebSocket dialer is unavailable")
+	}
+	return runtime.DialRuntimeWebSocket(ctx, hello)
 }
 
-func (dialer sdkRuntimeTransportDialer) ProbeRuntimeWebSocket(ctx context.Context) error {
-	return dialer.runtime.ProbeRuntimeWebSocket(ctx)
+func (dialer *sdkRuntimeTransportDialer) ProbeRuntimeWebSocket(ctx context.Context) error {
+	runtime := dialer.current()
+	if runtime == nil {
+		return errors.New("runtime WebSocket dialer is unavailable")
+	}
+	return runtime.ProbeRuntimeWebSocket(ctx)
 }
 
 // switchingRuntimeClient is the transport gate shared by every runtime
@@ -97,6 +118,18 @@ func (client *switchingRuntimeClient) snapshot() (RuntimeTransportMode, RuntimeT
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	return client.kind, client.state, client.active
+}
+
+func (client *switchingRuntimeClient) callRuntimeClient() RuntimeClient {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	return client.callClient
+}
+
+func (client *switchingRuntimeClient) replaceCallClient(callClient RuntimeClient) {
+	client.mu.Lock()
+	client.callClient = callClient
+	client.mu.Unlock()
 }
 
 func (client *switchingRuntimeClient) activateIfCurrent(epoch uint64, kind RuntimeTransportMode, active RuntimeClient) bool {
@@ -286,10 +319,11 @@ func (client *switchingRuntimeClient) AckRuntimeCancel(ctx context.Context, requ
 }
 
 func (client *switchingRuntimeClient) CallRuntimeAgent(ctx context.Context, authorization RuntimeCallAgentAuthorization, request RuntimeCallAgentRequest) (*RuntimeRunSummary, error) {
-	if client.callClient == nil {
+	callClient := client.callRuntimeClient()
+	if callClient == nil {
 		return nil, ErrRuntimeTransportSwitching
 	}
-	return client.callClient.CallRuntimeAgent(ctx, authorization, request)
+	return callClient.CallRuntimeAgent(ctx, authorization, request)
 }
 
 var _ RuntimeClient = (*switchingRuntimeClient)(nil)
