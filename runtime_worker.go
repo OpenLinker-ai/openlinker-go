@@ -48,17 +48,21 @@ type RuntimeWorker struct {
 	runtimeClient RuntimeClient
 	runtimeDialer RuntimeTransportDialer
 
-	lifecycleMu   sync.Mutex
-	started       bool
-	completed     bool
-	done          chan struct{}
-	runtimeCtx    context.Context
-	runtimeStop   context.CancelFunc
-	httpClient    *http.Client
-	transport     *switchingRuntimeClient
-	transportStop context.CancelFunc
-	store         RuntimeStore
-	ready         *RuntimeReadyPayload
+	lifecycleMu            sync.Mutex
+	started                bool
+	completed              bool
+	done                   chan struct{}
+	runtimeCtx             context.Context
+	runtimeStop            context.CancelFunc
+	httpClient             *http.Client
+	transport              *switchingRuntimeClient
+	transportStop          context.CancelFunc
+	store                  RuntimeStore
+	ready                  *RuntimeReadyPayload
+	transportOrder         []RuntimeTransportMode
+	sessionStaleAfter      time.Duration
+	webSocketProbeInterval time.Duration
+	webSocketProbeTimeout  time.Duration
 
 	stateMu       sync.RWMutex
 	draining      bool
@@ -94,11 +98,14 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 		return err
 	}
 	if node.runtimeClient == nil {
-		runtimeURL, err := resolveRuntimeURL(parent, node.PlatformURL, node.RuntimeURL)
+		connection, err := resolveRuntimeConnection(parent, node.PlatformURL, node.RuntimeURL)
 		if err != nil {
 			return err
 		}
-		node.RuntimeURL = runtimeURL
+		node.RuntimeURL = connection.RuntimeURL
+		if err = node.applyRuntimeTransportPolicy(connection.Policy); err != nil {
+			return err
+		}
 	}
 	startupCtx, cancelStartup := context.WithCancel(parent)
 	defer cancelStartup()
@@ -285,6 +292,9 @@ func (node *RuntimeWorker) applyDefaultsAndValidate() error {
 	}
 	if node.RetryMaximum < node.RetryMinimum {
 		return errors.New("retry maximum must not be less than retry minimum")
+	}
+	if node.webSocketProbeTimeout <= 0 {
+		node.webSocketProbeTimeout = 10 * time.Second
 	}
 	return nil
 }

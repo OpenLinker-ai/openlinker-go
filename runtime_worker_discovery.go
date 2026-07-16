@@ -27,62 +27,94 @@ type openLinkerDiscoveryManifest struct {
 		Runtime string `json:"runtime"`
 	} `json:"base_urls"`
 	Runtime struct {
-		Enabled      bool `json:"enabled"`
-		MTLSRequired bool `json:"mtls_required"`
+		Enabled          bool                               `json:"enabled"`
+		MTLSRequired     bool                               `json:"mtls_required"`
+		Transports       []string                           `json:"transports"`
+		DefaultTransport *string                            `json:"default_transport"`
+		TransportPolicy  *openLinkerManifestTransportPolicy `json:"transport_policy"`
 	} `json:"runtime"`
 }
 
-func resolveRuntimeURL(ctx context.Context, platformURL, override string) (string, error) {
+type openLinkerManifestTransportPolicy struct {
+	Version                  *int   `json:"version"`
+	HeartbeatIntervalSeconds *int64 `json:"heartbeat_interval_seconds"`
+	SessionStaleAfterSeconds *int64 `json:"session_stale_after_seconds"`
+	RetryMinimumMS           *int64 `json:"retry_minimum_ms"`
+	RetryMaximumMS           *int64 `json:"retry_maximum_ms"`
+	WebSocketProbeIntervalMS *int64 `json:"websocket_probe_interval_ms"`
+	WebSocketProbeTimeoutMS  *int64 `json:"websocket_probe_timeout_ms"`
+}
+
+type runtimeConnectionInformation struct {
+	RuntimeURL string
+	Policy     runtimeTransportPolicy
+}
+
+func resolveRuntimeConnection(ctx context.Context, platformURL, override string) (runtimeConnectionInformation, error) {
 	if strings.TrimSpace(override) != "" {
-		return validateRuntimeOrigin(override)
+		runtimeURL, err := validateRuntimeOrigin(override)
+		return runtimeConnectionInformation{RuntimeURL: runtimeURL, Policy: legacyRuntimeTransportPolicy()}, err
 	}
 	platformOrigin, err := validatePlatformOrigin(platformURL)
 	if err != nil {
-		return "", err
+		return runtimeConnectionInformation{}, err
 	}
 	client := newOpenLinkerDiscoveryClient()
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, platformOrigin+openLinkerDiscoveryPath, nil)
 	if err != nil {
-		return "", fmt.Errorf("build OpenLinker discovery request: %w", err)
+		return runtimeConnectionInformation{}, fmt.Errorf("build OpenLinker discovery request: %w", err)
 	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("User-Agent", runtimeWorkerSDKAgent)
 	response, err := client.Do(request)
 	if err != nil {
-		return "", fmt.Errorf("OpenLinker connection information unavailable from %s: %w", platformOrigin, err)
+		return runtimeConnectionInformation{}, fmt.Errorf("OpenLinker connection information unavailable from %s: %w", platformOrigin, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("OpenLinker connection information unavailable from %s: HTTP %d", platformOrigin, response.StatusCode)
+		return runtimeConnectionInformation{}, fmt.Errorf("OpenLinker connection information unavailable from %s: HTTP %d", platformOrigin, response.StatusCode)
 	}
 	if response.ContentLength > openLinkerDiscoveryMaxBytes {
-		return "", errors.New("OpenLinker connection information exceeds 64 KiB")
+		return runtimeConnectionInformation{}, errors.New("OpenLinker connection information exceeds 64 KiB")
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, openLinkerDiscoveryMaxBytes+1))
 	if err != nil {
-		return "", fmt.Errorf("read OpenLinker connection information: %w", err)
+		return runtimeConnectionInformation{}, fmt.Errorf("read OpenLinker connection information: %w", err)
 	}
 	if len(body) > openLinkerDiscoveryMaxBytes {
-		return "", errors.New("OpenLinker connection information exceeds 64 KiB")
+		return runtimeConnectionInformation{}, errors.New("OpenLinker connection information exceeds 64 KiB")
 	}
 	var manifest openLinkerDiscoveryManifest
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	if err := decoder.Decode(&manifest); err != nil {
-		return "", fmt.Errorf("decode OpenLinker connection information: %w", err)
+		return runtimeConnectionInformation{}, fmt.Errorf("decode OpenLinker connection information: %w", err)
 	}
 	if err := rejectTrailingJSON(decoder); err != nil {
-		return "", err
+		return runtimeConnectionInformation{}, err
 	}
 	if !manifest.Runtime.Enabled {
-		return "", errors.New("this OpenLinker instance does not provide a Runtime connection address")
+		return runtimeConnectionInformation{}, errors.New("this OpenLinker instance does not provide a Runtime connection address")
 	}
 	if !manifest.Runtime.MTLSRequired {
-		return "", errors.New("OpenLinker connection information does not require the expected mTLS identity")
+		return runtimeConnectionInformation{}, errors.New("OpenLinker connection information does not require the expected mTLS identity")
 	}
 	if strings.TrimSpace(manifest.BaseURLs.Runtime) == "" {
-		return "", errors.New("this OpenLinker instance does not provide a Runtime connection address")
+		return runtimeConnectionInformation{}, errors.New("this OpenLinker instance does not provide a Runtime connection address")
 	}
-	return validateRuntimeOrigin(manifest.BaseURLs.Runtime)
+	runtimeURL, err := validateRuntimeOrigin(manifest.BaseURLs.Runtime)
+	if err != nil {
+		return runtimeConnectionInformation{}, err
+	}
+	policy, err := runtimeTransportPolicyFromManifest(manifest.Runtime.Transports, manifest.Runtime.DefaultTransport, manifest.Runtime.TransportPolicy)
+	if err != nil {
+		return runtimeConnectionInformation{}, err
+	}
+	return runtimeConnectionInformation{RuntimeURL: runtimeURL, Policy: policy}, nil
+}
+
+func resolveRuntimeURL(ctx context.Context, platformURL, override string) (string, error) {
+	connection, err := resolveRuntimeConnection(ctx, platformURL, override)
+	return connection.RuntimeURL, err
 }
 
 func newOpenLinkerDiscoveryClient() *http.Client {

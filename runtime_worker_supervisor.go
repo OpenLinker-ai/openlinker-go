@@ -17,6 +17,14 @@ func (node *RuntimeWorker) startInitialRuntimeTransport(parent context.Context) 
 		epoch, _, _ := node.transport.beginTransition(RuntimeTransportConnectingWS)
 		return node.activateWebSocketWithRetry(parent, false, epoch)
 	case RuntimeTransportAuto:
+		order := node.orderedRuntimeTransports()
+		if len(order) == 0 {
+			return nil, errors.New("OpenLinker Runtime has no usable transport")
+		}
+		if order[0] == RuntimeTransportPull {
+			epoch, _, _ := node.transport.beginTransition(RuntimeTransportSwitchingPull)
+			return node.activatePullWithRetry(parent, false, epoch)
+		}
 		epoch, _, _ := node.transport.beginTransition(RuntimeTransportConnectingWS)
 		connection, ready, err := node.dialWebSocketOnce(parent)
 		if err == nil {
@@ -32,6 +40,9 @@ func (node *RuntimeWorker) startInitialRuntimeTransport(parent context.Context) 
 		if runtimeErrorIsPermanent(err) && !runtimeAttachErrorIsRetryable(err) {
 			return nil, scrubRuntimeError(err)
 		}
+		if !node.autoAllowsPullFallback() {
+			return node.activateWebSocketWithRetry(parent, false, epoch)
+		}
 		node.logf("runtime WebSocket unavailable; activating HTTPS long-poll: %v", scrubRuntimeError(err))
 		epoch, _, _ = node.transport.beginTransition(RuntimeTransportSwitchingPull)
 		return node.activatePullWithRetry(parent, false, epoch)
@@ -41,7 +52,8 @@ func (node *RuntimeWorker) startInitialRuntimeTransport(parent context.Context) 
 }
 
 func (node *RuntimeWorker) startTransportSupervisor() {
-	if node.transport == nil || node.runtimeDialer == nil || RuntimeTransportMode(node.Transport) == RuntimeTransportPull {
+	if node.transport == nil || node.runtimeDialer == nil || RuntimeTransportMode(node.Transport) == RuntimeTransportPull ||
+		(RuntimeTransportMode(node.Transport) == RuntimeTransportAuto && !node.autoPrefersWebSocket()) {
 		return
 	}
 	ctx, cancel := context.WithCancel(node.runtimeCtx)
@@ -74,7 +86,7 @@ func (node *RuntimeWorker) transportSupervisorLoop(ctx context.Context) {
 			}
 			node.logf("runtime WebSocket disconnected: %v", scrubRuntimeError(connection.Err()))
 			var err error
-			if RuntimeTransportMode(node.Transport) == RuntimeTransportWebSocket {
+			if RuntimeTransportMode(node.Transport) == RuntimeTransportWebSocket || !node.autoAllowsPullFallback() {
 				err = node.reconnectWebSocket(ctx)
 			} else {
 				err = node.switchToPull(ctx)
@@ -85,17 +97,20 @@ func (node *RuntimeWorker) transportSupervisorLoop(ctx context.Context) {
 			}
 			probeAttempt = 0
 		case RuntimeTransportPull:
-			delay := node.retryDelay(probeAttempt)
-			if node.jitter != nil {
-				delay = node.jitter(delay)
-			} else {
-				delay = jitterDuration(delay)
+			delay := node.webSocketProbeInterval
+			if delay <= 0 {
+				delay = node.retryDelay(probeAttempt)
+				if node.jitter != nil {
+					delay = node.jitter(delay)
+				} else {
+					delay = jitterDuration(delay)
+				}
 			}
 			if sleepContext(ctx, delay) != nil {
 				return
 			}
 			node.transport.setState(RuntimeTransportProbingWS)
-			probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			probeCtx, cancel := context.WithTimeout(ctx, node.webSocketProbeTimeout)
 			err := node.runtimeDialer.ProbeRuntimeWebSocket(probeCtx)
 			cancel()
 			if err != nil {

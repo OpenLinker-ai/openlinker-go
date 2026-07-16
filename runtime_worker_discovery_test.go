@@ -3,14 +3,127 @@ package openlinker
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+type runtimeDiscoveryPolicyFixture struct {
+	Cases []struct {
+		Name     string                         `json:"name"`
+		Manifest openLinkerDiscoveryManifest    `json:"manifest"`
+		Expected runtimeDiscoveryPolicyExpected `json:"expected"`
+	} `json:"cases"`
+	ConfiguredTransportCases []struct {
+		Name         string                       `json:"name"`
+		ManifestCase string                       `json:"manifest_case"`
+		Manifest     *openLinkerDiscoveryManifest `json:"manifest"`
+		Configured   RuntimeTransportMode         `json:"configured"`
+		Effective    RuntimeTransportMode         `json:"effective"`
+		Error        string                       `json:"error"`
+	} `json:"configured_transport_cases"`
+}
+
+type runtimeDiscoveryPolicyExpected struct {
+	Allowed                  []RuntimeTransportMode `json:"allowed"`
+	Default                  RuntimeTransportMode   `json:"default"`
+	HeartbeatIntervalMS      int64                  `json:"heartbeat_interval_ms"`
+	SessionStaleAfterMS      int64                  `json:"session_stale_after_ms"`
+	RetryMinimumMS           int64                  `json:"retry_minimum_ms"`
+	RetryMaximumMS           int64                  `json:"retry_maximum_ms"`
+	WebSocketProbeIntervalMS int64                  `json:"websocket_probe_interval_ms"`
+	WebSocketProbeTimeoutMS  int64                  `json:"websocket_probe_timeout_ms"`
+}
+
+func loadRuntimeDiscoveryPolicyFixture(t *testing.T) runtimeDiscoveryPolicyFixture {
+	t.Helper()
+	body, err := os.ReadFile("contracts/runtime-discovery-policy-fixtures.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture runtimeDiscoveryPolicyFixture
+	if err = json.Unmarshal(body, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	return fixture
+}
+
+func TestRuntimeDiscoveryPolicyFixtures(t *testing.T) {
+	fixture := loadRuntimeDiscoveryPolicyFixture(t)
+	manifests := make(map[string]openLinkerDiscoveryManifest, len(fixture.Cases))
+	for _, test := range fixture.Cases {
+		manifests[test.Name] = test.Manifest
+		t.Run(test.Name, func(t *testing.T) {
+			policy, err := runtimeTransportPolicyFromManifest(
+				test.Manifest.Runtime.Transports,
+				test.Manifest.Runtime.DefaultTransport,
+				test.Manifest.Runtime.TransportPolicy,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := runtimeDiscoveryPolicyExpected{
+				Allowed: policy.Allowed, Default: policy.Default,
+				HeartbeatIntervalMS:      policy.HeartbeatInterval.Milliseconds(),
+				SessionStaleAfterMS:      policy.SessionStaleAfter.Milliseconds(),
+				RetryMinimumMS:           policy.RetryMinimum.Milliseconds(),
+				RetryMaximumMS:           policy.RetryMaximum.Milliseconds(),
+				WebSocketProbeIntervalMS: policy.WebSocketProbeInterval.Milliseconds(),
+				WebSocketProbeTimeoutMS:  policy.WebSocketProbeTimeout.Milliseconds(),
+			}
+			if !reflect.DeepEqual(got, test.Expected) {
+				t.Fatalf("policy = %#v, want %#v", got, test.Expected)
+			}
+		})
+	}
+	for _, test := range fixture.ConfiguredTransportCases {
+		t.Run(test.Name, func(t *testing.T) {
+			manifest := test.Manifest
+			if manifest == nil {
+				value, ok := manifests[test.ManifestCase]
+				if !ok {
+					t.Fatalf("unknown manifest fixture %q", test.ManifestCase)
+				}
+				manifest = &value
+			}
+			policy, err := runtimeTransportPolicyFromManifest(
+				manifest.Runtime.Transports,
+				manifest.Runtime.DefaultTransport,
+				manifest.Runtime.TransportPolicy,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			worker := &RuntimeWorker{
+				Transport:             test.Configured,
+				HeartbeatInterval:     RuntimeWorkerDefaultHeartbeatInterval,
+				RetryMinimum:          RuntimeWorkerDefaultRetryMinimum,
+				RetryMaximum:          RuntimeWorkerDefaultRetryMaximum,
+				webSocketProbeTimeout: 10 * time.Second,
+			}
+			err = worker.applyRuntimeTransportPolicy(policy)
+			if test.Error != "" {
+				if err == nil || !strings.Contains(err.Error(), test.Error) {
+					t.Fatalf("error = %v, want substring %q", err, test.Error)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if worker.Transport != test.Effective {
+				t.Fatalf("effective transport = %q, want %q", worker.Transport, test.Effective)
+			}
+		})
+	}
+}
 
 func TestResolveRuntimeURLDiscoversWithoutRuntimeCredentials(t *testing.T) {
 	var calls atomic.Int32

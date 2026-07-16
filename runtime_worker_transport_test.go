@@ -141,6 +141,28 @@ func TestRuntimeTransportAutoFallsBackWhenInitialWebSocketIsUnavailable(t *testi
 	}
 }
 
+func TestRuntimeTransportAutoHonorsPullFirstPolicyWithoutWebSocketProbe(t *testing.T) {
+	pull := newFakeRuntimeClient()
+	unusedWebSocket := newFakeRuntimeDuplex(newFakeRuntimeClient())
+	dialer := &fakeRuntimeTransportDialer{connections: []RuntimeDuplexClient{unusedWebSocket}}
+	node := newRuntimeWorkerForTest(t.TempDir(), pull, testRuntimeHandlerFunc(func(context.Context, any, RuntimeContext) (any, error) {
+		return RuntimeJSONMap{"unused": true}, nil
+	}))
+	node.Transport = RuntimeTransportAuto
+	node.transportOrder = []RuntimeTransportMode{RuntimeTransportPull, RuntimeTransportWebSocket}
+	node.runtimeDialer = dialer
+	runDone := make(chan error, 1)
+	go func() { runDone <- node.Start(context.Background()) }()
+	waitForRuntimeTransport(t, node, RuntimeTransportPullActive)
+	dialer.mu.Lock()
+	remaining := len(dialer.connections)
+	dialer.mu.Unlock()
+	if remaining != 1 {
+		t.Fatalf("pull-first policy dialed WebSocket; remaining connections = %d", remaining)
+	}
+	stopRuntimeWorkerTest(t, node, runDone)
+}
+
 func TestRuntimeTransportPullRetriesSessionConflict(t *testing.T) {
 	pull := newFakeRuntimeClient()
 	var creates atomic.Int32

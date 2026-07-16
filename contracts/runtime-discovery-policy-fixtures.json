@@ -1,0 +1,165 @@
+{
+  "cases": [
+    {
+      "name": "full_auto_ws_pull",
+      "manifest": {
+        "base_urls": {
+          "runtime": "https://runtime.example.test:8443"
+        },
+        "runtime": {
+          "enabled": true,
+          "mtls_required": true,
+          "transports": [
+            "websocket",
+            "long_poll"
+          ],
+          "default_transport": "auto",
+          "transport_policy": {
+            "version": 1,
+            "heartbeat_interval_seconds": 20,
+            "session_stale_after_seconds": 45,
+            "retry_minimum_ms": 250,
+            "retry_maximum_ms": 15000,
+            "websocket_probe_interval_ms": 15000,
+            "websocket_probe_timeout_ms": 10000
+          }
+        }
+      },
+      "expected": {
+        "allowed": [
+          "ws",
+          "pull"
+        ],
+        "default": "auto",
+        "heartbeat_interval_ms": 20000,
+        "session_stale_after_ms": 45000,
+        "retry_minimum_ms": 250,
+        "retry_maximum_ms": 15000,
+        "websocket_probe_interval_ms": 15000,
+        "websocket_probe_timeout_ms": 10000
+      }
+    },
+    {
+      "name": "ordered_pull_then_ws",
+      "manifest": {
+        "base_urls": {
+          "runtime": "https://runtime.example.test:8443"
+        },
+        "runtime": {
+          "enabled": true,
+          "mtls_required": true,
+          "transports": [
+            "long_poll",
+            "websocket",
+            "future_transport"
+          ],
+          "default_transport": "auto",
+          "transport_policy": {
+            "version": 1,
+            "unknown_future_field": true
+          }
+        }
+      },
+      "expected": {
+        "allowed": [
+          "pull",
+          "ws"
+        ],
+        "default": "auto",
+        "heartbeat_interval_ms": 5000,
+        "session_stale_after_ms": 0,
+        "retry_minimum_ms": 250,
+        "retry_maximum_ms": 15000,
+        "websocket_probe_interval_ms": 15000,
+        "websocket_probe_timeout_ms": 10000
+      }
+    },
+    {
+      "name": "server_fixed_pull",
+      "manifest": {
+        "base_urls": {
+          "runtime": "https://runtime.example.test:8443"
+        },
+        "runtime": {
+          "enabled": true,
+          "mtls_required": true,
+          "transports": [
+            "websocket",
+            "long_poll"
+          ],
+          "default_transport": "long_poll"
+        }
+      },
+      "expected": {
+        "allowed": [
+          "ws",
+          "pull"
+        ],
+        "default": "pull",
+        "heartbeat_interval_ms": 5000,
+        "session_stale_after_ms": 0,
+        "retry_minimum_ms": 250,
+        "retry_maximum_ms": 15000,
+        "websocket_probe_interval_ms": 15000,
+        "websocket_probe_timeout_ms": 10000
+      }
+    },
+    {
+      "name": "legacy_manifest",
+      "manifest": {
+        "base_urls": {
+          "runtime": "https://runtime.example.test:8443"
+        },
+        "runtime": {
+          "enabled": true,
+          "mtls_required": true
+        }
+      },
+      "expected": {
+        "allowed": [
+          "ws",
+          "pull"
+        ],
+        "default": "auto",
+        "heartbeat_interval_ms": 5000,
+        "session_stale_after_ms": 0,
+        "retry_minimum_ms": 250,
+        "retry_maximum_ms": 15000,
+        "websocket_probe_interval_ms": 15000,
+        "websocket_probe_timeout_ms": 10000
+      }
+    }
+  ],
+  "configured_transport_cases": [
+    {
+      "name": "explicit_ws_allowed",
+      "manifest_case": "full_auto_ws_pull",
+      "configured": "ws",
+      "effective": "ws"
+    },
+    {
+      "name": "server_default_pull_is_fixed",
+      "manifest_case": "server_fixed_pull",
+      "configured": "auto",
+      "effective": "pull"
+    },
+    {
+      "name": "explicit_ws_rejected_by_pull_only_server",
+      "manifest": {
+        "base_urls": {
+          "runtime": "https://runtime.example.test:8443"
+        },
+        "runtime": {
+          "enabled": true,
+          "mtls_required": true,
+          "transports": [
+            "long_poll"
+          ],
+          "default_transport": "auto"
+        }
+      },
+      "configured": "ws",
+      "error": "not allowed"
+    }
+  ]
+}
