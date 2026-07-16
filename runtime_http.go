@@ -104,6 +104,31 @@ func (r *Runtime) HeartbeatRuntimeSession(ctx context.Context, hello RuntimeHell
 	return &ready, nil
 }
 
+// DrainRuntimeSession asks Core to durably fence this attached Session at
+// capacity zero. The response is Core's persisted first-writer state; callers
+// must use it instead of treating the request body as an acknowledgement.
+func (r *Runtime) DrainRuntimeSession(
+	ctx context.Context,
+	runtimeSessionID string,
+	request RuntimeDrainPayload,
+) (*RuntimeDrainPayload, error) {
+	if !runtimeUUID(runtimeSessionID) {
+		return nil, errors.New("openlinker: invalid runtime drain Session")
+	}
+	if err := validateRuntimeDrain(request); err != nil {
+		return nil, err
+	}
+	var response RuntimeDrainPayload
+	path := "/agent-runtime/sessions/" + url.PathEscape(runtimeSessionID) + "/drain"
+	if _, err := r.doRuntime(ctx, http.MethodPost, path, nil, request, &response); err != nil {
+		return nil, err
+	}
+	if err := validateRuntimeDrain(response); err != nil {
+		return nil, fmt.Errorf("openlinker: invalid runtime drain acknowledgement: %w", err)
+	}
+	return &response, nil
+}
+
 func (r *Runtime) CloseRuntimeSession(ctx context.Context, request RuntimeSessionCloseRequest) error {
 	if err := validateRuntimeSessionClose(request); err != nil {
 		return err
@@ -456,6 +481,14 @@ func validateRuntimeSessionClose(value RuntimeSessionCloseRequest) error {
 	return nil
 }
 
+func validateRuntimeDrain(value RuntimeDrainPayload) error {
+	if value.DeadlineAt.IsZero() || !runtimeText(value.ReasonCode, 120) ||
+		value.Capacity != 0 || value.Inflight < 0 {
+		return errors.New("openlinker: invalid runtime drain")
+	}
+	return nil
+}
+
 func validateRuntimeAssignment(value RuntimeRunAssignedPayload) error {
 	if err := validateRuntimeAttemptIdentity(value.AttemptIdentity); err != nil {
 		return err
@@ -635,7 +668,7 @@ func DecodeRuntimePendingCommand(command RuntimePendingCommand) (RuntimeDecodedP
 		if err := decodeRuntimeResponse(bytes.NewReader(command.Payload), &payload); err != nil {
 			return RuntimeDecodedPendingCommand{}, err
 		}
-		if payload.DeadlineAt.IsZero() || !runtimeText(payload.ReasonCode, 120) || payload.Capacity < 0 || payload.Inflight < 0 {
+		if err := validateRuntimeDrain(payload); err != nil {
 			return RuntimeDecodedPendingCommand{}, errors.New("openlinker: invalid runtime drain command")
 		}
 		decoded.Drain = &payload

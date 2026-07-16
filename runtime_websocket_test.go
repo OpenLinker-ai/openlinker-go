@@ -65,6 +65,58 @@ func TestRuntimeWebSocketFallbackReasonHeaderIsBounded(t *testing.T) {
 	}
 }
 
+func TestRuntimeWebSocketDrainWaitsForCorrelatedCommittedACK(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	serverErr := make(chan error, 1)
+	server := newRuntimeSDKWSServer(t, func(_ *http.Request, conn *websocket.Conn) error {
+		if err := serveRuntimeSDKWSReady(conn, now); err != nil {
+			return err
+		}
+		drainEnvelope, err := readRuntimeSDKWSEnvelope(conn)
+		if err != nil {
+			return err
+		}
+		if drainEnvelope.Type != RuntimeDrain || drainEnvelope.ReplyToMessageID != "" {
+			return fmt.Errorf("drain envelope = %#v", drainEnvelope.RuntimeEnvelopeFields)
+		}
+		request, err := decodeRuntimeWSPayload[RuntimeDrainPayload](drainEnvelope, RuntimeDrain)
+		if err != nil {
+			return err
+		}
+		if request.Capacity != 0 || request.ReasonCode != "DEPLOYMENT" {
+			return fmt.Errorf("drain request = %#v", request)
+		}
+		return writeRuntimeSDKWSEnvelope(conn, RuntimeDrain, drainEnvelope.MessageID, RuntimeDrainPayload{
+			DeadlineAt: request.DeadlineAt.Add(-time.Second),
+			ReasonCode: "FIRST_WRITER_REASON",
+			Capacity:   0,
+			Inflight:   1,
+		})
+	}, serverErr)
+	defer server.Close()
+	runtimeClient, err := NewRuntime(server.URL, WithAgentToken("ol_agent_v2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := runtimeClient.DialRuntimeWebSocket(context.Background(), runtimeTestHello())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	response, err := connection.DrainRuntimeSession(context.Background(), runtimeTestSessionID, RuntimeDrainPayload{
+		DeadlineAt: now.Add(time.Minute), ReasonCode: "DEPLOYMENT", Capacity: 0, Inflight: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.ReasonCode != "FIRST_WRITER_REASON" || response.Inflight != 1 || response.Capacity != 0 {
+		t.Fatalf("authoritative drain = %#v", response)
+	}
+	if err = <-serverErr; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRuntimeWebSocketHandshakeAssignmentAndCancelCorrelation(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	hello := runtimeTestHello()

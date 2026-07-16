@@ -131,7 +131,7 @@ func TestDecodeRuntimePendingCommandIsStrictAndTyped(t *testing.T) {
 		t.Fatalf("revoke = %#v, %v", decoded, err)
 	}
 	validDrain := runtimeMarshalTest(t, RuntimeDrainPayload{
-		DeadlineAt: now.Add(time.Minute), ReasonCode: "DEPLOY", Capacity: 3, Inflight: 2,
+		DeadlineAt: now.Add(time.Minute), ReasonCode: "DEPLOY", Capacity: 0, Inflight: 2,
 	})
 	decoded, err = DecodeRuntimePendingCommand(RuntimePendingCommand{Type: RuntimeDrain, Payload: validDrain})
 	if err != nil || decoded.Drain == nil || decoded.Type != RuntimeDrain {
@@ -141,7 +141,7 @@ func TestDecodeRuntimePendingCommandIsStrictAndTyped(t *testing.T) {
 	cases := []RuntimePendingCommand{
 		{Type: RuntimeMessageType("runtime.unknown"), Payload: []byte(`{}`)},
 		{Type: RuntimeDrain, Payload: runtimeMarshalTest(t, map[string]any{
-			"deadline_at": now, "reason_code": "DRAIN", "capacity": -1, "inflight": 0,
+			"deadline_at": now, "reason_code": "DRAIN", "capacity": 1, "inflight": 0,
 		})},
 		{Type: RuntimeRunCancel, Payload: runtimeMarshalTest(t, map[string]any{
 			"cancellation_id": runtimeTestCancellationID, "attempt_identity": identity,

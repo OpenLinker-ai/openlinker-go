@@ -42,6 +42,7 @@ type fakeRuntimeClient struct {
 
 	createFn    func(context.Context, RuntimeHelloPayload) (*RuntimeReadyPayload, error)
 	heartbeatFn func(context.Context, RuntimeHelloPayload) (*RuntimeReadyPayload, error)
+	drainFn     func(context.Context, string, RuntimeDrainPayload) (*RuntimeDrainPayload, error)
 	closeFn     func(context.Context, RuntimeSessionCloseRequest) error
 	claimFn     func(context.Context, int, RuntimeClaimRequest) (*RuntimeRunAssignedPayload, error)
 	ackFn       func(context.Context, RuntimeAssignmentAckPayload) (*RuntimeAssignmentConfirmedPayload, error)
@@ -53,6 +54,7 @@ type fakeRuntimeClient struct {
 	commandsFn  func(context.Context, string, int) (*RuntimeCommandsResponse, error)
 	cancelAckFn func(context.Context, RuntimeRunCancelAckPayload) (*RuntimeRunCancellationState, error)
 	callAgentFn func(context.Context, RuntimeCallAgentAuthorization, RuntimeCallAgentRequest) (*RuntimeRunSummary, error)
+	drains      []RuntimeDrainPayload
 }
 
 func newFakeRuntimeClient() *fakeRuntimeClient {
@@ -89,6 +91,22 @@ func (client *fakeRuntimeClient) HeartbeatRuntimeSession(ctx context.Context, re
 		return client.heartbeatFn(ctx, request)
 	}
 	return client.readyPayload(), nil
+}
+
+func (client *fakeRuntimeClient) DrainRuntimeSession(
+	ctx context.Context,
+	runtimeSessionID string,
+	request RuntimeDrainPayload,
+) (*RuntimeDrainPayload, error) {
+	client.mu.Lock()
+	client.drains = append(client.drains, request)
+	client.mu.Unlock()
+	if client.drainFn != nil {
+		return client.drainFn(ctx, runtimeSessionID, request)
+	}
+	response := request
+	response.Capacity = 0
+	return &response, nil
 }
 
 func (client *fakeRuntimeClient) CloseRuntimeSession(ctx context.Context, request RuntimeSessionCloseRequest) error {

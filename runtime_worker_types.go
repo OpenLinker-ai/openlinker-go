@@ -3,6 +3,7 @@ package openlinker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 )
@@ -31,6 +32,40 @@ type RuntimeWorkerConfig struct {
 	RetryMaximum      time.Duration
 	Logger            *log.Logger
 	OnReady           func(RuntimeReadyPayload)
+}
+
+// RuntimeWorkerDrainOptions controls a server-authoritative graceful drain.
+// Timeout bounds the Core fence, local handlers, and every durable spool ACK.
+type RuntimeWorkerDrainOptions struct {
+	Timeout    time.Duration
+	ReasonCode string
+}
+
+// RuntimeSpoolStatus counts every durable record that must be cleared before
+// a Runtime Worker can report a safe graceful exit.
+type RuntimeSpoolStatus struct {
+	Assignments int
+	Events      int
+	Results     int
+	Empty       bool
+}
+
+// RuntimeDrainTimeoutError means the Worker stopped accepting new Runs but
+// could not prove that its handlers and durable spool were empty in time. The
+// records remain available for the next process Session to resume.
+type RuntimeDrainTimeoutError struct {
+	Timeout time.Duration
+	Spool   RuntimeSpoolStatus
+}
+
+func (err *RuntimeDrainTimeoutError) Error() string {
+	return fmt.Sprintf(
+		"openlinker: Runtime Worker drain timed out after %s with %d assignment(s), %d Event(s), and %d Result(s) still durable",
+		err.Timeout,
+		err.Spool.Assignments,
+		err.Spool.Events,
+		err.Spool.Results,
+	)
 }
 
 // NewRuntimeWorker validates config and returns a worker ready to Start.

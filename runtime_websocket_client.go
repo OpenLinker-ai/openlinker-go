@@ -50,6 +50,34 @@ func (c *RuntimeWebSocket) HeartbeatRuntimeSession(
 	}
 }
 
+func (c *RuntimeWebSocket) DrainRuntimeSession(
+	ctx context.Context,
+	runtimeSessionID string,
+	request RuntimeDrainPayload,
+) (*RuntimeDrainPayload, error) {
+	if c == nil {
+		return nil, errors.New("openlinker: runtime WebSocket is nil")
+	}
+	if runtimeSessionID != c.hello.RuntimeSessionID {
+		return nil, errors.New("openlinker: runtime WebSocket drain Session mismatch")
+	}
+	if err := validateRuntimeDrain(request); err != nil {
+		return nil, err
+	}
+	envelope, err := c.requestOne(ctx, RuntimeDrain, "", request, RuntimeDrain)
+	if err != nil {
+		return nil, err
+	}
+	response, err := decodeRuntimeWSPayload[RuntimeDrainPayload](envelope, RuntimeDrain)
+	if err == nil {
+		err = validateRuntimeDrain(response)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("openlinker: invalid runtime drain acknowledgement: %w", err)
+	}
+	return &response, nil
+}
+
 func (c *RuntimeWebSocket) CloseRuntimeSession(
 	_ context.Context,
 	request RuntimeSessionCloseRequest,

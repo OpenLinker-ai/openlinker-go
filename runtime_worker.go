@@ -83,15 +83,27 @@ type RuntimeWorker struct {
 
 	stateMu       sync.RWMutex
 	draining      bool
+	stopping      bool
 	active        map[string]*activeRuntimeAttempt
+	reservations  map[string]struct{}
+	assignmentOps int
 	cancellations map[string]struct{}
 	spoolAllowed  map[string]spoolPermission
 	wakeSpool     chan struct{}
 	fatal         chan error
 	stopRequest   chan struct{}
 	stopRequested bool
+	drainOwnsStop bool
 	loops         sync.WaitGroup
 	executions    sync.WaitGroup
+
+	drainMu   sync.Mutex
+	drainDone chan struct{}
+	drainErr  error
+
+	// Tests use this barrier to prove the final Stop/Drain linearization. It is
+	// nil in production and deliberately not part of the public API.
+	drainBeforeStop func()
 
 	jitter func(time.Duration) time.Duration
 }
@@ -211,12 +223,8 @@ func (node *RuntimeWorker) Stop(ctx context.Context) error {
 		return nil
 	}
 	done := node.done
-	node.setDraining(true)
-	if !node.stopRequested {
-		close(node.stopRequest)
-		node.stopRequested = true
-	}
 	node.lifecycleMu.Unlock()
+	node.requestStop()
 
 	select {
 	case <-done:
@@ -239,14 +247,20 @@ func (node *RuntimeWorker) beginLifecycle() error {
 	node.done = make(chan struct{})
 	node.runtimeCtx, node.runtimeStop = context.WithCancel(context.Background())
 	node.active = make(map[string]*activeRuntimeAttempt)
+	node.reservations = make(map[string]struct{})
+	node.assignmentOps = 0
 	node.cancellations = make(map[string]struct{})
 	node.spoolAllowed = make(map[string]spoolPermission)
 	node.wakeSpool = make(chan struct{}, 1)
 	node.fatal = make(chan error, 1)
 	node.stopRequest = make(chan struct{})
 	node.stopRequested = false
+	node.drainOwnsStop = false
 	node.draining = false
+	node.stopping = false
 	node.ready = nil
+	node.drainDone = nil
+	node.drainErr = nil
 	return nil
 }
 
@@ -339,7 +353,7 @@ func (node *RuntimeWorker) startRuntimeLoops() {
 }
 
 func (node *RuntimeWorker) shutdown(ctx context.Context) error {
-	node.setDraining(true)
+	node.requestStop()
 	if node.transportStop != nil {
 		node.transportStop()
 	}
@@ -419,6 +433,37 @@ func (node *RuntimeWorker) setDraining(value bool) {
 	node.stateMu.Unlock()
 }
 
+func (node *RuntimeWorker) setStopping() {
+	node.stateMu.Lock()
+	node.draining = true
+	node.stopping = true
+	node.stateMu.Unlock()
+}
+
+func (node *RuntimeWorker) requestStop() {
+	node.lifecycleMu.Lock()
+	node.setStopping()
+	if node.started && !node.stopRequested {
+		close(node.stopRequest)
+		node.stopRequested = true
+		node.drainOwnsStop = false
+	}
+	node.lifecycleMu.Unlock()
+}
+
+func (node *RuntimeWorker) requestDrainStop() bool {
+	node.lifecycleMu.Lock()
+	defer node.lifecycleMu.Unlock()
+	if !node.started || node.completed || node.stopRequested {
+		return false
+	}
+	node.setStopping()
+	close(node.stopRequest)
+	node.stopRequested = true
+	node.drainOwnsStop = true
+	return true
+}
+
 func (node *RuntimeWorker) isDraining() bool {
 	node.stateMu.RLock()
 	defer node.stateMu.RUnlock()
@@ -429,6 +474,11 @@ func (node *RuntimeWorker) capacitySnapshot() (capacity, inflight int64) {
 	node.stateMu.RLock()
 	draining := node.draining
 	inflight = int64(len(node.active))
+	for attemptID := range node.reservations {
+		if node.active[attemptID] == nil {
+			inflight++
+		}
+	}
 	node.stateMu.RUnlock()
 	accepting := node.store == nil || node.store.AcceptsNewRuns()
 	if !draining && accepting {

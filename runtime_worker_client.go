@@ -30,6 +30,13 @@ type RuntimeClient interface {
 	CallRuntimeAgent(context.Context, RuntimeCallAgentAuthorization, RuntimeCallAgentRequest) (*RuntimeRunSummary, error)
 }
 
+// runtimeDrainClient is deliberately optional so adding graceful drain does
+// not break existing RuntimeClient implementations. Official transports
+// implement it; custom clients fail closed only when Drain is actually used.
+type runtimeDrainClient interface {
+	DrainRuntimeSession(context.Context, string, RuntimeDrainPayload) (*RuntimeDrainPayload, error)
+}
+
 type RuntimeMTLSConfig struct {
 	CertFile   string
 	KeyFile    string

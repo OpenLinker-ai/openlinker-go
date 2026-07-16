@@ -117,6 +117,20 @@ func (client *policyRecoveringRuntimeClient) HeartbeatRuntimeSession(ctx context
 	return value.(*RuntimeReadyPayload), err
 }
 
+func (client *policyRecoveringRuntimeClient) DrainRuntimeSession(
+	ctx context.Context,
+	runtimeSessionID string,
+	request RuntimeDrainPayload,
+) (*RuntimeDrainPayload, error) {
+	value, err := client.call(ctx, func() (any, error) {
+		return client.transport.DrainRuntimeSession(ctx, runtimeSessionID, request)
+	})
+	if value == nil {
+		return nil, err
+	}
+	return value.(*RuntimeDrainPayload), err
+}
+
 func (client *policyRecoveringRuntimeClient) CloseRuntimeSession(ctx context.Context, request RuntimeSessionCloseRequest) error {
 	_, err := client.call(ctx, func() (any, error) { return nil, client.transport.CloseRuntimeSession(ctx, request) })
 	return err

@@ -3,6 +3,7 @@ package openlinker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 )
 
@@ -226,6 +227,23 @@ func (client *switchingRuntimeClient) HeartbeatRuntimeSession(ctx context.Contex
 	}
 	defer done()
 	return active.HeartbeatRuntimeSession(callCtx, request)
+}
+
+func (client *switchingRuntimeClient) DrainRuntimeSession(
+	ctx context.Context,
+	runtimeSessionID string,
+	request RuntimeDrainPayload,
+) (*RuntimeDrainPayload, error) {
+	active, callCtx, done, err := client.begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	drainer, ok := active.(runtimeDrainClient)
+	if !ok {
+		return nil, fmt.Errorf("%w: Runtime Client does not implement session drain", ErrRuntimeProtocolMismatch)
+	}
+	return drainer.DrainRuntimeSession(callCtx, runtimeSessionID, request)
 }
 
 func (client *switchingRuntimeClient) CloseRuntimeSession(ctx context.Context, request RuntimeSessionCloseRequest) error {

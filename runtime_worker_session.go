@@ -132,7 +132,10 @@ func (node *RuntimeWorker) claimLoop() {
 		if assigned == nil {
 			continue
 		}
-		if err := node.handleClaimedAssignment(assigned); err != nil {
+		node.beginAssignment(assigned.AttemptIdentity.AttemptID)
+		err = node.handleClaimedAssignment(assigned)
+		node.endAssignment(assigned.AttemptIdentity.AttemptID)
+		if err != nil {
 			if runtimeErrorIsPermanent(err) || durableRuntimeErrorIsFatal(err) {
 				node.reportFatal(scrubRuntimeError(err))
 				return
@@ -140,6 +143,35 @@ func (node *RuntimeWorker) claimLoop() {
 			node.logf("runtime assignment deferred: %v", scrubRuntimeError(err))
 		}
 	}
+}
+
+func (node *RuntimeWorker) beginAssignment(attemptID string) {
+	node.stateMu.Lock()
+	node.assignmentOps++
+	inflight := len(node.active)
+	for reservedID := range node.reservations {
+		if node.active[reservedID] == nil {
+			inflight++
+		}
+	}
+	if !node.draining && node.active[attemptID] == nil && inflight < int(node.Capacity) {
+		node.reservations[attemptID] = struct{}{}
+	}
+	node.stateMu.Unlock()
+}
+
+func (node *RuntimeWorker) endAssignment(attemptID string) {
+	node.stateMu.Lock()
+	delete(node.reservations, attemptID)
+	node.assignmentOps--
+	node.stateMu.Unlock()
+}
+
+func (node *RuntimeWorker) assignmentAdmitted(attemptID string) (bool, bool) {
+	node.stateMu.RLock()
+	defer node.stateMu.RUnlock()
+	_, admitted := node.reservations[attemptID]
+	return admitted, node.draining
 }
 
 func (node *RuntimeWorker) handleClaimedAssignment(assigned *RuntimeRunAssignedPayload) error {
@@ -169,8 +201,8 @@ func (node *RuntimeWorker) handleClaimedAssignment(assigned *RuntimeRunAssignedP
 	if err != nil {
 		return err
 	}
-	capacity, inflight := node.capacitySnapshot()
-	if record.State == AssignmentStateReceived && (capacity == 0 || inflight >= capacity) {
+	admitted, draining := node.assignmentAdmitted(localIdentity.AttemptID)
+	if record.State == AssignmentStateReceived && (draining || !admitted) {
 		return node.rejectAssignment(record)
 	}
 	payload := DurableAssignmentPayload{

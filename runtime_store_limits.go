@@ -30,6 +30,27 @@ func (store *FileRuntimeStore) SpoolUsage() (RuntimeSpoolUsage, error) {
 	return store.spoolUsageLocked(), nil
 }
 
+func (store *FileRuntimeStore) SpoolStatus() (RuntimeSpoolStatus, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if err := store.readyLocked(); err != nil {
+		return RuntimeSpoolStatus{}, err
+	}
+	assignments := 0
+	for _, entry := range store.entries {
+		if !entry.Deleted {
+			assignments++
+		}
+	}
+	status := RuntimeSpoolStatus{
+		Assignments: assignments,
+		Events:      len(store.events),
+		Results:     len(store.results),
+	}
+	status.Empty = status.Assignments == 0 && status.Events == 0 && status.Results == 0
+	return status, nil
+}
+
 func (store *FileRuntimeStore) AcceptsNewRuns() bool {
 	store.mu.Lock()
 	defer store.mu.Unlock()

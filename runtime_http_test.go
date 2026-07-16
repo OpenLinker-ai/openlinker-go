@@ -82,6 +82,55 @@ func TestRuntimeFallbackReasonHeaderIsBoundedAndCreateOnly(t *testing.T) {
 	}
 }
 
+func TestRuntimeHTTPDrainUsesAttachmentAndReturnsCorePersistedState(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/api/v1/agent-runtime/sessions":
+			writeRuntimeTestJSON(t, w, RuntimeReadyPayload{
+				CoreInstanceID: runtimeTestCoreID, AttachmentID: runtimeTestAttachmentID,
+				Features: RuntimeRequiredFeatures(), OfferTTLSeconds: 30, LeaseTTLSeconds: 60,
+				DatabaseTime: now,
+			})
+		case "/api/v1/agent-runtime/sessions/" + runtimeTestSessionID + "/drain":
+			if got := request.Header.Get(RuntimeAttachmentHeader); got != runtimeTestAttachmentID {
+				t.Errorf("drain attachment = %q", got)
+			}
+			var drain RuntimeDrainPayload
+			decodeRuntimeTestBody(t, request, &drain)
+			if drain.Capacity != 0 || drain.Inflight != 2 || drain.ReasonCode != "DEPLOYMENT" {
+				t.Errorf("drain request = %#v", drain)
+			}
+			writeRuntimeTestJSON(t, w, RuntimeDrainPayload{
+				DeadlineAt: drain.DeadlineAt.Add(-time.Second),
+				ReasonCode: "FIRST_WRITER_REASON",
+				Capacity:   0,
+				Inflight:   3,
+			})
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+	runtimeClient, err := NewRuntime(server.URL, WithAgentToken("ol_agent_v2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = runtimeClient.CreateRuntimeSession(context.Background(), runtimeTestHello()); err != nil {
+		t.Fatal(err)
+	}
+	response, err := runtimeClient.DrainRuntimeSession(context.Background(), runtimeTestSessionID, RuntimeDrainPayload{
+		DeadlineAt: now.Add(time.Minute), ReasonCode: "DEPLOYMENT", Capacity: 0, Inflight: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.ReasonCode != "FIRST_WRITER_REASON" || response.Inflight != 3 || response.Capacity != 0 {
+		t.Fatalf("authoritative drain = %#v", response)
+	}
+}
+
 func TestRuntimeHTTPFlowRequiresExplicitAssignmentConfirmation(t *testing.T) {
 	t.Parallel()
 

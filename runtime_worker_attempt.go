@@ -48,7 +48,7 @@ func (node *RuntimeWorker) startConfirmedAttempt(record AssignmentJournalRecord,
 		return ErrAssignmentTransition
 	}
 	node.stateMu.Lock()
-	if node.draining {
+	if node.stopping {
 		node.stateMu.Unlock()
 		return nil
 	}

@@ -157,7 +157,7 @@ func TestRuntimeContractMatchesExportedConstants(t *testing.T) {
 		}
 		messageTypes = append(messageTypes, message.Type)
 	}
-	for _, messageType := range []string{"runtime.hello", "run.assigned", "run.result", "runtime.resume", "run.cancel", "runtime.error"} {
+	for _, messageType := range []string{"runtime.hello", "run.assigned", "run.result", "runtime.resume", "run.cancel", "runtime.drain", "runtime.error"} {
 		if !slices.Contains(messageTypes, messageType) {
 			t.Fatalf("runtime contract missing message %q", messageType)
 		}
@@ -183,6 +183,7 @@ func TestRuntimeContractMatchesExportedConstants(t *testing.T) {
 	requiredEndpoints := []string{
 		"POST /api/v1/agent-runtime/sessions",
 		"POST /api/v1/agent-runtime/sessions/{id}/heartbeat",
+		"POST /api/v1/agent-runtime/sessions/{id}/drain",
 		"POST /api/v1/agent-runtime/sessions/{id}/close",
 		"POST /api/v1/agent-runtime/runs/claim",
 		"POST /api/v1/agent-runtime/runs/{id}/assignment-ack",
@@ -237,6 +238,14 @@ func TestRuntimeContractMatchesExportedConstants(t *testing.T) {
 		closeEndpoint.ErrorResponseSchema.Ref != "#/$defs/RuntimeError" {
 		t.Fatalf("runtime close contract = %#v", closeEndpoint)
 	}
+	drainEndpoint := endpoints["POST /api/v1/agent-runtime/sessions/{id}/drain"]
+	if drainEndpoint.ClientMethod != "drainRuntimeSession" ||
+		drainEndpoint.RequestBodySchema.Ref != "#/$defs/RuntimeDrainPayload" ||
+		drainEndpoint.SuccessResponseSchema.Ref != "#/$defs/RuntimeDrainPayload" ||
+		drainEndpoint.EmptyResponseStatus != 0 ||
+		drainEndpoint.ErrorResponseSchema.Ref != "#/$defs/RuntimeError" {
+		t.Fatalf("runtime drain contract = %#v", drainEndpoint)
+	}
 
 	for _, definition := range []string{
 		"AttemptIdentity",
@@ -245,6 +254,7 @@ func TestRuntimeContractMatchesExportedConstants(t *testing.T) {
 		"PendingCommand",
 		"RuntimeCommandsResponse",
 		"RuntimeSessionCloseRequest",
+		"RuntimeDrainPayload",
 	} {
 		if _, ok := contract.Definitions[definition]; !ok {
 			t.Fatalf("runtime contract missing definition %q", definition)

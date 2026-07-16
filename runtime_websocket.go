@@ -816,6 +816,12 @@ func validateRuntimeWSReplyPayload(envelope RuntimeEnvelope) error {
 			return err
 		}
 		return validateRuntimeResumeDecision(payload)
+	case RuntimeDrain:
+		payload, err := decodeRuntimeWSPayload[RuntimeDrainPayload](envelope, RuntimeDrain)
+		if err != nil {
+			return err
+		}
+		return validateRuntimeDrain(payload)
 	case RuntimeError:
 		payload, err := decodeRuntimeWSPayload[RuntimeErrorBody](envelope, RuntimeError)
 		if err != nil {
