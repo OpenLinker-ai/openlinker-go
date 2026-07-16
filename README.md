@@ -221,6 +221,11 @@ _ = body
 
 ## OpenLinker Runtime
 
+Before the first deployment, follow the Chinese
+[end-to-end RuntimeWorker runbook](./docs/runtime-worker-end-to-end.zh-CN.md) to prepare the
+Agent identity, Runtime Node, mTLS and durable storage, then verify a real Run, cancellation and
+process restart. Runtime Ready proves connectivity only; it does not prove end-to-end callability.
+
 Most Go Agents should start with the minimal facade. It loads the standard
 environment, opens the encrypted Runtime store, and runs the canonical worker:
 

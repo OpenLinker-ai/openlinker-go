@@ -1,5 +1,9 @@
 # Runtime 示例
 
+第一次运行任何 Runtime 示例前，先完成
+[《从零运行一个 RuntimeWorker：完整操作手册》](../../docs/runtime-worker-end-to-end.zh-CN.md)
+中的 Agent 身份、Runtime Node、mTLS、真实 Run、cancel 和重启验证。
+
 Runtime 示例按照 API 层级组织，而不是按照 HTTP/WebSocket 传输方式组织：
 
 - `agent-generic`：极简 `WithAgent(...).Run()`，普通 Agent 的推荐入口。
