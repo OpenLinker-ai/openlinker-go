@@ -62,19 +62,28 @@ func TestEnsureAgentCreatesCreatorAgentAndRuntimeToken(t *testing.T) {
 	t.Parallel()
 	store := &memoryRegistrationStore{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		if request.Header.Get("Authorization") != "Bearer ol_user_creator" {
-			t.Fatalf("auth = %q", request.Header.Get("Authorization"))
-		}
 		switch request.Method + " " + request.URL.Path {
-		case "GET /api/v1/creator/agents/by-slug/demo-agent":
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"error":{"code":"NOT_FOUND","message":"missing"}}`))
-		case "POST /api/v1/creator/agents":
-			writeRuntimeTestJSON(t, w, AgentResponse{ID: testAgentID, Slug: "demo-agent", Name: "Demo Agent"})
 		case "POST /api/v1/creator/agent-tokens":
+			if request.Header.Get("Authorization") != "Bearer ol_user_creator" {
+				t.Fatalf("auth = %q", request.Header.Get("Authorization"))
+			}
+			var body CreateAgentTokenRequest
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.AgentID != "" {
+				t.Fatalf("pending token agent_id = %q", body.AgentID)
+			}
 			writeRuntimeTestJSON(t, w, AgentTokenResponse{
-				ID: testRegistrationTokenID, Prefix: "ol_agent_demo", Status: "active_runtime", PlaintextToken: "ol_agent_plaintext",
+				ID: testRegistrationTokenID, Prefix: "ol_agent_demo", Status: "pending_registration", PlaintextToken: "ol_agent_plaintext",
+			})
+		case "POST /api/v1/agent-registration/agents":
+			if request.Header.Get("Authorization") != "Bearer ol_agent_plaintext" {
+				t.Fatalf("auth = %q", request.Header.Get("Authorization"))
+			}
+			writeRuntimeTestJSON(t, w, RegisterAgentViaTokenResponse{
+				Agent:      AgentResponse{ID: testAgentID, Slug: "demo-agent", Name: "Demo Agent"},
+				AgentToken: AgentTokenResponse{ID: testRegistrationTokenID, Prefix: "ol_agent_demo", Status: "active_runtime"},
 			})
 		default:
 			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
@@ -127,31 +136,44 @@ func TestEnsureAgentReusesStoredRegistrationWithoutRedeemingTokenAgain(t *testin
 
 func TestEnsureAgentRegistrationPolicies(t *testing.T) {
 	t.Parallel()
-	var getAgentCalls atomic.Int32
 	var listTokenCalls atomic.Int32
-	var createAgentCalls atomic.Int32
 	var createTokenCalls atomic.Int32
+	var registerCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		if request.Header.Get("Authorization") != "Bearer ol_user_creator" {
-			t.Fatalf("auth = %q", request.Header.Get("Authorization"))
-		}
 		switch request.Method + " " + request.URL.Path {
-		case "GET /api/v1/creator/agents/" + testAgentID:
-			getAgentCalls.Add(1)
-			writeRuntimeTestJSON(t, w, AgentResponse{ID: testAgentID, Slug: "demo-agent", Name: "Demo Agent"})
 		case "GET /api/v1/creator/agent-tokens":
+			if request.Header.Get("Authorization") != "Bearer ol_user_creator" {
+				t.Fatalf("auth = %q", request.Header.Get("Authorization"))
+			}
 			listTokenCalls.Add(1)
 			writeRuntimeTestJSON(t, w, AgentTokenListResponse{Items: []AgentTokenResponse{{
 				ID: testRegistrationTokenID, AgentID: stringPointer(testAgentID), Status: "active_runtime",
 			}}})
-		case "POST /api/v1/creator/agents":
-			createAgentCalls.Add(1)
-			writeRuntimeTestJSON(t, w, AgentResponse{ID: testAgentID, Slug: "forced-agent", Name: "Forced Agent"})
 		case "POST /api/v1/creator/agent-tokens":
+			if request.Header.Get("Authorization") != "Bearer ol_user_creator" {
+				t.Fatalf("auth = %q", request.Header.Get("Authorization"))
+			}
 			call := createTokenCalls.Add(1)
+			var body CreateAgentTokenRequest
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			status := "active_runtime"
+			if body.AgentID == "" {
+				status = "pending_registration"
+			}
 			writeRuntimeTestJSON(t, w, AgentTokenResponse{
-				ID: testRegistrationRotatedTokenID, Prefix: "ol_agent_rotated", Status: "active_runtime",
+				ID: testRegistrationRotatedTokenID, Prefix: "ol_agent_rotated", Status: status,
 				PlaintextToken: "ol_agent_rotated_" + string(rune('0'+call)),
+			})
+		case "POST /api/v1/agent-registration/agents":
+			registerCalls.Add(1)
+			if request.Header.Get("Authorization") != "Bearer ol_agent_rotated_2" {
+				t.Fatalf("auth = %q", request.Header.Get("Authorization"))
+			}
+			writeRuntimeTestJSON(t, w, RegisterAgentViaTokenResponse{
+				Agent:      AgentResponse{ID: testAgentID, Slug: "forced-agent", Name: "Forced Agent"},
+				AgentToken: AgentTokenResponse{ID: testRegistrationRotatedTokenID, Prefix: "ol_agent_rotated", Status: "active_runtime"},
 			})
 		default:
 			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
@@ -185,9 +207,9 @@ func TestEnsureAgentRegistrationPolicies(t *testing.T) {
 	if err != nil || forced.AgentSlug != "forced-agent" {
 		t.Fatalf("forced=%#v err=%v", forced, err)
 	}
-	if getAgentCalls.Load() != 2 || listTokenCalls.Load() != 1 || createAgentCalls.Load() != 1 || createTokenCalls.Load() != 2 {
-		t.Fatalf("calls get=%d list=%d create-agent=%d create-token=%d",
-			getAgentCalls.Load(), listTokenCalls.Load(), createAgentCalls.Load(), createTokenCalls.Load())
+	if listTokenCalls.Load() != 1 || createTokenCalls.Load() != 2 || registerCalls.Load() != 1 {
+		t.Fatalf("calls list=%d create-token=%d register=%d",
+			listTokenCalls.Load(), createTokenCalls.Load(), registerCalls.Load())
 	}
 }
 

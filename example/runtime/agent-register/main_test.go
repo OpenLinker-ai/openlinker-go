@@ -31,7 +31,7 @@ func TestRunRegistersThenExecutesOneAssignment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != "success" || server.RegistrationCalls() != 3 || server.Err() != nil {
+	if result.Status != "success" || server.RegistrationCalls() != 2 || server.Err() != nil {
 		t.Fatalf("result=%#v registration calls=%d server err=%v", result, server.RegistrationCalls(), server.Err())
 	}
 }

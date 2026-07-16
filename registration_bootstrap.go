@@ -19,7 +19,7 @@ func EnsureAgent(ctx context.Context, input any, opts ...RegistrationOption) (*A
 	if err != nil {
 		return nil, err
 	}
-	if stored == nil && req.Policy == RegisterPolicyReuseExisting && req.UserToken == "" && req.AgentToken != "" && req.Name != "" {
+	if stored == nil && req.Policy == RegisterPolicyReuseExisting && req.AgentToken != "" && req.Name != "" {
 		registered, err := RegisterAgentViaToken(ctx, req.APIBase, req.AgentToken, RegisterAgentViaTokenRequest{
 			Slug: req.Slug, Name: req.Name, Description: req.Description, EndpointURL: req.EndpointURL,
 			EndpointAuthHeader: req.EndpointAuthHeader, PricePerCallCents: req.PricePerCallCents,
@@ -93,33 +93,10 @@ func (c *Client) ensureAgent(ctx context.Context, req EnsureAgentRequest, stored
 	if client.userToken == "" {
 		return nil, errors.New("openlinker: OPENLINKER_USER_TOKEN is required to create an Agent or rotate its Agent Token")
 	}
-	agent, err := client.ensureCreatorAgent(ctx, req, stored)
-	if err != nil {
-		return nil, err
+	if req.Policy == RegisterPolicyForceNew || stored == nil {
+		return client.registerNewAgent(ctx, req)
 	}
-	token, err := client.CreateAgentToken(ctx, CreateAgentTokenRequest{
-		Name: req.TokenName, AgentID: agent.ID, Scopes: req.TokenScopes, ExpiresInMinutes: req.TokenExpiresInMinutes,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if token.PlaintextToken == "" {
-		return nil, errors.New("openlinker: platform did not return Agent Token plaintext")
-	}
-	now := time.Now().UTC()
-	registeredAt := now
-	if stored != nil && !stored.RegisteredAt.IsZero() {
-		registeredAt = stored.RegisteredAt
-	}
-	registration := &AgentRegistration{
-		AgentID: agent.ID, AgentSlug: agent.Slug, AgentName: agent.Name,
-		AgentToken: token.PlaintextToken, TokenID: token.ID, TokenPrefix: token.Prefix,
-		APIBase: req.APIBase, RegisteredAt: registeredAt, UpdatedAt: now,
-	}
-	if err := saveAgentRegistration(req.Store, registration); err != nil {
-		return nil, err
-	}
-	return registration, nil
+	return client.issueRuntimeTokenForStoredAgent(ctx, req, stored)
 }
 
 func prepareEnsureAgentRequest(req EnsureAgentRequest) (EnsureAgentRequest, *AgentRegistration, error) {
@@ -223,42 +200,72 @@ func normalizeRegistrationConnectionMode(value string) string {
 	}
 }
 
-func (c *Client) ensureCreatorAgent(ctx context.Context, req EnsureAgentRequest, stored *AgentRegistration) (*AgentResponse, error) {
-	if req.Policy != RegisterPolicyForceNew && stored != nil && stored.AgentID != "" {
-		agent, err := c.GetMyAgent(ctx, stored.AgentID)
-		if err == nil {
-			return agent, nil
-		}
-		if !registrationStatus(err, http.StatusNotFound) {
-			return nil, err
-		}
-	}
-	if req.Policy != RegisterPolicyForceNew && req.Slug != "" {
-		agent, err := c.GetMyAgentBySlug(ctx, req.Slug)
-		if err == nil {
-			return agent, nil
-		}
-		if !registrationStatus(err, http.StatusNotFound) {
-			return nil, err
-		}
-	}
+func (c *Client) registerNewAgent(ctx context.Context, req EnsureAgentRequest) (*AgentRegistration, error) {
 	if req.Slug == "" || req.Name == "" {
 		return nil, errors.New("openlinker: Agent slug and name are required to create an Agent")
 	}
-	return c.CreateAgent(ctx, CreateAgentRequest{
+	pending, err := c.CreateAgentToken(ctx, CreateAgentTokenRequest{
+		Name: req.TokenName, Scopes: req.TokenScopes, ExpiresInMinutes: req.TokenExpiresInMinutes,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if pending.PlaintextToken == "" {
+		return nil, errors.New("openlinker: platform did not return pending Agent Token plaintext")
+	}
+	registered, err := c.registerAgentViaToken(ctx, pending.PlaintextToken, RegisterAgentViaTokenRequest{
 		Slug: req.Slug, Name: req.Name, Description: req.Description, EndpointURL: req.EndpointURL,
 		EndpointAuthHeader: req.EndpointAuthHeader, PricePerCallCents: req.PricePerCallCents,
-		Tags: req.Tags, SkillIDs: req.SkillIDs, Visibility: req.Visibility,
+		Tags: req.Tags, AbilityTags: req.Tags, SkillIDs: req.SkillIDs, Visibility: req.Visibility,
 		ConnectionMode: req.ConnectionMode, MCPToolName: req.MCPToolName,
 	})
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	registration := &AgentRegistration{
+		AgentID: registered.Agent.ID, AgentSlug: registered.Agent.Slug, AgentName: registered.Agent.Name,
+		AgentToken: pending.PlaintextToken, TokenID: registered.AgentToken.ID, TokenPrefix: registered.AgentToken.Prefix,
+		APIBase: req.APIBase, RegisteredAt: now, UpdatedAt: now,
+	}
+	if err := saveAgentRegistration(req.Store, registration); err != nil {
+		return nil, err
+	}
+	return registration, nil
+}
+
+func (c *Client) issueRuntimeTokenForStoredAgent(ctx context.Context, req EnsureAgentRequest, stored *AgentRegistration) (*AgentRegistration, error) {
+	if stored == nil || stored.AgentID == "" {
+		return nil, errors.New("openlinker: stored Agent ID is required to rotate or recreate an Agent Token")
+	}
+	token, err := c.CreateAgentToken(ctx, CreateAgentTokenRequest{
+		Name: req.TokenName, AgentID: stored.AgentID, Scopes: req.TokenScopes, ExpiresInMinutes: req.TokenExpiresInMinutes,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if token.PlaintextToken == "" {
+		return nil, errors.New("openlinker: platform did not return Agent Token plaintext")
+	}
+	now := time.Now().UTC()
+	registeredAt := stored.RegisteredAt
+	if registeredAt.IsZero() {
+		registeredAt = now
+	}
+	registration := &AgentRegistration{
+		AgentID: stored.AgentID, AgentSlug: firstNonEmpty(req.Slug, stored.AgentSlug), AgentName: firstNonEmpty(req.Name, stored.AgentName),
+		AgentToken: token.PlaintextToken, TokenID: token.ID, TokenPrefix: token.Prefix,
+		APIBase: req.APIBase, RegisteredAt: registeredAt, UpdatedAt: now,
+	}
+	if err := saveAgentRegistration(req.Store, registration); err != nil {
+		return nil, err
+	}
+	return registration, nil
 }
 
 func (c *Client) validateStoredAgent(ctx context.Context, stored *AgentRegistration) (bool, error) {
 	if stored == nil || stored.AgentID == "" || stored.TokenID == "" {
 		return false, nil
-	}
-	if _, err := c.GetMyAgent(ctx, stored.AgentID); err != nil {
-		return false, err
 	}
 	tokens, err := c.ListAgentTokens(ctx, ListAgentTokensParams{AgentID: stored.AgentID, Limit: 50})
 	if err != nil {

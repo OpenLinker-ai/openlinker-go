@@ -95,7 +95,7 @@ func (server *Server) fail(w http.ResponseWriter, err error) {
 }
 
 func (server *Server) ServeHTTP(w http.ResponseWriter, request *http.Request) {
-	if strings.HasPrefix(request.URL.Path, "/api/v1/creator/") {
+	if strings.HasPrefix(request.URL.Path, "/api/v1/creator/") || request.URL.Path == "/api/v1/agent-registration/agents" {
 		server.serveRegistration(w, request)
 		return
 	}
@@ -227,13 +227,21 @@ func (server *Server) serveRegistration(w http.ResponseWriter, request *http.Req
 	server.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	switch request.Method + " " + request.URL.Path {
-	case "GET /api/v1/creator/agents/by-slug/example-register-agent":
-		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`{"error":{"code":"NOT_FOUND","message":"missing"}}`))
-	case "POST /api/v1/creator/agents":
-		writeJSON(w, openlinker.AgentResponse{ID: AgentID, Slug: "example-register-agent", Name: "Example Register Agent"})
 	case "POST /api/v1/creator/agent-tokens":
-		writeJSON(w, openlinker.AgentTokenResponse{ID: TargetAgentID, Prefix: "ol_agent_example", Status: "active_runtime", PlaintextToken: AgentToken})
+		if request.Header.Get("Authorization") != "Bearer "+UserToken {
+			server.fail(w, fmt.Errorf("unexpected User Token authorization %q", request.Header.Get("Authorization")))
+			return
+		}
+		writeJSON(w, openlinker.AgentTokenResponse{ID: TargetAgentID, Prefix: "ol_agent_example", Status: "pending_registration", PlaintextToken: AgentToken})
+	case "POST /api/v1/agent-registration/agents":
+		if request.Header.Get("Authorization") != "Bearer "+AgentToken {
+			server.fail(w, fmt.Errorf("unexpected Agent Token authorization %q", request.Header.Get("Authorization")))
+			return
+		}
+		writeJSON(w, openlinker.RegisterAgentViaTokenResponse{
+			Agent:      openlinker.AgentResponse{ID: AgentID, Slug: "example-register-agent", Name: "Example Register Agent"},
+			AgentToken: openlinker.AgentTokenResponse{ID: TargetAgentID, Prefix: "ol_agent_example", Status: "active_runtime"},
+		})
 	default:
 		server.fail(w, fmt.Errorf("unexpected registration request %s %s", request.Method, request.URL.Path))
 	}

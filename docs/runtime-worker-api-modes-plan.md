@@ -191,7 +191,10 @@
     - [x] `openlinker-agent-layout` 已迁移到 `Native(agent.Handle)`，本地全量测试通过；已移除 vendor，RC 发布前仅保留临时本地 replace。
     - [x] 新增 `v0.2.0-rc.1` 中文发布/验证清单，并补齐 CHANGELOG 的默认值、breaking、兼容和回滚信息。
     - [x] 对照本地 `openlinker-core main` 完成 contract、路由、注册 connection mode 和定向测试核对；记录见 `runtime-core-compatibility.zh-CN.md`。
-    - [x] SDK `go test` / race / vet、example module test / vet、layout test / vet 与 Core 定向测试全部通过；真实测试环境 smoke test 留在 RC 发布门槛。
+    - [x] SDK `go test` / race / vet、example module test / vet、layout test / vet 与 Core 定向测试全部通过。
+    - [x] 开发环境真实 smoke 已完成：User Token 两步自注册、Runtime Node mTLS、HTTP transport、`TransportAuto` WebSocket、assignment/Event/Result 和两笔成功 layout Run。
+    - [x] 验证 Core `hard_maintenance` 期间 Session 503，以及 reopen 后 SDK supervisor 无需重启自动恢复。
+    - [ ] 补充运行中 cancel 与进程重启后的 spool/resume 真实验证。
     - [ ] 获得明确确认后创建并推送 `v0.2.0-rc.1`；发布后删除 layout 临时 replace 并以正常 Go module 依赖复验。
     - [ ] 收集 RC 反馈后发布 `v0.2.0`。
     - `openlinker-agent-node` 实施迁移按用户要求不在本轮修改，保留为后续独立工作；本 Item 不以修改该仓库作为当前执行范围。

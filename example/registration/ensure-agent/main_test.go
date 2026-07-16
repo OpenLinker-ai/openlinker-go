@@ -23,33 +23,36 @@ func TestRunCreatesThenReusesStoredRegistration(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		calls.Add(1)
-		if request.Header.Get("Authorization") != "Bearer ol_user_example" {
-			t.Fatalf("Authorization = %q", request.Header.Get("Authorization"))
-		}
 		w.Header().Set("Content-Type", "application/json")
 		switch request.Method + " " + request.URL.Path {
-		case "GET /api/v1/creator/agents/by-slug/demo-agent":
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"error":{"code":"NOT_FOUND","message":"missing"}}`))
-		case "POST /api/v1/creator/agents":
-			var body openlinker.CreateAgentRequest
-			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
-				t.Fatal(err)
-			}
-			if body.Slug != "demo-agent" || body.Visibility != "private" || body.ConnectionMode != "runtime" {
-				t.Fatalf("agent body = %#v", body)
-			}
-			_ = json.NewEncoder(w).Encode(openlinker.AgentResponse{ID: agentID, Slug: "demo-agent", Name: "Demo Agent"})
 		case "POST /api/v1/creator/agent-tokens":
+			if request.Header.Get("Authorization") != "Bearer ol_user_example" {
+				t.Fatalf("Authorization = %q", request.Header.Get("Authorization"))
+			}
 			var body openlinker.CreateAgentTokenRequest
 			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 				t.Fatal(err)
 			}
-			if body.AgentID != agentID || len(body.Scopes) != 2 {
+			if body.AgentID != "" || len(body.Scopes) != 2 {
 				t.Fatalf("token body = %#v", body)
 			}
 			_ = json.NewEncoder(w).Encode(openlinker.AgentTokenResponse{
-				ID: tokenID, Prefix: "ol_agent_demo", Status: "active_runtime", PlaintextToken: "ol_agent_plaintext",
+				ID: tokenID, Prefix: "ol_agent_demo", Status: "pending_registration", PlaintextToken: "ol_agent_plaintext",
+			})
+		case "POST /api/v1/agent-registration/agents":
+			if request.Header.Get("Authorization") != "Bearer ol_agent_plaintext" {
+				t.Fatalf("Authorization = %q", request.Header.Get("Authorization"))
+			}
+			var body openlinker.RegisterAgentViaTokenRequest
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Slug != "demo-agent" || body.Visibility != "private" || body.ConnectionMode != "runtime" {
+				t.Fatalf("registration body = %#v", body)
+			}
+			_ = json.NewEncoder(w).Encode(openlinker.RegisterAgentViaTokenResponse{
+				Agent:      openlinker.AgentResponse{ID: agentID, Slug: "demo-agent", Name: "Demo Agent"},
+				AgentToken: openlinker.AgentTokenResponse{ID: tokenID, Prefix: "ol_agent_demo", Status: "active_runtime"},
 			})
 		default:
 			t.Fatalf("unexpected request %s %s", request.Method, request.URL.Path)
@@ -72,8 +75,8 @@ func TestRunCreatesThenReusesStoredRegistration(t *testing.T) {
 	if err := run(context.Background(), reuseConfig, &secondOutput); err != nil {
 		t.Fatal(err)
 	}
-	if calls.Load() != 3 {
-		t.Fatalf("HTTP calls = %d, want 3", calls.Load())
+	if calls.Load() != 2 {
+		t.Fatalf("HTTP calls = %d, want 2", calls.Load())
 	}
 	if strings.Contains(firstOutput.String(), "ol_agent_plaintext") || !strings.Contains(firstOutput.String(), `"token_prefix": "ol_agent_demo"`) {
 		t.Fatalf("unsafe output = %s", firstOutput.String())

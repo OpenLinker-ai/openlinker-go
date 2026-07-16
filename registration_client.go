@@ -98,17 +98,27 @@ func RegisterAgentViaToken(
 	if agentToken == "" {
 		return nil, errors.New("openlinker: Agent Token is required for registration")
 	}
-	opts = append(opts, WithAgentToken(agentToken))
-	client, err := newClient(baseURL, true, opts...)
+	client, err := newClient(baseURL, false, opts...)
 	if err != nil {
 		return nil, err
+	}
+	return client.registerAgentViaToken(ctx, agentToken, req)
+}
+
+func (c *Client) registerAgentViaToken(ctx context.Context, agentToken string, req RegisterAgentViaTokenRequest) (*RegisterAgentViaTokenResponse, error) {
+	if c == nil {
+		return nil, errors.New("openlinker: client is nil")
+	}
+	agentToken = strings.TrimSpace(agentToken)
+	if agentToken == "" {
+		return nil, errors.New("openlinker: Agent Token is required for registration")
 	}
 	if req.Visibility == "" {
 		req.Visibility = "private"
 	}
 	req.ConnectionMode = normalizeRegistrationConnectionMode(req.ConnectionMode)
 	var out RegisterAgentViaTokenResponse
-	response, err := client.newRequestWithToken(ctx, http.MethodPost, "/agent-registration/agents", nil, req, "application/json", agentToken)
+	response, err := c.newRequestWithToken(ctx, http.MethodPost, "/agent-registration/agents", nil, req, "application/json", agentToken)
 	if err != nil {
 		return nil, err
 	}

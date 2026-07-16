@@ -20,7 +20,7 @@ export OPENLINKER_AGENT_TAGS='agent,runtime,demo'                   # 可选
 go run ./registration/ensure-agent
 ```
 
-第一次运行时，`EnsureAgent` 会按 slug 查找 Agent；不存在时创建 Agent 和 Runtime Token。注册结果默认保存在：
+第一次运行时，`EnsureAgent` 会使用 User Token 创建短期 `pending_registration` Agent Token，再通过公开 Agent 注册端点原子创建 Agent，并把同一枚 Token 兑换为 Runtime Token。它不会使用 User Token 调用只接受网页登录 JWT 的 Agent 管理路由。注册结果默认保存在：
 
 ```text
 .openlinker/registration.env
