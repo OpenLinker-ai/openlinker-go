@@ -13,11 +13,17 @@ This SDK is pre-1.0. The package tracks the Core API and runtime contracts while
 they are still stabilizing. Pin versions or commits and review `CHANGELOG.md`
 before upgrading.
 
+The SDK wraps the public Core contract in self-hosted and Hosted deployments.
+Hosted authentication, service listings, orders, wallets, billing, and
+marketplace-operation APIs are intentionally outside this package.
+
 ## Install
 
 ```bash
-go get github.com/OpenLinker-ai/openlinker-go
+go get github.com/OpenLinker-ai/openlinker-go@v0.x.y
 ```
+
+Replace `v0.x.y` with a release you have pinned.
 
 For local development inside the parent OpenLinker workspace, use this package
 directory directly.
@@ -28,6 +34,8 @@ The Go SDK keeps caller and Runtime credentials separate. `NewClient` wraps
 User Token platform calls. `NewRuntimeWorker` discovers the dedicated mTLS
 Runtime origin and owns delivery, recovery, and durable state. Process-level
 HTTP, command, Codex, and A2A adapters belong in `openlinker-agent-node`.
+The `mcp_server` value describes how Core reaches an Agent; this SDK does not
+currently expose a separate MCP protocol client.
 
 ```mermaid
 flowchart LR
@@ -38,7 +46,7 @@ flowchart LR
   AgentNode["openlinker-agent-node<br/>optional Adapter shell"] --> RuntimeSDK
   RuntimeSDK -->|"mTLS + Agent Token / WebSocket or HTTP long-poll"| Core
 
-  HostedBridge["Hosted Bridge<br/>optional deployment adapter"] -.->|"same Core API contract"| Core
+  HostedBridge["Hosted execution bridge<br/>outside this SDK"] -.->|"protected Core execution APIs"| Core
 
   Core -->|"direct_http"| HTTPAgent["Public HTTPS Agent"]
   Core -->|"mcp_server"| MCPAgent["Remote MCP / JSON-RPC server"]

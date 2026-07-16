@@ -7,7 +7,8 @@ English documentation: [RELEASE.md](./RELEASE.md)
 
 ## 发布前检查
 
-1. 确认 `README.md`、`CONTRIBUTING.md`、`SECURITY.md`、`SUPPORT.md`、contracts、
+1. 确认 `README.md` 与 `README.zh-CN.md` 对 Core/Hosted、Client/Runtime 和 Agent Node
+   Adapter 边界的描述一致，并确认 `CONTRIBUTING`、`SECURITY`、`SUPPORT`、contracts、
    protobuf 文件和示例是最新的。
 2. 确认 `CHANGELOG.md` 描述了公共 API 变化、兼容性说明和 Core 版本假设。
 3. 运行 `gofmt -w .`。

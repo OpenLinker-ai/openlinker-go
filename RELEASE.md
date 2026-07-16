@@ -7,8 +7,9 @@ pass. Public SDK releases should use semantic version tags.
 
 ## Pre-Release Checklist
 
-1. Confirm `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md`,
-   contracts, protobuf files, and examples are current.
+1. Confirm `README.md` and `README.zh-CN.md` describe the same Core/Hosted,
+   Client/Runtime, and Agent Node Adapter boundaries, and that `CONTRIBUTING`,
+   `SECURITY`, `SUPPORT`, contracts, protobuf files, and examples are current.
 2. Confirm `CHANGELOG.md` describes public API changes, compatibility notes,
    and any Core version assumptions.
 3. Run `gofmt -w .`.
