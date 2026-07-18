@@ -85,7 +85,15 @@ func TestRunAgentEncodesRequestBody(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
 			t.Fatal(err)
 		}
-		writeJSON(t, w, RunResponse{RunID: "run-1", Status: "success", CostCents: 0, DurationMS: 12})
+		writeJSON(t, w, RunResponse{
+			RunID: "run-1", AgentID: "00000000-0000-0000-0000-000000000001",
+			AgentSlug: "runtime-agent", AgentName: "Runtime Agent", AgentConnectionMode: "runtime",
+			Status: "success", CostCents: 0, DurationMS: 12,
+			StartedAt: "2026-07-18T00:00:00Z", FinishedAt: "2026-07-18T00:00:01Z", Source: "api",
+			RuntimeContractID: "openlinker.runtime.v2", RuntimeTransport: "websocket",
+			RuntimeTransportReason: "recovery", RuntimeTransportChangedAt: "2026-07-18T00:00:00Z",
+			DispatchState: "terminal", AttemptCount: 1, MaxAttempts: 3, LatestAttemptID: "attempt-1",
+		})
 	}))
 	defer server.Close()
 
@@ -111,8 +119,18 @@ func TestRunAgentEncodesRequestBody(t *testing.T) {
 	if resp.RunID != "run-1" {
 		t.Fatalf("run id = %q", resp.RunID)
 	}
+	if resp.AgentConnectionMode != "runtime" || resp.RuntimeTransport != "websocket" ||
+		resp.RuntimeTransportReason != "recovery" || resp.DispatchState != "terminal" || resp.AttemptCount != 1 {
+		t.Fatalf("run execution evidence = %#v", resp)
+	}
 	if got["agent_id"] != "00000000-0000-0000-0000-000000000001" {
 		t.Fatalf("agent_id = %#v", got["agent_id"])
+	}
+	if _, ok := got["agent_connection_mode"]; ok {
+		t.Fatalf("run request must not select Agent connection mode: %#v", got)
+	}
+	if _, ok := got["runtime_transport"]; ok {
+		t.Fatalf("run request must not select Runtime transport: %#v", got)
 	}
 	if got["input"].(map[string]any)["query"] != "hello" {
 		t.Fatalf("input = %#v", got["input"])

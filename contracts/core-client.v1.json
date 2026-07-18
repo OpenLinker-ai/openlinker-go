@@ -63,6 +63,17 @@
         "Location",
         "Idempotency-Replayed"
       ],
+      "response_fields": [
+        "agent_connection_mode",
+        "runtime_transport",
+        "runtime_transport_reason",
+        "runtime_transport_changed_at",
+        "dispatch_state",
+        "attempt_count",
+        "max_attempts",
+        "started_at",
+        "replayed"
+      ],
       "source": "openlinker-core/pkg/runtime/handler.go"
     },
     {
@@ -83,6 +94,17 @@
         "Location",
         "Idempotency-Replayed"
       ],
+      "response_fields": [
+        "agent_connection_mode",
+        "runtime_transport",
+        "runtime_transport_reason",
+        "runtime_transport_changed_at",
+        "dispatch_state",
+        "attempt_count",
+        "max_attempts",
+        "started_at",
+        "replayed"
+      ],
       "source": "openlinker-core/pkg/runtime/handler.go"
     },
     {
@@ -91,6 +113,17 @@
       "path": "/api/v1/runs/{id}",
       "auth": "access_token",
       "required_scope": "runs:read",
+      "response_fields": [
+        "agent_connection_mode",
+        "runtime_transport",
+        "runtime_transport_reason",
+        "runtime_transport_changed_at",
+        "dispatch_state",
+        "attempt_count",
+        "max_attempts",
+        "started_at",
+        "replayed"
+      ],
       "source": "openlinker-core/pkg/runtime/handler.go"
     },
     {
