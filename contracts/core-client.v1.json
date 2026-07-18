@@ -132,7 +132,34 @@
       "path": "/api/v1/runs/{id}/events",
       "auth": "access_token",
       "required_scope": "runs:read",
+      "response_fields": [
+        "items",
+        "meta.requested_after_sequence",
+        "meta.effective_after_sequence",
+        "meta.retained_through_sequence",
+        "meta.earliest_available_sequence",
+        "meta.latest_available_sequence",
+        "meta.retention_gap",
+        "meta.terminal",
+        "meta.stream_complete"
+      ],
       "source": "openlinker-core/pkg/runtime/handler.go"
+    },
+    {
+      "client_method": "listRunChildren",
+      "http_method": "GET",
+      "path": "/api/v1/runs/{id}/children",
+      "auth": "access_token",
+      "required_scope": "runs:read",
+      "response_fields": [
+        "parent_run_id",
+        "items[].child_run_id",
+        "items[].caller_agent_id",
+        "items[].target_agent_id",
+        "items[].status",
+        "items[].children"
+      ],
+      "source": "openlinker-core/pkg/a2a/handler.go"
     },
     {
       "client_method": "listRunArtifacts",
