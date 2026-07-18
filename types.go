@@ -235,12 +235,38 @@ type RunEventPageMeta struct {
 }
 
 type RunChildResponse struct {
-	ChildRunID string `json:"child_run_id"`
-	Status     string `json:"status"`
+	ChildRunID      string             `json:"child_run_id"`
+	ParentRunID     string             `json:"parent_run_id"`
+	CallerAgentID   string             `json:"caller_agent_id"`
+	CallerAgentSlug string             `json:"caller_agent_slug"`
+	CallerAgentName string             `json:"caller_agent_name"`
+	CallerAgentTags []string           `json:"caller_agent_tags"`
+	CallerSkills    []RunSkillRef      `json:"caller_skills"`
+	TargetAgentID   string             `json:"target_agent_id"`
+	TargetAgentSlug string             `json:"target_agent_slug"`
+	TargetAgentName string             `json:"target_agent_name"`
+	TargetAgentTags []string           `json:"target_agent_tags"`
+	TargetSkills    []RunSkillRef      `json:"target_skills"`
+	Reason          string             `json:"reason"`
+	Status          string             `json:"status"`
+	CostCents       int32              `json:"cost_cents"`
+	DurationMS      *int32             `json:"duration_ms,omitempty"`
+	StartedAt       string             `json:"started_at"`
+	FinishedAt      *string            `json:"finished_at,omitempty"`
+	Source          string             `json:"source"`
+	BillingMode     string             `json:"billing_mode"`
+	A2AContext      *RunA2AContext     `json:"a2a_context,omitempty"`
+	Children        []RunChildResponse `json:"children,omitempty"`
+}
+
+type RunSkillRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type ListRunChildrenResponse struct {
-	Items []RunChildResponse `json:"items"`
+	ParentRunID string             `json:"parent_run_id"`
+	Items       []RunChildResponse `json:"items"`
 }
 
 type RunEventResponse struct {

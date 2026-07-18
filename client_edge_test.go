@@ -55,6 +55,36 @@ func TestClientResourceMethodsUseHeadersAndPaths(t *testing.T) {
 					StreamComplete:            true,
 				},
 			})
+		case "/api/v1/runs/run-1/children":
+			duration := int32(25)
+			finishedAt := "2026-07-18T10:00:01Z"
+			writeJSON(t, w, ListRunChildrenResponse{
+				ParentRunID: "run-1",
+				Items: []RunChildResponse{{
+					ChildRunID:      "child-1",
+					ParentRunID:     "run-1",
+					CallerAgentID:   "caller-1",
+					CallerAgentSlug: "caller",
+					CallerAgentName: "Caller",
+					CallerAgentTags: []string{"orchestrator"},
+					CallerSkills:    []RunSkillRef{{ID: "skill-1", Name: "Plan"}},
+					TargetAgentID:   "target-1",
+					TargetAgentSlug: "target",
+					TargetAgentName: "Target",
+					TargetAgentTags: []string{"worker"},
+					TargetSkills:    []RunSkillRef{{ID: "skill-2", Name: "Execute"}},
+					Reason:          "delegate",
+					Status:          "success",
+					CostCents:       3,
+					DurationMS:      &duration,
+					StartedAt:       "2026-07-18T10:00:00Z",
+					FinishedAt:      &finishedAt,
+					Source:          "api",
+					BillingMode:     "caller",
+					A2AContext:      &RunA2AContext{ProtocolContextID: "context-1"},
+					Children:        []RunChildResponse{},
+				}},
+			})
 		case "/api/v1/runs/run-1/artifacts":
 			writeJSON(t, w, ListItemsResponse[RunArtifactResponse]{Items: []RunArtifactResponse{{ID: "artifact-1", RunID: "run-1"}}})
 		case "/api/v1/runs/run-1/messages":
@@ -95,6 +125,13 @@ func TestClientResourceMethodsUseHeadersAndPaths(t *testing.T) {
 		events.Meta.RetentionGap || !events.Meta.Terminal || !events.Meta.StreamComplete {
 		t.Fatalf("ListRunEvents = %+v err=%v", events, err)
 	}
+	if children, err := client.ListRunChildren(ctx, "run-1"); err != nil ||
+		children.ParentRunID != "run-1" || len(children.Items) != 1 ||
+		children.Items[0].CallerAgentSlug != "caller" || children.Items[0].TargetAgentSlug != "target" ||
+		children.Items[0].DurationMS == nil || *children.Items[0].DurationMS != 25 ||
+		children.Items[0].A2AContext == nil || children.Items[0].A2AContext.ProtocolContextID != "context-1" {
+		t.Fatalf("ListRunChildren = %+v err=%v", children, err)
+	}
 	if artifacts, err := client.ListRunArtifacts(ctx, "run-1"); err != nil || len(artifacts.Items) != 1 {
 		t.Fatalf("ListRunArtifacts = %+v err=%v", artifacts, err)
 	}
@@ -102,7 +139,7 @@ func TestClientResourceMethodsUseHeadersAndPaths(t *testing.T) {
 		t.Fatalf("ListRunMessages = %+v err=%v", messages, err)
 	}
 
-	if len(calls) != 7 {
+	if len(calls) != 8 {
 		t.Fatalf("calls len = %d", len(calls))
 	}
 	for _, call := range calls {
