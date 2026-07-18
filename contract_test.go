@@ -24,6 +24,7 @@ func TestCoreClientV1ContractMapsToImplementedMethods(t *testing.T) {
 			RequiredHeaders []string `json:"required_headers"`
 			SuccessStatuses []int    `json:"success_statuses"`
 			ResponseHeaders []string `json:"response_headers"`
+			ResponseFields  []string `json:"response_fields"`
 		} `json:"endpoints"`
 	}
 	if err := json.Unmarshal(raw, &contract); err != nil {
@@ -60,6 +61,11 @@ func TestCoreClientV1ContractMapsToImplementedMethods(t *testing.T) {
 			for _, header := range []string{"Location", "Idempotency-Replayed"} {
 				if !slices.Contains(endpoint.ResponseHeaders, header) {
 					t.Fatalf("%s contract missing response header %s", endpoint.ClientMethod, header)
+				}
+			}
+			for _, field := range []string{"agent_connection_mode", "runtime_transport", "dispatch_state", "attempt_count", "started_at", "replayed"} {
+				if !slices.Contains(endpoint.ResponseFields, field) {
+					t.Fatalf("%s contract missing response field %s", endpoint.ClientMethod, field)
 				}
 			}
 		}
