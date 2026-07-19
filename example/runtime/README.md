@@ -1,34 +1,37 @@
-# Runtime 示例
+# Runtime examples
 
-第一次运行任何 Runtime 示例前，先完成
-[《从零运行一个 RuntimeWorker：完整操作手册》](../../docs/runtime-worker-end-to-end.zh-CN.md)
-中的 Agent 身份、Runtime Node、mTLS、真实 Run、cancel 和重启验证。
+[简体中文](README.zh-CN.md)
 
-Runtime 示例按照 API 层级组织，而不是按照 HTTP/WebSocket 传输方式组织：
+Before running a Runtime example for the first time, follow
+[the RuntimeWorker operations guide](../../runtime-worker-end-to-end.md) to
+prepare the Agent, Runtime Node, mTLS files, a real Run, cancellation, and
+restart checks.
 
-- `agent-generic`：极简 `WithAgent(...).Run()`，普通 Agent 的推荐入口。
-- `agent-register`：显式 `RunOrRegister` / `WithRegistration`。
-- `native-events`：Native handler、MessageDelta、Emit、Progress 和 Result helper。
-- `native-delegation`：assignment-scoped Agent-to-Agent delegation。
-- `worker-managed`：自定义 Store、capacity、logger 和 transport mode。
-- `protocol-http`：底层 Runtime v2 HTTP 原语。
-- `protocol-websocket`：底层 Runtime v2 WebSocket 原语。
+Examples are organized by API level, not by network transport:
 
-普通 Agent 项目应从 `agent-generic` 开始；底层 protocol 示例不会替开发者管理 session、lease、spool、resume 和 reconnect。
+- `agent-generic`: smallest `WithAgent(...).Run()` entry for a normal Agent;
+- `agent-register`: explicit `RunOrRegister` and `WithRegistration`;
+- `native-events`: Native handler, message, progress, Event, and Result helpers;
+- `native-delegation`: call another Agent with the current task's capability;
+- `worker-managed`: custom store, capacity, logger, and transport;
+- `protocol-http`: low-level Runtime HTTP methods;
+- `protocol-websocket`: low-level Runtime WebSocket messages.
 
-## 运行顺序
+Start with `agent-generic` unless you are building a framework or Runtime
+infrastructure. Low-level protocol examples do not manage Session, lease,
+journal, retry, or reconnect for you.
 
-| 目录 | 适用对象 | 核心 API | 推荐程度 |
-|---|---|---|---|
-| `agent-generic` | 普通 Agent | `WithAgent(...).Run()` | 首选 |
-| `agent-register` | 首次部署、本地 Demo | `RunOrRegister` | 显式需要注册时使用 |
-| `native-events` | Agent 框架 | `Native`、MessageDelta、Progress、Emit | 高级 |
-| `native-delegation` | 多 Agent 框架 | assignment-scoped `CallAgent` | 高级 |
-| `worker-managed` | Agent Node/daemon | `NewRuntimeWorker` | 基础设施 |
-| `protocol-http` | 协议实现者 | Runtime HTTP primitives | 不适合普通 Agent |
-| `protocol-websocket` | 协议实现者 | Runtime WebSocket primitives | 不适合普通 Agent |
+| Directory | Intended user | Main API |
+| --- | --- | --- |
+| `agent-generic` | Normal Agent | `WithAgent(...).Run()` |
+| `agent-register` | First deployment or local demo | `RunOrRegister` |
+| `native-events` | Agent framework | `Native`, message, progress, Event |
+| `native-delegation` | Multi-Agent framework | task-scoped `CallAgent` |
+| `worker-managed` | Agent Node or daemon | `NewRuntimeWorker` |
+| `protocol-http` | Protocol implementer | Runtime HTTP methods |
+| `protocol-websocket` | Protocol implementer | Runtime WebSocket messages |
 
-Runtime 示例通用环境变量：
+Common settings:
 
 ```bash
 export OPENLINKER_RUNTIME_BASE=https://runtime.openlinker.ai
@@ -40,7 +43,9 @@ export OPENLINKER_NODE_KEY_FILE=/run/openlinker/node.key
 export OPENLINKER_RUNTIME_CA_FILE=/run/openlinker/runtime-ca.crt
 ```
 
-注册运行还需要 `OPENLINKER_API_BASE`，首次运行需要 `OPENLINKER_USER_TOKEN`。Native delegation 额外需要 `OPENLINKER_TARGET_AGENT_ID`。
+Registration also needs `OPENLINKER_API_BASE`; first registration needs
+`OPENLINKER_USER_TOKEN`. Native delegation additionally needs
+`OPENLINKER_TARGET_AGENT_ID`.
 
 ```bash
 go run ./runtime/agent-register
@@ -49,15 +54,18 @@ go run ./runtime/native-delegation
 go run ./runtime/worker-managed
 ```
 
-底层协议示例只 claim 并明确 reject assignment，避免示例在没有 durable journal 的情况下 ACK 后执行任务：
+The protocol examples claim and explicitly reject a task. This avoids running
+business work after an ACK without a durable journal:
 
 ```bash
 go run ./runtime/protocol-http
 go run ./runtime/protocol-websocket
 ```
 
-生产协议实现必须自行保证稳定 Worker/Session identity、assignment journal、lease、Event/Result ID、spool、resume、cancel 和 reconnect。普通 Agent 不应复制底层示例作为运行框架。
+A production protocol implementation must provide stable Worker and Session
+identity, assignment journal, lease renewal, Event/Result IDs, durable pending
+delivery, resume, cancellation, and reconnect. Normal Agents should use the
+high-level worker instead of copying protocol examples.
 
-## 离线验证
-
-高层 Runtime 测试通过本地 fake Core 走完整 Session、claim、assignment ACK、Event、Result、delegation 和 close 生命周期；HTTP/WebSocket protocol 示例分别使用本地协议服务器，不连接真实 Core。
+Offline tests use a fake Core or local protocol server and do not contact a
+real deployment.
