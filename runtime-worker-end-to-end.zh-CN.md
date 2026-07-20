@@ -1,5 +1,7 @@
 # 从零运行一个 RuntimeWorker：完整操作手册
 
+[English](runtime-worker-end-to-end.md)
+
 本文是 `openlinker-go` 中运行 Managed `RuntimeWorker` 的端到端操作手册，覆盖平台资源、
 Runtime Node、mTLS、Agent 身份、SDK 代码、持久化、真实调用、cancel、重启和 K8s 部署。
 
@@ -603,9 +605,7 @@ terminationGracePeriodSeconds: 90
 
 ## 17. 相关文档和示例
 
-- [RuntimeWorker 配置与默认行为](./runtime-worker-configuration.zh-CN.md)
-- [RuntimeWorker 生命周期](./runtime-worker-lifecycle.zh-CN.md)
-- [RuntimeWorker supervisor](./runtime-worker-supervisor.zh-CN.md)
-- [TransportAuto](./runtime-worker-transport-auto.zh-CN.md)
-- [Runtime API 分层](./runtime-api-modes.zh-CN.md)
-- [Managed RuntimeWorker 示例](../example/runtime/worker-managed)
+- [Runtime 示例总览](./example/runtime/README.zh-CN.md)
+- [极简 Agent 示例](./example/runtime/agent-generic/README.zh-CN.md)
+- [Managed RuntimeWorker 示例](./example/runtime/worker-managed/README.zh-CN.md)
+- [SDK 中文 README](./README.zh-CN.md)

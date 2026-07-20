@@ -1,20 +1,23 @@
-# OpenLinker 极简 Agent
+# Smallest OpenLinker Agent
 
-这个示例只演示最简单、也是普通 Agent 推荐使用的 SDK 入口：
+[简体中文](README.zh-CN.md)
+
+This is the recommended SDK entry for a normal Agent:
 
 ```go
 openlinker.WithAgent(agent).Run(ctx)
 ```
 
-Agent 只需要实现：
+The Agent implements only:
 
 ```go
 Run(context.Context, string) (string, error)
 ```
 
-环境配置、mTLS、Runtime session、assignment、lease、spool、resume、重连以及 Result 映射都由 SDK 管理。
+The SDK manages environment configuration, mTLS, Runtime Session, tasks,
+leases, durable pending delivery, resume, reconnect, and Result mapping.
 
-## 运行
+## Run
 
 ```bash
 OPENLINKER_API_BASE=https://api.openlinker.ai \
@@ -28,62 +31,43 @@ OPENLINKER_RUNTIME_TRANSPORT=auto \
 go run ./runtime/agent-generic
 ```
 
-以上命令需要在共享 module 根目录 `example/` 中执行。需要强制 WebSocket 时：
+Run the command from the shared `example/` module. To require WebSocket:
 
 ```bash
 OPENLINKER_RUNTIME_TRANSPORT=ws go run ./runtime/agent-generic
 ```
 
-## 可选 Agent 配置
+## Agent settings
 
-| 环境变量 | 默认值 | 说明 |
+| Variable | Default | Meaning |
 | --- | --- | --- |
-| `GENERIC_AGENT_NAME` | `Generic Agent` | 文本响应中使用的 Agent 名称。 |
-| `GENERIC_AGENT_PREFIX` | 空 | 设置后返回 `<prefix> <input>`。 |
-| `GENERIC_AGENT_PANIC` | `false` | 设置为 `1` 或 `true`，用于测试 SDK 的 panic recovery。 |
+| `GENERIC_AGENT_NAME` | `Generic Agent` | Agent name included in the text response. |
+| `GENERIC_AGENT_PREFIX` | empty | Return `<prefix> <input>` when set. |
+| `GENERIC_AGENT_PANIC` | `false` | Set to `1` or `true` to test panic recovery. |
 
-## OpenLinker Runtime 配置
+## Runtime settings
 
-| 环境变量 | 默认值 | 说明 |
+| Variable | Default | Meaning |
 | --- | --- | --- |
-| `OPENLINKER_NODE_ID` | 必填 | 已注册的 Node UUID。 |
-| `OPENLINKER_AGENT_ID` | 必填 | Agent UUID。 |
-| `OPENLINKER_AGENT_TOKEN` | 必填 | Agent Runtime credential。 |
-| `OPENLINKER_API_BASE` | 未显式配置 Runtime base 时必填 | 用于发现 Runtime endpoint 的平台地址。 |
-| `OPENLINKER_RUNTIME_BASE` | 空 | 显式覆盖 Runtime endpoint。 |
-| `OPENLINKER_RUNTIME_DATA_DIR` | `.openlinker/runtime-<agent-id>` | 加密 identity、journal 和 spool 目录。 |
-| `OPENLINKER_RUNTIME_TRANSPORT` | `auto` | 支持 `auto`、`ws` 或 `pull`。 |
-| `OPENLINKER_NODE_CERT_FILE` | 必填 | Node mTLS 证书。 |
-| `OPENLINKER_NODE_KEY_FILE` | 必填 | Node mTLS 私钥。 |
-| `OPENLINKER_RUNTIME_CA_FILE` | 必填 | Runtime 服务端 CA。 |
+| `OPENLINKER_NODE_ID` | required | Registered Runtime Node UUID. |
+| `OPENLINKER_AGENT_ID` | required | Agent UUID. |
+| `OPENLINKER_AGENT_TOKEN` | required | Agent credential used by Runtime. |
+| `OPENLINKER_API_BASE` | required without a Runtime base | Platform URL used for Runtime discovery. |
+| `OPENLINKER_RUNTIME_BASE` | empty | Explicit Runtime URL override. |
+| `OPENLINKER_RUNTIME_DATA_DIR` | `.openlinker/runtime-<agent-id>` | Encrypted identity, journal, and pending delivery directory. |
+| `OPENLINKER_RUNTIME_TRANSPORT` | `auto` | `auto`, `ws`, or `pull`. |
+| `OPENLINKER_NODE_CERT_FILE` | required | Runtime Node mTLS certificate. |
+| `OPENLINKER_NODE_KEY_FILE` | required | Runtime Node private key. |
+| `OPENLINKER_RUNTIME_CA_FILE` | required | CA used to verify Runtime. |
 
-## 输入
+The SDK reads the first non-empty `text`, `query`, `task`, or `prompt`
+field, and also accepts a plain string.
 
-SDK 会从 `text`、`query`、`task`、`prompt` 中读取第一个非空字符串，也接受纯字符串输入。
-
-```json
-{
-  "text": "summarize this"
-}
-```
-
-## Panic recovery 测试
-
-使用以下方式验证 SDK 会把 Agent panic 映射为失败 Result，而不是让 Worker 进程崩溃：
+## Panic recovery
 
 ```bash
-GENERIC_AGENT_PANIC=1 \
-go run ./runtime/agent-generic
+GENERIC_AGENT_PANIC=1 go run ./runtime/agent-generic
 ```
 
-从 OpenLinker 触发一次 Run 后，Worker 仍可继续处理后续任务，失败结果中应包含：
-
-```json
-{
-  "status": "failed",
-  "error": {
-    "code": "AGENT_RUNTIME_PANIC",
-    "message": "agent panic: generic agent panic requested by GENERIC_AGENT_PANIC"
-  }
-}
-```
+After a Run is sent, the SDK maps the panic to a failed Result instead of
+crashing the worker. The process can continue with later tasks.

@@ -1,58 +1,60 @@
-# Client 示例
+# Client examples
 
-本分类包含六个单一概念示例。所有命令都在共享 module 根目录 `example/` 中执行。
+[简体中文](README.zh-CN.md)
 
-## 示例索引
+Run every command from the shared `example/` module.
 
-| 目录 | 核心概念 | 是否创建 Run | 命令 |
-|---|---|---:|---|
-| `agent-discovery` | `ListAgents`、`GetAgent`、`GetAgentCard` | 否 | `go run ./client/agent-discovery` |
-| `run-sync` | `RunAgent` 与显式 idempotency key | 是 | `go run ./client/run-sync` |
-| `run-async` | `StartAgentRun`、`GetRun`、轮询与 timeout | 是 | `go run ./client/run-async` |
-| `run-stream` | `StreamRunEvents`、SSE 终态与断流 | 是 | `go run ./client/run-stream` |
-| `run-callbacks` | `RunAgentWithCallbacks`、message delta 与 terminal callback | 是 | `go run ./client/run-callbacks` |
-| `run-history` | Events、Messages、Artifacts、Children 与 retention metadata | 否 | `go run ./client/run-history` |
+| Directory | Main API | Creates a Run |
+| --- | --- | ---: |
+| `agent-discovery` | `ListAgents`, `GetAgent`, `GetAgentCard` | No |
+| `run-sync` | `RunAgent` with an idempotency key | Yes |
+| `run-async` | `StartAgentRun`, `GetRun`, polling and timeout | Yes |
+| `run-stream` | `StreamRunEvents`, SSE terminal events and disconnects | Yes |
+| `run-callbacks` | `RunAgentWithCallbacks`, message and terminal callbacks | Yes |
+| `run-history` | Events, messages, artifacts, children, and retention metadata | No |
 
-## 通用环境变量
+Common settings:
 
 ```bash
 export OPENLINKER_API_BASE=https://api.openlinker.ai
 export OPENLINKER_USER_TOKEN=ol_user_xxx
 ```
 
-发现 Agent 需要：
+Agent discovery:
 
 ```bash
 export OPENLINKER_AGENT_SLUG=my-agent
-export OPENLINKER_AGENT_QUERY=my-agent # 可选
+export OPENLINKER_AGENT_QUERY=my-agent # optional
 go run ./client/agent-discovery
 ```
 
-创建 Run 的四个示例需要：
+Examples that create a Run:
 
 ```bash
 export OPENLINKER_AGENT_ID=22222222-2222-4222-8222-222222222222
-export OPENLINKER_RUN_INPUT='hello' # 可选，默认 hello
+export OPENLINKER_RUN_INPUT='hello'
 export OPENLINKER_IDEMPOTENCY_KEY='demo-intent-20260715-001'
 ```
 
-`OPENLINKER_IDEMPOTENCY_KEY` 表示一次明确的创建意图。同一次请求因网络错误重试时应复用原值；真正发起新任务时必须换一个新值。
+One idempotency key represents one intended Run creation. Reuse it when
+retrying the same request after a network failure. Generate a new key for a
+new task.
 
-异步、流式和 callback 示例还支持：
+Async, streaming, and callback examples also accept:
 
 ```bash
-export OPENLINKER_RUN_TIMEOUT=30s # 默认 30s
-export OPENLINKER_POLL_INTERVAL=1s # 仅 run-async 使用
+export OPENLINKER_RUN_TIMEOUT=30s
+export OPENLINKER_POLL_INTERVAL=1s # run-async only
 ```
 
-读取已有 Run 历史需要：
+Read an existing Run:
 
 ```bash
 export OPENLINKER_RUN_ID=33333333-3333-4333-8333-333333333333
-export OPENLINKER_AFTER_SEQUENCE=0 # 可选
+export OPENLINKER_AFTER_SEQUENCE=0
 go run ./client/run-history
 ```
 
-## 离线测试覆盖
-
-每个目录都有 `httptest`：验证实际请求路径、Bearer Token、idempotency header、JSON body、SSE、终态处理以及 Event retention metadata，不需要连接真实 Core。
+Each directory has an offline `httptest` that checks paths, Bearer
+authentication, idempotency headers, JSON, SSE, terminal handling, and event
+retention metadata.

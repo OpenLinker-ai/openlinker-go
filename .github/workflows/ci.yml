@@ -24,6 +24,18 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Check public documentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f runtime-worker-end-to-end.md
+          test -f runtime-worker-end-to-end.zh-CN.md
+          while IFS= read -r readme; do
+            test -f "${readme%.md}.zh-CN.md"
+          done < <(find example -type f -name README.md -print)
+          ! grep -R -n -E '\]\([^)]*docs/' +            README.md README.zh-CN.md example --include='*.md'
+          ! grep -R -n -E 'Runtime v2|Runtime V2|兑换为 Runtime Token|确保存在 Runtime Token' +            README.md README.zh-CN.md runtime-worker-end-to-end*.md example --include='*.md'
+
       - name: Test
         run: go test ./...
 

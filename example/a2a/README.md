@@ -1,22 +1,25 @@
-# A2A 示例
+# A2A examples
 
-每个目录只覆盖一种 A2A binding，不与 Agent Runtime 的 WebSocket/HTTP transport 混为一谈。
+[简体中文](README.zh-CN.md)
 
-| 目录 | Binding | 命令 |
-|---|---|---|
+Each directory demonstrates one A2A binding. A2A bindings are independent from
+the WebSocket or HTTP transport used by an Agent Runtime worker.
+
+| Directory | Binding | Command |
+| --- | --- | --- |
 | `jsonrpc` | A2A JSON-RPC `SendMessage` | `go run ./a2a/jsonrpc` |
-| `http-json-sse` | A2A HTTP+JSON 请求和 SSE stream | `go run ./a2a/http-json-sse` |
+| `http-json-sse` | A2A HTTP+JSON and SSE | `go run ./a2a/http-json-sse` |
 | `grpc` | A2A gRPC `SendMessage` | `go run ./a2a/grpc` |
 
-JSON-RPC 和 HTTP+JSON/SSE 使用：
+JSON-RPC and HTTP+JSON/SSE:
 
 ```bash
 export OPENLINKER_A2A_ENDPOINT=https://api.openlinker.ai/api/v1/a2a/agents/my-agent
-export OPENLINKER_A2A_TOKEN=ol_user_xxx # 端点要求认证时设置
+export OPENLINKER_A2A_TOKEN=ol_user_xxx # only when the endpoint requires authentication
 export OPENLINKER_A2A_INPUT='hello'
 ```
 
-gRPC 使用：
+gRPC:
 
 ```bash
 export OPENLINKER_A2A_GRPC_ENDPOINT=https://grpc.openlinker.ai
@@ -25,6 +28,8 @@ export OPENLINKER_A2A_TOKEN=ol_user_xxx
 go run ./a2a/grpc
 ```
 
-实际调用前应从 Agent Card 的 interfaces 中选择对方声明支持的 binding。A2A gRPC 是 Agent 调用 binding，不替代 Agent Runtime。
+Before calling an Agent, read its Agent Card and choose a binding it declares.
+A2A gRPC is a way to call an Agent; it does not replace OpenLinker Runtime.
 
-离线测试分别验证 JSON-RPC method/auth、HTTP content negotiation/SSE，以及 gRPC tenant/metadata。
+Offline tests cover JSON-RPC method and authentication, HTTP content
+negotiation and SSE, and gRPC tenant metadata.

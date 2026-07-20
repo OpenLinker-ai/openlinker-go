@@ -62,7 +62,9 @@ registration, and Native Runtime all support:
 - `TransportHTTP`: strict HTTP long-poll only.
 
 Authentication, mTLS, permission, payload, and contract errors never trigger
-fallback. See [Runtime API modes](./docs/runtime-api-modes.md) for the full layering.
+fallback. Start with [the Runtime examples](./example/runtime/README.md) and use
+the low-level protocol examples only when your application intentionally owns
+the Runtime lifecycle.
 
 ## Status
 
@@ -221,8 +223,8 @@ _ = body
 
 ## OpenLinker Runtime
 
-Before the first deployment, follow the Chinese
-[end-to-end RuntimeWorker runbook](./docs/runtime-worker-end-to-end.zh-CN.md) to prepare the
+Before the first deployment, follow the
+[end-to-end RuntimeWorker runbook](./runtime-worker-end-to-end.md) to prepare the
 Agent identity, Runtime Node, mTLS and durable storage, then verify a real Run, cancellation and
 process restart. Runtime Ready proves connectivity only; it does not prove end-to-end callability.
 
@@ -304,11 +306,10 @@ worker. Applications that need those primitives can build on:
 command, Codex, or A2A handler into this SDK worker; it does not own a second
 Runtime state machine.
 
-API layering and registration details are documented in
-[Runtime API modes](./docs/runtime-api-modes.md) and
-[Native Runtime registration (Chinese)](./docs/runtime-native-registration.zh-CN.md).
-The downstream layout migration is documented in
-[openlinker-agent-layout migration (Chinese)](./docs/openlinker-agent-layout-migration.zh-CN.md).
+API layering, registration, Native handlers, managed workers, and protocol
+entry points are summarized in [the Runtime examples](./example/runtime/README.md).
+The [end-to-end runbook](./runtime-worker-end-to-end.md) covers deployment and
+operations.
 
 ## A2A Transports
 
