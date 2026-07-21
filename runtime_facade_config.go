@@ -109,6 +109,14 @@ func LoadRuntimeWorkerConfig() (RuntimeWorkerConfig, error) {
 // Runtime client.
 func (config RuntimeWorkerConfig) Validate(requireClient bool) error {
 	problems := make([]string, 0, 10)
+	platformURL := strings.TrimSpace(config.PlatformURL)
+	runtimeURL := strings.TrimSpace(config.RuntimeURL)
+	explicitMTLS := strings.TrimSpace(config.MTLS.CertFile) != "" ||
+		strings.TrimSpace(config.MTLS.KeyFile) != "" ||
+		strings.TrimSpace(config.MTLS.CAFile) != ""
+	completeMTLS := strings.TrimSpace(config.MTLS.CertFile) != "" &&
+		strings.TrimSpace(config.MTLS.KeyFile) != "" &&
+		strings.TrimSpace(config.MTLS.CAFile) != ""
 	if !validRuntimeUUID(strings.TrimSpace(config.NodeID)) {
 		problems = append(problems, EnvNodeID+" must be a non-zero lowercase UUID")
 	}
@@ -124,21 +132,29 @@ func (config RuntimeWorkerConfig) Validate(requireClient bool) error {
 	if config.Store == nil && strings.TrimSpace(config.DataDir) == "" {
 		problems = append(problems, EnvRuntimeDataDir+" is missing")
 	}
+	if explicitMTLS && !completeMTLS {
+		problems = append(problems, EnvNodeCertFile+", "+EnvNodeKeyFile+", and "+EnvRuntimeCAFile+" must be configured together")
+	}
 	if requireClient {
-		if strings.TrimSpace(config.RuntimeURL) == "" && strings.TrimSpace(config.PlatformURL) == "" {
+		if runtimeURL == "" && platformURL == "" {
 			problems = append(problems, EnvRuntimeBase+" or "+EnvAPIBase+" is missing")
 		}
 		if strings.TrimSpace(config.AgentToken) == "" {
 			problems = append(problems, EnvAgentToken+" is missing")
 		}
-		if strings.TrimSpace(config.MTLS.CertFile) == "" {
-			problems = append(problems, EnvNodeCertFile+" is missing")
-		}
-		if strings.TrimSpace(config.MTLS.KeyFile) == "" {
-			problems = append(problems, EnvNodeKeyFile+" is missing")
-		}
-		if strings.TrimSpace(config.MTLS.CAFile) == "" {
-			problems = append(problems, EnvRuntimeCAFile+" is missing")
+		// Platform discovery is authoritative for whether Runtime requires mTLS.
+		// A direct Runtime URL without a Platform URL has no policy source, so it
+		// keeps the legacy fail-closed requirement for an explicit mTLS identity.
+		if platformURL == "" && runtimeURL != "" && !completeMTLS {
+			if strings.TrimSpace(config.MTLS.CertFile) == "" {
+				problems = append(problems, EnvNodeCertFile+" is missing")
+			}
+			if strings.TrimSpace(config.MTLS.KeyFile) == "" {
+				problems = append(problems, EnvNodeKeyFile+" is missing")
+			}
+			if strings.TrimSpace(config.MTLS.CAFile) == "" {
+				problems = append(problems, EnvRuntimeCAFile+" is missing")
+			}
 		}
 	}
 	if len(problems) != 0 {

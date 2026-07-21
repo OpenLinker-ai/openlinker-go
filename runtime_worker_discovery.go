@@ -56,7 +56,12 @@ type runtimeConnectionInformation struct {
 }
 
 func resolveRuntimeConnection(ctx context.Context, platformURL, override string) (runtimeConnectionInformation, error) {
-	if strings.TrimSpace(override) != "" {
+	platformURL = strings.TrimSpace(platformURL)
+	override = strings.TrimSpace(override)
+	if platformURL == "" {
+		if override == "" {
+			return runtimeConnectionInformation{}, errors.New("OpenLinker address is required")
+		}
 		runtimeURL, err := validateRuntimeOrigin(override)
 		return runtimeConnectionInformation{RuntimeURL: runtimeURL, Policy: legacyRuntimeTransportPolicy(), MTLSRequired: true}, err
 	}
@@ -103,7 +108,11 @@ func resolveRuntimeConnection(ctx context.Context, platformURL, override string)
 	if strings.TrimSpace(manifest.BaseURLs.Runtime) == "" {
 		return runtimeConnectionInformation{}, errors.New("this OpenLinker instance does not provide a Runtime connection address")
 	}
-	runtimeURL, err := validateRuntimeOriginForPolicy(manifest.BaseURLs.Runtime, !manifest.Runtime.MTLSRequired)
+	runtimeAddress := strings.TrimSpace(manifest.BaseURLs.Runtime)
+	if override != "" {
+		runtimeAddress = override
+	}
+	runtimeURL, err := validateRuntimeOriginForPolicy(runtimeAddress, !manifest.Runtime.MTLSRequired)
 	if err != nil {
 		return runtimeConnectionInformation{}, err
 	}
