@@ -3,7 +3,7 @@
 [简体中文](runtime-worker-end-to-end.zh-CN.md)
 
 This guide covers the complete path for a managed `openlinker-go`
-`RuntimeWorker`: platform resources, Runtime Node, mTLS, Agent identity,
+`RuntimeWorker`: platform resources, Runtime Node identity, discovered transport security, Agent identity,
 durable local state, a real Run, cancellation, restart, and Kubernetes
 deployment.
 
@@ -24,13 +24,13 @@ Reliability: cancellation works and a process or Pod restart keeps durable state
 | --- | --- | --- | --- |
 | User | User Token or login JWT | Create Runs, read results, manage Agents | User or administrator |
 | Agent | Agent ID and Agent Token | Select the Agent that receives work | Agent registration |
-| Runtime Node | Node ID and mTLS certificate/key | Trust the machine connecting to Runtime | Core operator |
+| Runtime Node | Node ID; certificate/key only when policy requires mTLS | Select the machine connecting to Runtime | SDK/Core or operator |
 
 Do not mix them:
 
 - A User Token is not a worker credential.
-- An Agent Token does not replace Runtime Node mTLS.
-- Agent auto-registration does not create a Runtime Node or certificate.
+- Platform discovery decides whether Runtime is token-only or requires mTLS.
+- Agent auto-registration and Runtime Node enrollment are separate operations.
 - A Node ID is not a Pod ID, host name, or SDK Worker ID.
 
 ## Choose the right SDK entry
@@ -91,7 +91,17 @@ The first registration needs a User Token. Save the returned Agent registration
 and remove the User Token from later worker starts. `NewRuntimeWorker` never
 creates an Agent implicitly.
 
-## 3. Issue the Runtime Node and mTLS identity
+## 3. Use the discovered Runtime security policy
+
+Normal workers set `OPENLINKER_API_BASE` and let the SDK fetch
+`/.well-known/openlinker.json`. If the manifest declares `mtls_required=false`,
+the worker uses the Agent Token plus stable Node and Agent IDs and does not load
+certificate files. If it declares `mtls_required=true`, SDK-managed enrollment
+generates a private key in `DataDir`, obtains a short-lived certificate, and
+renews it automatically.
+
+Explicit certificate files are an external-PKI compatibility mode. A Core
+operator can issue them in a trusted administration environment:
 
 A Core operator runs the node-issuance command in a trusted administration
 environment:
@@ -108,7 +118,7 @@ environment:
   --key-out /secure/runtime-node.key
 ```
 
-The worker needs:
+An external-PKI worker needs the complete group:
 
 - the Node ID returned by Core;
 - `runtime-node.crt`;
@@ -135,23 +145,19 @@ expected Node ID in its URI SAN.
 
 ```bash
 export OPENLINKER_API_BASE='https://openlinker.example'
-export OPENLINKER_RUNTIME_BASE='https://runtime.openlinker.example'
 
 export OPENLINKER_NODE_ID='11111111-1111-4111-8111-111111111111'
 export OPENLINKER_AGENT_ID='22222222-2222-4222-8222-222222222222'
 export OPENLINKER_AGENT_TOKEN='<read from a secret store>'
-
-export OPENLINKER_NODE_CERT_FILE='/run/openlinker/runtime-node.crt'
-export OPENLINKER_NODE_KEY_FILE='/run/openlinker/runtime-node.key'
-export OPENLINKER_RUNTIME_CA_FILE='/run/openlinker/runtime-server-ca.crt'
 
 export OPENLINKER_RUNTIME_TRANSPORT='auto'
 export OPENLINKER_RUNTIME_CAPACITY='1'
 export OPENLINKER_RUNTIME_DATA_DIR='/var/lib/my-agent/runtime'
 ```
 
-`OPENLINKER_RUNTIME_BASE` is optional when the worker can discover Runtime
-from `OPENLINKER_API_BASE`. Set
+Do not set `OPENLINKER_RUNTIME_BASE` in normal production configuration. It is
+an advanced routing override and platform discovery still remains authoritative
+for the security policy. Set
 `OPENLINKER_RUNTIME_SERVER_NAME` only when certificate verification needs an
 explicit server-name override.
 
@@ -287,21 +293,21 @@ crossed the durable started boundary.
 
 - Put public addresses, Node ID, transport, capacity, and file paths in a
   ConfigMap.
-- Put the Agent Token and mTLS private key in Secrets.
+- Put the Agent Token and any external-PKI private key in Secrets.
 - Use a persistent volume for the Runtime data directory.
 - Do not share one data directory between replicas.
 - Run as non-root and preserve directory mode `0700` and private file mode
   `0600`.
 - Use `fsGroupChangePolicy: OnRootMismatch` when a group is required; avoid
   recursive permission changes that make private files group-readable.
-- Mount mTLS files read-only.
+- Mount external-PKI files read-only when that compatibility mode is used.
 - On shutdown, stop accepting new work and allow enough time for active work
   and pending delivery to finish.
 
 ## Final acceptance
 
 - Core is ready and not in maintenance.
-- Agent ID, Agent Token, Node ID, Node version, and certificate SAN agree.
+- Agent ID, Agent Token, Node ID, and Node version agree; when mTLS is required, the certificate SAN also agrees.
 - Tokens and private keys are absent from images, Git, logs, and ConfigMaps.
 - The data directory is private, durable, and locked by one worker.
 - Runtime Ready succeeds.

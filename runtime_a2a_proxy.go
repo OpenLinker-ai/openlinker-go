@@ -45,9 +45,10 @@ type RuntimeA2AProxy struct {
 	httpClient *http.Client
 }
 
-// NewRuntimeA2AProxy discovers the canonical Runtime origin when needed and
-// binds every upstream request to the configured Agent Token and device mTLS
-// certificate. Incoming Authorization credentials are never forwarded.
+// NewRuntimeA2AProxy discovers the canonical Runtime origin and transport
+// security policy, then binds every upstream request to the configured Agent
+// Token and Node identity. Incoming Authorization credentials are never
+// forwarded.
 func NewRuntimeA2AProxy(ctx context.Context, config RuntimeA2AProxyConfig) (*RuntimeA2AProxy, error) {
 	if ctx == nil {
 		ctx = context.Background()

@@ -14,7 +14,7 @@ Agent 只需要实现：
 Run(context.Context, string) (string, error)
 ```
 
-环境配置、mTLS、Runtime session、assignment、lease、spool、resume、重连以及 Result 映射都由 SDK 管理。
+环境配置、发现得到的 Runtime 安全策略、Runtime session、assignment、lease、spool、resume、重连以及 Result 映射都由 SDK 管理。
 
 ## 运行
 
@@ -23,9 +23,6 @@ OPENLINKER_API_BASE=https://api.openlinker.ai \
 OPENLINKER_NODE_ID=11111111-1111-4111-8111-111111111111 \
 OPENLINKER_AGENT_ID=22222222-2222-4222-8222-222222222222 \
 OPENLINKER_AGENT_TOKEN=ol_agent_xxx \
-OPENLINKER_NODE_CERT_FILE=/run/openlinker/node.crt \
-OPENLINKER_NODE_KEY_FILE=/run/openlinker/node.key \
-OPENLINKER_RUNTIME_CA_FILE=/run/openlinker/runtime-ca.crt \
 OPENLINKER_RUNTIME_TRANSPORT=auto \
 go run ./runtime/agent-generic
 ```
@@ -55,9 +52,12 @@ OPENLINKER_RUNTIME_TRANSPORT=ws go run ./runtime/agent-generic
 | `OPENLINKER_RUNTIME_BASE` | 空 | 显式覆盖 Runtime endpoint。 |
 | `OPENLINKER_RUNTIME_DATA_DIR` | `.openlinker/runtime-<agent-id>` | 加密 identity、journal 和 spool 目录。 |
 | `OPENLINKER_RUNTIME_TRANSPORT` | `auto` | 支持 `auto`、`ws` 或 `pull`。 |
-| `OPENLINKER_NODE_CERT_FILE` | 必填 | Node mTLS 证书。 |
-| `OPENLINKER_NODE_KEY_FILE` | 必填 | Node mTLS 私钥。 |
-| `OPENLINKER_RUNTIME_CA_FILE` | 必填 | Runtime 服务端 CA。 |
+| `OPENLINKER_NODE_CERT_FILE` | 空 | 发现要求 mTLS 时可选的外部 PKI 证书。 |
+| `OPENLINKER_NODE_KEY_FILE` | 空 | 可选的外部 PKI 私钥，必须与证书和 CA 成组配置。 |
+| `OPENLINKER_RUNTIME_CA_FILE` | 空 | 可选的外部 PKI Runtime CA。 |
+
+平台发现是安全策略的权威来源。token-only Runtime 不需要任何证书文件；mTLS 部署可使用
+SDK 自动登记，或完整提供上面的外部 PKI 配置组。
 
 ## 输入
 
