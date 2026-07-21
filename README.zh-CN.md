@@ -320,7 +320,9 @@ gRPC 是 A2A transport binding，不替代 OpenLinker Runtime。
 - `RunAgentWithCallbacks`
 - `StartAgentRun`
 - `StartAgentRunWithCallbacks`
+- `RecommendTask`
 - `GetRun`
+- `CancelRun`
 - `ListRunEvents`
 - `ListRunArtifacts`
 - `ListRunMessages`

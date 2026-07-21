@@ -345,7 +345,9 @@ Application-side calls:
 - `RunAgentWithCallbacks`
 - `StartAgentRun`
 - `StartAgentRunWithCallbacks`
+- `RecommendTask`
 - `GetRun`
+- `CancelRun`
 - `ListRunEvents`
 - `ListRunArtifacts`
 - `ListRunMessages`

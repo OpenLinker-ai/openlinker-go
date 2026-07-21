@@ -5,14 +5,20 @@ All notable changes to `openlinker-go` will be documented in this file.
 This SDK is currently pre-1.0. Breaking changes may happen before the Core API,
 runtime connector, callback, and A2A contracts are declared stable.
 
-## [v0.2.0-rc.1] - Unreleased
+## [v0.2.0-rc2] - Unreleased
+
+### Added
+
+- Added typed `RecommendTask` and `CancelRun` user-client methods so JSON-first
+  callers do not need to duplicate Core REST transport logic.
+
+## [v0.2.0-rc1]
 
 This release candidate is the breaking preview for the `v0.2.0` Runtime API
 layering. Pin the exact RC tag during validation; do not depend on `main`,
 `latest`, a committed local `replace`, or a vendored SDK copy.
 
 ### Added
-
 - Added the high-level `WithAgent`, `WithFunc`, and `Native` facades over the
   canonical reliable `RuntimeWorker`, including event/progress helpers,
   assignment context, retryable failures, explicit registration, environment
