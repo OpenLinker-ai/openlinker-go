@@ -49,13 +49,16 @@ type RuntimeMTLSConfig struct {
 	credentialManager *runtimeCredentialManager
 }
 
-func newRuntimeClient(runtimeAddress, agentToken string, config RuntimeMTLSConfig) (*Runtime, *http.Client, error) {
+func newRuntimeClient(runtimeAddress, agentToken, nodeID string, config RuntimeMTLSConfig) (*Runtime, *http.Client, error) {
 	runtimeURL, err := validateRuntimeOriginForPolicy(runtimeAddress, config.Disabled)
 	if err != nil {
 		return nil, nil, err
 	}
 	if strings.TrimSpace(agentToken) == "" {
 		return nil, nil, errors.New("Agent Token is required")
+	}
+	if !validRuntimeUUID(nodeID) {
+		return nil, nil, errors.New("RuntimeWorker ID must be a non-zero lowercase UUID")
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	if !config.Disabled {
@@ -109,12 +112,34 @@ func newRuntimeClient(runtimeAddress, agentToken string, config RuntimeMTLSConfi
 		WithAgentToken(agentToken),
 		WithHTTPClient(httpClient),
 		WithSDKAgent(runtimeWorkerSDKAgent),
+		WithHeader(RuntimeNodeIDHeader, nodeID),
 	)
 	if err != nil {
 		transport.CloseIdleConnections()
 		return nil, nil, err
 	}
 	return runtimeClient, httpClient, nil
+}
+
+type runtimeNodeHeaderTransport struct {
+	base   http.RoundTripper
+	nodeID string
+}
+
+func (transport *runtimeNodeHeaderTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if transport == nil || transport.base == nil || !validRuntimeUUID(transport.nodeID) {
+		return nil, errors.New("runtime Node identity transport is unavailable")
+	}
+	clone := request.Clone(request.Context())
+	clone.Header = request.Header.Clone()
+	clone.Header.Set(RuntimeNodeIDHeader, transport.nodeID)
+	return transport.base.RoundTrip(clone)
+}
+
+func (transport *runtimeNodeHeaderTransport) CloseIdleConnections() {
+	if closer, ok := transport.base.(interface{ CloseIdleConnections() }); ok {
+		closer.CloseIdleConnections()
+	}
 }
 
 type runtimeCredentialRenewingTransport struct {

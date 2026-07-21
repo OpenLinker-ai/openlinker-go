@@ -46,9 +46,10 @@ type RuntimeWorker struct {
 	Logger  *log.Logger
 	OnReady func(RuntimeReadyPayload)
 
-	runtimeClient     RuntimeClient
-	runtimeDialer     RuntimeTransportDialer
-	credentialManager *runtimeCredentialManager
+	runtimeClient       RuntimeClient
+	runtimeDialer       RuntimeTransportDialer
+	credentialManager   *runtimeCredentialManager
+	runtimeMTLSRequired bool
 
 	lifecycleMu            sync.Mutex
 	started                bool
@@ -138,6 +139,7 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 		if err = node.applyRuntimeTransportPolicy(connection.Policy); err != nil {
 			return err
 		}
+		node.runtimeMTLSRequired = connection.MTLSRequired
 	}
 	startupCtx, cancelStartup := context.WithCancel(parent)
 	defer cancelStartup()
@@ -160,41 +162,10 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 	node.store = node.Store
 
 	if node.runtimeClient == nil {
-		explicitMTLS := node.MTLS.CertFile != "" && node.MTLS.KeyFile != "" && node.MTLS.CAFile != ""
-		if !explicitMTLS || !connection.MTLSRequired {
-			credentialEndpoint := connection.CredentialEndpoint
-			if credentialEndpoint == "" && node.PlatformURL != "" {
-				platformOrigin, platformErr := validatePlatformOrigin(node.PlatformURL)
-				if platformErr != nil {
-					return platformErr
-				}
-				credentialEndpoint = platformOrigin + "/api/v1/runtime-credentials"
-			}
-			manager, managerErr := newRuntimeCredentialManager(
-				node.DataDir, credentialEndpoint, node.AgentToken, node.NodeID, node.AgentID,
-				node.NodeVersion, node.Capacity, node.Logger,
-			)
-			if managerErr != nil {
-				return managerErr
-			}
-			if managerErr = manager.Ensure(startupCtx, false); managerErr != nil {
-				return managerErr
-			}
-			node.NodeID, node.AgentID = manager.Identity()
-			node.credentialManager = manager
-			node.MTLS.credentialManager = manager
-			node.MTLS.Disabled = !connection.MTLSRequired
-			if connection.MTLSRequired {
-				node.MTLS.tlsConfig, managerErr = manager.TLSConfig()
-				if managerErr != nil {
-					return managerErr
-				}
-			}
-			manager.Start(startupCtx)
-		} else {
-			node.MTLS.Disabled = false
+		if err = node.configureRuntimeSecurity(startupCtx, connection); err != nil {
+			return err
 		}
-		runtimeClient, httpClient, err := newRuntimeClient(node.RuntimeURL, node.AgentToken, node.MTLS)
+		runtimeClient, httpClient, err := newRuntimeClient(node.RuntimeURL, node.AgentToken, node.NodeID, node.MTLS)
 		if err != nil {
 			return err
 		}
@@ -245,6 +216,53 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 	case err := <-node.fatal:
 		return err
 	}
+}
+
+func (node *RuntimeWorker) configureRuntimeSecurity(
+	ctx context.Context,
+	connection runtimeConnectionInformation,
+) error {
+	node.MTLS.Disabled = !connection.MTLSRequired
+	if !connection.MTLSRequired {
+		if !validRuntimeUUID(node.NodeID) || !validRuntimeUUID(node.AgentID) {
+			return errors.New("RuntimeWorker ID and Agent ID are required for token-only Runtime transport")
+		}
+		node.MTLS.tlsConfig = nil
+		node.MTLS.credentialManager = nil
+		node.credentialManager = nil
+		return nil
+	}
+	explicitMTLS := node.MTLS.CertFile != "" && node.MTLS.KeyFile != "" && node.MTLS.CAFile != ""
+	if explicitMTLS {
+		return nil
+	}
+	credentialEndpoint := connection.CredentialEndpoint
+	if credentialEndpoint == "" && node.PlatformURL != "" {
+		platformOrigin, err := validatePlatformOrigin(node.PlatformURL)
+		if err != nil {
+			return err
+		}
+		credentialEndpoint = platformOrigin + "/api/v1/runtime-credentials"
+	}
+	manager, err := newRuntimeCredentialManager(
+		node.DataDir, credentialEndpoint, node.AgentToken, node.NodeID, node.AgentID,
+		node.NodeVersion, node.Capacity, node.Logger,
+	)
+	if err != nil {
+		return err
+	}
+	if err = manager.Ensure(ctx, false); err != nil {
+		return err
+	}
+	node.NodeID, node.AgentID = manager.Identity()
+	node.credentialManager = manager
+	node.MTLS.credentialManager = manager
+	node.MTLS.tlsConfig, err = manager.TLSConfig()
+	if err != nil {
+		return err
+	}
+	manager.Start(ctx)
+	return nil
 }
 
 // Run is the facade-friendly alias for Start.

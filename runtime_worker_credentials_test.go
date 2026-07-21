@@ -1,6 +1,7 @@
 package openlinker
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -15,10 +16,45 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestRuntimeTokenOnlySecuritySkipsAutomaticCredentialManager(t *testing.T) {
+	node := &RuntimeWorker{
+		NodeID:      testNodeID,
+		AgentID:     testAgentID,
+		AgentToken:  "ol_agent_token_only",
+		NodeVersion: runtimeWorkerSDKAgent,
+		DataDir:     t.TempDir(),
+		Capacity:    1,
+	}
+	connection := runtimeConnectionInformation{
+		RuntimeURL:         "https://runtime.example.test",
+		MTLSRequired:       false,
+		CredentialEndpoint: "not-a-valid-credential-endpoint",
+	}
+
+	if err := node.configureRuntimeSecurity(context.Background(), connection); err != nil {
+		t.Fatalf("configure token-only security: %v", err)
+	}
+	if node.MTLS.credentialManager != nil || node.MTLS.tlsConfig != nil {
+		t.Fatalf("token-only transport initialized mTLS state: %#v", node.MTLS)
+	}
+	if !node.MTLS.Disabled {
+		t.Fatal("token-only transport did not disable mTLS")
+	}
+}
+
+func TestRuntimeTokenOnlySecurityRequiresConfiguredIdentity(t *testing.T) {
+	node := &RuntimeWorker{AgentToken: "ol_agent_token_only"}
+	err := node.configureRuntimeSecurity(context.Background(), runtimeConnectionInformation{MTLSRequired: false})
+	if err == nil || !strings.Contains(err.Error(), "RuntimeWorker ID and Agent ID are required") {
+		t.Fatalf("token-only identity error = %v", err)
+	}
+}
 
 func TestRuntimeCredentialManagerGeneratesBindsAndRenewsOneKey(t *testing.T) {
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

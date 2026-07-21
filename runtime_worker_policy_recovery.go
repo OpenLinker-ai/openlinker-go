@@ -296,6 +296,11 @@ func (node *RuntimeWorker) recoverRuntimePolicyLocked(ctx context.Context) (*Run
 	if _, err = node.runtimeTransportOrder(connection.Policy); err != nil {
 		return nil, &runtimePolicyRecoveryError{cause: err}
 	}
+	if connection.MTLSRequired != node.runtimeMTLSRequired {
+		return nil, &runtimePolicyRecoveryError{cause: errors.New(
+			"Runtime mTLS requirement changed; restart the Worker to apply the new security mode",
+		)}
+	}
 	if node.httpClient == nil {
 		return nil, &runtimePolicyRecoveryError{cause: errors.New("mTLS Runtime HTTP client is unavailable")}
 	}
@@ -304,6 +309,7 @@ func (node *RuntimeWorker) recoverRuntimePolicyLocked(ctx context.Context) (*Run
 		WithAgentToken(node.AgentToken),
 		WithHTTPClient(node.httpClient),
 		WithSDKAgent(runtimeWorkerSDKAgent),
+		WithHeader(RuntimeNodeIDHeader, node.NodeID),
 	)
 	if err != nil {
 		return nil, &runtimePolicyRecoveryError{cause: fmt.Errorf("connect rediscovered Runtime: %w", err)}

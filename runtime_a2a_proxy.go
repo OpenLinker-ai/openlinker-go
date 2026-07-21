@@ -61,7 +61,12 @@ func NewRuntimeA2AProxy(ctx context.Context, config RuntimeA2AProxyConfig) (*Run
 		return nil, err
 	}
 	explicitMTLS := config.MTLS.CertFile != "" && config.MTLS.KeyFile != "" && config.MTLS.CAFile != ""
-	if !explicitMTLS || !connection.MTLSRequired {
+	config.MTLS.Disabled = !connection.MTLSRequired
+	if !connection.MTLSRequired {
+		if !validRuntimeUUID(config.NodeID) || !validRuntimeUUID(config.AgentID) {
+			return nil, errors.New("RuntimeWorker ID and Agent ID are required for token-only Runtime transport")
+		}
+	} else if !explicitMTLS {
 		credentialEndpoint := connection.CredentialEndpoint
 		if credentialEndpoint == "" && config.PlatformURL != "" {
 			platformOrigin, platformErr := validatePlatformOrigin(config.PlatformURL)
@@ -80,20 +85,22 @@ func NewRuntimeA2AProxy(ctx context.Context, config RuntimeA2AProxyConfig) (*Run
 		if managerErr = manager.Ensure(ctx, false); managerErr != nil {
 			return nil, managerErr
 		}
+		config.NodeID, config.AgentID = manager.Identity()
 		config.MTLS.credentialManager = manager
-		config.MTLS.Disabled = !connection.MTLSRequired
-		if connection.MTLSRequired {
-			config.MTLS.tlsConfig, managerErr = manager.TLSConfig()
-			if managerErr != nil {
-				return nil, managerErr
-			}
+		config.MTLS.tlsConfig, managerErr = manager.TLSConfig()
+		if managerErr != nil {
+			return nil, managerErr
 		}
 		manager.Start(ctx)
 	}
-	_, httpClient, err := newRuntimeClient(connection.RuntimeURL, config.AgentToken, config.MTLS)
+	_, httpClient, err := newRuntimeClient(connection.RuntimeURL, config.AgentToken, config.NodeID, config.MTLS)
 	if err != nil {
 		return nil, err
 	}
+	// The Runtime client owns its default headers, but ReverseProxy uses only the
+	// underlying transport. Add the trusted Node selector at that boundary so an
+	// incoming adapter header can never choose a different Runtime identity.
+	httpClient.Transport = &runtimeNodeHeaderTransport{base: httpClient.Transport, nodeID: config.NodeID}
 	proxy, err := newRuntimeA2AProxy(connection.RuntimeURL, slug, config.AgentToken, httpClient)
 	if err != nil {
 		closeRuntimeA2AProxyHTTPClient(httpClient)

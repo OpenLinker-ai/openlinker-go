@@ -122,7 +122,7 @@ func TestRuntimeClientUsesTLS13MTLSAndExactInvocationProof(t *testing.T) {
 		}
 	}
 
-	client, httpClient, err := newRuntimeClient(server.URL, agentToken, RuntimeMTLSConfig{
+	client, httpClient, err := newRuntimeClient(server.URL, agentToken, runtimeTestHello().NodeID, RuntimeMTLSConfig{
 		CertFile:   certPath,
 		KeyFile:    keyPath,
 		CAFile:     caPath,
@@ -159,6 +159,30 @@ func TestRuntimeClientUsesTLS13MTLSAndExactInvocationProof(t *testing.T) {
 	}
 	if summary.RunID != "99999999-9999-4999-8999-999999999999" || sessionCalls.Load() != 1 || delegatedCalls.Load() != 1 {
 		t.Fatalf("summary=%#v sessionCalls=%d delegatedCalls=%d", summary, sessionCalls.Load(), delegatedCalls.Load())
+	}
+}
+
+func TestRuntimeNodeHeaderTransportOverridesCallerValue(t *testing.T) {
+	request, err := http.NewRequest(http.MethodPost, "https://runtime.example.test/api/v1/agent-runtime/sessions", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set(RuntimeNodeIDHeader, "ffffffff-ffff-4fff-8fff-ffffffffffff")
+	transport := &runtimeNodeHeaderTransport{
+		nodeID: testNodeID,
+		base: sdkRoundTripper(func(outbound *http.Request) (*http.Response, error) {
+			if got := outbound.Header.Get(RuntimeNodeIDHeader); got != testNodeID {
+				t.Fatalf("Runtime Node header = %q, want %q", got, testNodeID)
+			}
+			return &http.Response{StatusCode: http.StatusNoContent, Body: http.NoBody, Header: make(http.Header)}, nil
+		}),
+	}
+
+	if _, err = transport.RoundTrip(request); err != nil {
+		t.Fatalf("round trip: %v", err)
+	}
+	if got := request.Header.Get(RuntimeNodeIDHeader); got != "ffffffff-ffff-4fff-8fff-ffffffffffff" {
+		t.Fatalf("caller request was mutated: %q", got)
 	}
 }
 
