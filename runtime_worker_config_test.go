@@ -24,10 +24,63 @@ func TestRuntimeWorkerConfigReportsAllMissingValues(t *testing.T) {
 	if !errors.As(err, &configErr) {
 		t.Fatalf("error = %T %v", err, err)
 	}
-	for _, key := range []string{EnvNodeID, EnvAgentID, EnvRuntimeBase, EnvAPIBase, EnvAgentToken, EnvRuntimeDataDir, EnvNodeCertFile, EnvNodeKeyFile, EnvRuntimeCAFile} {
+	for _, key := range []string{EnvNodeID, EnvAgentID, EnvRuntimeBase, EnvAPIBase, EnvAgentToken, EnvRuntimeDataDir} {
 		if !strings.Contains(err.Error(), key) {
 			t.Fatalf("error %q does not contain %s", err, key)
 		}
+	}
+}
+
+func TestRuntimeWorkerConfigAllowsDiscoveryWithoutMTLS(t *testing.T) {
+	config := RuntimeWorkerConfig{
+		PlatformURL: "https://api.example.com",
+		NodeID:      testNodeID,
+		AgentID:     testAgentID,
+		AgentToken:  "ol_agent_test",
+		DataDir:     t.TempDir(),
+		Transport:   TransportAuto,
+		Capacity:    1,
+	}
+	if err := config.Validate(true); err != nil {
+		t.Fatalf("discovery-backed token-only config: %v", err)
+	}
+}
+
+func TestRuntimeWorkerConfigDirectRuntimeStillRequiresMTLS(t *testing.T) {
+	config := RuntimeWorkerConfig{
+		RuntimeURL: "https://runtime.example.com",
+		NodeID:     testNodeID,
+		AgentID:    testAgentID,
+		AgentToken: "ol_agent_test",
+		DataDir:    t.TempDir(),
+		Transport:  TransportAuto,
+		Capacity:   1,
+	}
+	err := config.Validate(true)
+	if err == nil {
+		t.Fatal("direct Runtime config without mTLS unexpectedly succeeded")
+	}
+	for _, key := range []string{EnvNodeCertFile, EnvNodeKeyFile, EnvRuntimeCAFile} {
+		if !strings.Contains(err.Error(), key) {
+			t.Fatalf("error %q does not contain %s", err, key)
+		}
+	}
+}
+
+func TestRuntimeWorkerConfigRejectsPartialMTLSWithDiscovery(t *testing.T) {
+	config := RuntimeWorkerConfig{
+		PlatformURL: "https://api.example.com",
+		NodeID:      testNodeID,
+		AgentID:     testAgentID,
+		AgentToken:  "ol_agent_test",
+		DataDir:     t.TempDir(),
+		Transport:   TransportAuto,
+		Capacity:    1,
+		MTLS:        RuntimeMTLSConfig{CertFile: "node.crt"},
+	}
+	err := config.Validate(true)
+	if err == nil || !strings.Contains(err.Error(), "must be configured together") {
+		t.Fatalf("partial mTLS error = %v", err)
 	}
 }
 
@@ -121,6 +174,28 @@ func TestNativeRunnerExplicitConfigOverridesEnvironment(t *testing.T) {
 	}
 	if worker.NodeID != testNodeID || worker.AgentID != testAgentID || worker.Capacity != 3 || worker.Transport != RuntimeTransportPull {
 		t.Fatalf("worker = %#v", worker)
+	}
+}
+
+func TestNativeRunnerBuildsDiscoveryBackedWorkerWithoutMTLS(t *testing.T) {
+	clearRuntimeConfigEnv(t)
+	store, err := OpenFileRuntimeStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	runner := Native(func(context.Context, NativeRun) (any, error) { return Success(nil), nil }).
+		WithAPIBase("https://api.example.com").
+		WithNodeID(testNodeID).
+		WithAgentID(testAgentID).
+		WithAgentToken("ol_agent_test").
+		WithStore(store)
+	worker, err := runner.buildWorker(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worker.PlatformURL != "https://api.example.com" || worker.MTLS.CertFile != "" || worker.MTLS.KeyFile != "" || worker.MTLS.CAFile != "" {
+		t.Fatalf("discovery-backed worker = %#v", worker)
 	}
 }
 

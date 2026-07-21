@@ -252,13 +252,42 @@ func TestResolveRuntimeURLDiscoversWithoutRuntimeCredentials(t *testing.T) {
 	}
 }
 
-func TestResolveRuntimeURLOverrideSkipsDiscovery(t *testing.T) {
-	got, err := resolveRuntimeURL(context.Background(), "not-a-platform-url", " https://runtime.example.test:8443 ")
+func TestResolveRuntimeURLDirectOverrideUsesLegacyMTLS(t *testing.T) {
+	connection, err := resolveRuntimeConnection(context.Background(), "", " https://runtime.example.test:8443 ")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "https://runtime.example.test:8443" {
-		t.Fatalf("runtime URL = %q", got)
+	if connection.RuntimeURL != "https://runtime.example.test:8443" || !connection.MTLSRequired {
+		t.Fatalf("direct Runtime connection = %#v", connection)
+	}
+}
+
+func TestResolveRuntimeURLOverrideUsesDiscoveryPolicy(t *testing.T) {
+	var discoveryCalls atomic.Int32
+	var platform *httptest.Server
+	platform = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		discoveryCalls.Add(1)
+		_, _ = fmt.Fprintf(w, `{"base_urls":{"runtime":%q},"runtime":{"enabled":true,"mtls_required":false,"transports":["long_poll"]}}`, platform.URL)
+	}))
+	defer platform.Close()
+	override := "http://127.0.0.1:43123"
+	connection, err := resolveRuntimeConnection(context.Background(), platform.URL, override)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if connection.RuntimeURL != override || connection.MTLSRequired || discoveryCalls.Load() != 1 {
+		t.Fatalf("override connection = %#v, discovery calls = %d", connection, discoveryCalls.Load())
+	}
+}
+
+func TestResolveRuntimeURLOverrideCannotDowngradeMTLSManifest(t *testing.T) {
+	platform := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"base_urls":{"runtime":"https://runtime.example.test"},"runtime":{"enabled":true,"mtls_required":true}}`)
+	}))
+	defer platform.Close()
+	_, err := resolveRuntimeConnection(context.Background(), platform.URL, "http://127.0.0.1:43123")
+	if err == nil || !strings.Contains(err.Error(), "absolute HTTPS origin") {
+		t.Fatalf("mTLS override downgrade error = %v", err)
 	}
 }
 
