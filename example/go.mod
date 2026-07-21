@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/OpenLinker-ai/openlinker-go v0.0.0
 	github.com/gorilla/websocket v1.5.3
-	google.golang.org/grpc v1.82.0
+	google.golang.org/grpc v1.82.1
 )
 
 require (
