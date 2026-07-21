@@ -22,15 +22,14 @@ Runtime Node、mTLS、Agent 身份、SDK 代码、持久化、真实调用、can
 | 身份 | 典型配置 | 用途 | 谁创建 |
 | --- | --- | --- | --- |
 | 用户身份 | User Token 或登录 JWT | 创建 Run、查看结果、管理 Agent | 用户或管理员 |
-| Agent 身份 | `AgentID` + `AgentToken` | Worker 代表哪个 Agent 接收任务 | Agent 注册或管理流程 |
-| Runtime Node 身份 | `NodeID` + mTLS cert/key | 哪个受信任计算节点连接 Runtime | Core 运维人员 |
+| Agent 身份 | `AgentToken` | Worker 代表哪个 Agent 接收任务 | Agent 注册或管理流程 |
+| Runtime Node 身份 | `NodeID` + mTLS cert/key | 哪个受信任计算节点连接 Runtime | SDK 与 Core 自动创建 |
 
 不要混用：
 
 - User Token 不能作为 Runtime 长期凭据。
-- Agent Token 不能代替 Runtime Node mTLS 证书。
-- 自动注册只创建或复用 Agent 与 Agent Token，不创建 Runtime Node 和证书。
-- `NodeID` 不是 Pod ID、主机名或 SDK 生成的 WorkerID。
+- Agent Token 与 SDK 生成的 Node 公钥一对一绑定，二者不能互相替代。
+- `NodeID` 不是 Pod ID、主机名或 SDK 生成的 WorkerID；它由 SDK 持久生成。
 
 ## 2. 谁应该直接使用 RuntimeWorker
 
@@ -61,9 +60,8 @@ openlinker.NewRuntimeWorker(config)
 1. 确认 Core ready
 2. 创建或确认 Agent
 3. 创建 active_runtime Agent Token
-4. 运维签发 Runtime Node 与 mTLS 证书
-5. 分发 Node ID、Agent ID、Token 和证书
-6. 准备私有、持久化的 Runtime data 目录
+4. 准备私有、持久化的 Runtime data 目录
+5. 启动 Worker，由 SDK 自动生成 Node 私钥并向 Core 申请证书
 7. 实现 RuntimeHandler
 8. 创建并运行 RuntimeWorker
 9. 验证 Runtime Ready
@@ -125,32 +123,11 @@ err := openlinker.WithAgent(agent).
 首次运行需要 User Token。注册完成后保存 `AgentID` 和 `AgentToken`，后续启动不再使用 User
 Token。直接 `NewRuntimeWorker` 不会隐式创建 Agent。
 
-## 6. 签发 Runtime Node 和 mTLS
+## 6. 自动 Runtime Node 和 mTLS
 
-这一步由 Core 运维人员执行，不由 Agent Pod 自己执行。
-
-Core 运维命令示例：
-
-```bash
-/app/api runtime-node issue \
-  --ca-cert /secure/runtime-client-ca.crt \
-  --ca-key /secure/runtime-client-ca.key \
-  --display-name my-runtime-node \
-  --node-version openlinker-go/runtime-worker \
-  --capacity 1 \
-  --valid-for 8760h \
-  --cert-out /secure/runtime-node.crt \
-  --key-out /secure/runtime-node.key
-```
-
-该命令会登记 Runtime Node、生成 `NodeID`，并签发带严格 Runtime Node URI SAN 的客户端
-证书。Worker 还需要 Runtime server CA：
-
-```text
-runtime-server-ca.crt
-```
-
-Runtime Client CA 私钥只能保存在 Core 运维环境，不能分发给 Agent Pod。
+首次启动时，SDK 在 `DataDir` 生成 P-256 Node 私钥和 Node ID，以本地私钥签署 CSR，再用
+Agent Token 向 Core 请求证书。私钥不会离开 Worker。Core 自动登记 Node，并签发 24 小时
+客户端证书；SDK 在 12–16 小时随机续期，正常轮换无需运维或重启。
 
 ### 6.1 NodeVersion 必须完全一致
 
@@ -160,16 +137,10 @@ Runtime Client CA 私钥只能保存在 Core 运维环境，不能分发给 Agen
 openlinker-go/runtime-worker
 ```
 
-Node 登记也必须使用同一个值。如果代码设置：
+自动登记会直接使用 Worker 上报的值。如果代码设置：
 
 ```go
 config.NodeVersion = "my-runtime/1.0"
-```
-
-签发时必须使用：
-
-```text
---node-version my-runtime/1.0
 ```
 
 不一致时 Core 会拒绝连接：
@@ -190,52 +161,24 @@ Node capacity = 3
 每个 Worker capacity = 1
 ```
 
-### 6.3 检查证书
+### 6.3 检查凭证
 
-```bash
-openssl x509 -in runtime-node.crt -noout \
-  -subject -issuer -dates -serial -fingerprint -sha256
-
-openssl x509 -in runtime-node.crt -noout -text \
-  | sed -n '/Subject Alternative Name/,+2p'
-```
-
-URI SAN 中的 Node ID 必须与 `OPENLINKER_NODE_ID` 一致。
-
-检查 cert/key：
-
-```bash
-openssl x509 -in runtime-node.crt -pubkey -noout | openssl sha256
-openssl pkey -in runtime-node.key -pubout | openssl sha256
-```
-
-两行摘要必须相同。
+Core Web 管理员的 Runtime Nodes 页面可以查看 Node 状态并执行排空、激活和撤销。Node 私钥、
+证书与信任链位于私有 `DataDir`，由 SDK 校验完整性和 `0600` 权限，不需要人工拆分或复制。
 
 ## 7. 准备运行配置
 
 ```bash
 export OPENLINKER_API_BASE='https://openlinker.example'
-export OPENLINKER_RUNTIME_BASE='https://runtime.openlinker.example'
-
-export OPENLINKER_NODE_ID='11111111-1111-4111-8111-111111111111'
-export OPENLINKER_AGENT_ID='22222222-2222-4222-8222-222222222222'
 export OPENLINKER_AGENT_TOKEN='<从 Secret 或受保护文件读取>'
-
-export OPENLINKER_NODE_CERT_FILE='/run/openlinker/runtime-node.crt'
-export OPENLINKER_NODE_KEY_FILE='/run/openlinker/runtime-node.key'
-export OPENLINKER_RUNTIME_CA_FILE='/run/openlinker/runtime-server-ca.crt'
 
 export OPENLINKER_RUNTIME_TRANSPORT='auto'
 export OPENLINKER_RUNTIME_CAPACITY='1'
 export OPENLINKER_RUNTIME_DATA_DIR='/var/lib/my-agent/runtime'
 ```
 
-`OPENLINKER_RUNTIME_BASE` 可以省略，由 Worker 通过 `OPENLINKER_API_BASE` 发现；生产环境显式
-设置通常更易排查。只有 Runtime URL 主机名与证书 SAN 需要覆盖时才设置：
-
-```bash
-export OPENLINKER_RUNTIME_SERVER_NAME='runtime.openlinker.example'
-```
+Runtime origin 与 mTLS/token-only 策略由 Worker 通过 `OPENLINKER_API_BASE` 的公开清单发现；
+普通生产配置不要覆盖 Runtime URL。
 
 不要把 Token 写入镜像、Git、普通 ConfigMap、命令历史或日志。
 
@@ -430,7 +373,7 @@ curl -fsS -X POST \
 
 1. 记录 WorkerID 和 SessionEpoch。
 2. 发送 `SIGTERM` 或删除 Pod。
-3. 使用相同 Agent ID、Node ID 和 `DataDir` 启动。
+3. 使用相同 Agent Token 和 `DataDir` 启动。
 4. 确认 WorkerID 不变、SessionEpoch 递增。
 5. 再创建真实 Run。
 
@@ -452,22 +395,15 @@ ConfigMap 放非敏感配置：
 
 ```text
 OPENLINKER_API_BASE
-OPENLINKER_RUNTIME_BASE
-OPENLINKER_NODE_ID
-OPENLINKER_AGENT_ID
 OPENLINKER_RUNTIME_TRANSPORT
 OPENLINKER_RUNTIME_CAPACITY
 OPENLINKER_RUNTIME_DATA_DIR
-证书文件路径
 ```
 
 Secret 放：
 
 ```text
 OPENLINKER_AGENT_TOKEN
-runtime-node.crt
-runtime-node.key
-runtime-server-ca.crt
 ```
 
 User Token 不进入生产 Worker Pod。
@@ -553,7 +489,7 @@ terminationGracePeriodSeconds: 90
 | `RUNTIME_CLIENT_UPGRADE_REQUIRED` | NodeVersion、protocol 或 contract 不一致 | 先核对登记 NodeVersion 与上报值 |
 | `runtime identity is corrupt` | 内容损坏、权限不是 `0600`，或错误复用 Node identity | 先检查权限，不要直接删除 DataDir |
 | `runtime spool key is invalid` | spool key 长度或权限被改变 | 检查 PVC、`fsGroup` 和文件模式 |
-| mTLS handshake 失败 | cert/key、CA 或 SAN 不匹配 | 使用 OpenSSL 检查证书链和公钥 |
+| mTLS handshake 失败 | Core 不可达、证书续期失败或 Node 已撤销 | 检查 Core、Agent Token 与管理员 Node 状态 |
 | HTTP 401/403 | Agent Token 无效、撤销或 scope 不足 | 检查 active_runtime Token |
 | Runtime 503 | Core 维护或 member 未 ready | 检查 Core `/readyz` |
 | WebSocket 不 fallback | 实际是认证、mTLS 或 contract 永久错误 | 修复配置，不要强制 fallback |
@@ -566,15 +502,14 @@ terminationGracePeriodSeconds: 90
 ### 平台和身份
 
 - [ ] Core `/readyz` 为 `ready=true`、`mode=normal`。
-- [ ] Agent ID 正确，Agent Token 为 `active_runtime`。
-- [ ] Node ID 已登记且未 revoked。
+- [ ] Agent Token 为 `active_runtime`。
+- [ ] 自动登记的 Node 未 revoked。
 - [ ] NodeVersion 与 Worker 上报值完全一致。
 - [ ] Node capacity 足够。
 
 ### mTLS 和持久化
 
-- [ ] Node cert/key 匹配，server CA 正确。
-- [ ] Runtime URL 主机名或 IP 在 server cert SAN 中。
+- [ ] 24 小时证书已自动签发，续期任务正常。
 - [ ] `DataDir` 持久化且独占。
 - [ ] 目录 `0700`、私有文件 `0600`。
 - [ ] K8s 设置 `fsGroupChangePolicy: OnRootMismatch`。

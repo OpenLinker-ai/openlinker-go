@@ -30,6 +30,11 @@ type RuntimeA2AProxyConfig struct {
 	RuntimeURL  string
 	AgentToken  string
 	AgentSlug   string
+	DataDir     string
+	NodeID      string
+	AgentID     string
+	NodeVersion string
+	Capacity    int64
 	MTLS        RuntimeMTLSConfig
 }
 
@@ -54,6 +59,36 @@ func NewRuntimeA2AProxy(ctx context.Context, config RuntimeA2AProxyConfig) (*Run
 	connection, err := resolveRuntimeConnection(ctx, config.PlatformURL, config.RuntimeURL)
 	if err != nil {
 		return nil, err
+	}
+	explicitMTLS := config.MTLS.CertFile != "" && config.MTLS.KeyFile != "" && config.MTLS.CAFile != ""
+	if !explicitMTLS || !connection.MTLSRequired {
+		credentialEndpoint := connection.CredentialEndpoint
+		if credentialEndpoint == "" && config.PlatformURL != "" {
+			platformOrigin, platformErr := validatePlatformOrigin(config.PlatformURL)
+			if platformErr != nil {
+				return nil, platformErr
+			}
+			credentialEndpoint = platformOrigin + "/api/v1/runtime-credentials"
+		}
+		manager, managerErr := newRuntimeCredentialManager(
+			config.DataDir, credentialEndpoint, config.AgentToken,
+			config.NodeID, config.AgentID, config.NodeVersion, config.Capacity, nil,
+		)
+		if managerErr != nil {
+			return nil, managerErr
+		}
+		if managerErr = manager.Ensure(ctx, false); managerErr != nil {
+			return nil, managerErr
+		}
+		config.MTLS.credentialManager = manager
+		config.MTLS.Disabled = !connection.MTLSRequired
+		if connection.MTLSRequired {
+			config.MTLS.tlsConfig, managerErr = manager.TLSConfig()
+			if managerErr != nil {
+				return nil, managerErr
+			}
+		}
+		manager.Start(ctx)
 	}
 	_, httpClient, err := newRuntimeClient(connection.RuntimeURL, config.AgentToken, config.MTLS)
 	if err != nil {

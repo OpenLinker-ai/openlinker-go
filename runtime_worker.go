@@ -46,8 +46,9 @@ type RuntimeWorker struct {
 	Logger  *log.Logger
 	OnReady func(RuntimeReadyPayload)
 
-	runtimeClient RuntimeClient
-	runtimeDialer RuntimeTransportDialer
+	runtimeClient     RuntimeClient
+	runtimeDialer     RuntimeTransportDialer
+	credentialManager *runtimeCredentialManager
 
 	lifecycleMu            sync.Mutex
 	started                bool
@@ -126,8 +127,10 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 	if err := node.applyDefaultsAndValidate(); err != nil {
 		return err
 	}
+	connection := runtimeConnectionInformation{MTLSRequired: true}
 	if node.runtimeClient == nil {
-		connection, err := resolveRuntimeConnection(parent, node.PlatformURL, node.RuntimeURL)
+		var err error
+		connection, err = resolveRuntimeConnection(parent, node.PlatformURL, node.RuntimeURL)
 		if err != nil {
 			return err
 		}
@@ -157,12 +160,46 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 	node.store = node.Store
 
 	if node.runtimeClient == nil {
+		explicitMTLS := node.MTLS.CertFile != "" && node.MTLS.KeyFile != "" && node.MTLS.CAFile != ""
+		if !explicitMTLS || !connection.MTLSRequired {
+			credentialEndpoint := connection.CredentialEndpoint
+			if credentialEndpoint == "" && node.PlatformURL != "" {
+				platformOrigin, platformErr := validatePlatformOrigin(node.PlatformURL)
+				if platformErr != nil {
+					return platformErr
+				}
+				credentialEndpoint = platformOrigin + "/api/v1/runtime-credentials"
+			}
+			manager, managerErr := newRuntimeCredentialManager(
+				node.DataDir, credentialEndpoint, node.AgentToken, node.NodeID, node.AgentID,
+				node.NodeVersion, node.Capacity, node.Logger,
+			)
+			if managerErr != nil {
+				return managerErr
+			}
+			if managerErr = manager.Ensure(startupCtx, false); managerErr != nil {
+				return managerErr
+			}
+			node.NodeID, node.AgentID = manager.Identity()
+			node.credentialManager = manager
+			node.MTLS.credentialManager = manager
+			node.MTLS.Disabled = !connection.MTLSRequired
+			if connection.MTLSRequired {
+				node.MTLS.tlsConfig, managerErr = manager.TLSConfig()
+				if managerErr != nil {
+					return managerErr
+				}
+			}
+			manager.Start(startupCtx)
+		} else {
+			node.MTLS.Disabled = false
+		}
 		runtimeClient, httpClient, err := newRuntimeClient(node.RuntimeURL, node.AgentToken, node.MTLS)
 		if err != nil {
 			return err
 		}
 		node.runtimeClient = runtimeClient
-		node.runtimeDialer = &sdkRuntimeTransportDialer{runtime: runtimeClient}
+		node.runtimeDialer = &sdkRuntimeTransportDialer{runtime: runtimeClient, credentials: node.credentialManager}
 		node.httpClient = httpClient
 	}
 	if node.runtimeDialer != nil {
@@ -294,11 +331,18 @@ func (node *RuntimeWorker) applyDefaultsAndValidate() error {
 	default:
 		return errors.New("transport must be auto, ws, or pull")
 	}
-	if !validRuntimeUUID(node.NodeID) {
+	explicitMTLS := node.MTLS.CertFile != "" || node.MTLS.KeyFile != "" || node.MTLS.CAFile != ""
+	if explicitMTLS && (node.MTLS.CertFile == "" || node.MTLS.KeyFile == "" || node.MTLS.CAFile == "") {
+		return errors.New("runtime mTLS cert, key, and CA files must be configured together")
+	}
+	if node.NodeID != "" && !validRuntimeUUID(node.NodeID) {
 		return errors.New("RuntimeWorker ID must be a non-zero lowercase UUID")
 	}
-	if !validRuntimeUUID(node.AgentID) {
+	if node.AgentID != "" && !validRuntimeUUID(node.AgentID) {
 		return errors.New("Agent ID must be a non-zero lowercase UUID")
+	}
+	if explicitMTLS && (!validRuntimeUUID(node.NodeID) || !validRuntimeUUID(node.AgentID)) {
+		return errors.New("RuntimeWorker ID and Agent ID are required with explicit mTLS files")
 	}
 	if node.AgentToken == "" && node.runtimeClient == nil {
 		return errors.New("Agent Token is required")
@@ -308,9 +352,6 @@ func (node *RuntimeWorker) applyDefaultsAndValidate() error {
 	}
 	if node.Handler == nil {
 		return errors.New("runtime handler is required")
-	}
-	if node.runtimeClient == nil && (node.MTLS.CertFile == "" || node.MTLS.KeyFile == "" || node.MTLS.CAFile == "") {
-		return errors.New("runtime mTLS cert, key, and CA files are required")
 	}
 	if node.Capacity == 0 {
 		node.Capacity = RuntimeWorkerDefaultCapacity
@@ -410,7 +451,7 @@ func (node *RuntimeWorker) shutdown(ctx context.Context) error {
 		node.store = nil
 	}
 	if node.httpClient != nil {
-		if transport, ok := node.httpClient.Transport.(*http.Transport); ok {
+		if transport, ok := node.httpClient.Transport.(interface{ CloseIdleConnections() }); ok {
 			transport.CloseIdleConnections()
 		}
 	}
