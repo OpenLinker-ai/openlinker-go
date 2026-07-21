@@ -292,14 +292,14 @@ func TestResolveRuntimeURLFailsClosedForUnavailableManifest(t *testing.T) {
 func TestResolveRuntimeConnectionAllowsExplicitTokenOnlyPolicy(t *testing.T) {
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = fmt.Fprintf(w, `{"base_urls":{"runtime":%q},"runtime":{"enabled":true,"mtls_required":false,"credential_endpoint":%q}}`, server.URL, server.URL+"/api/v1/runtime-credentials")
+		_, _ = fmt.Fprintf(w, `{"base_urls":{"runtime":%q},"runtime":{"enabled":true,"mtls_required":false}}`, server.URL)
 	}))
 	defer server.Close()
 	connection, err := resolveRuntimeConnection(context.Background(), server.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if connection.MTLSRequired || connection.RuntimeURL != server.URL || connection.CredentialEndpoint == "" {
+	if connection.MTLSRequired || connection.RuntimeURL != server.URL || connection.CredentialEndpoint != "" || connection.TrustBundleEndpoint != "" {
 		t.Fatalf("token-only connection = %#v", connection)
 	}
 }

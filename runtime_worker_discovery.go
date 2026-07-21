@@ -112,7 +112,11 @@ func resolveRuntimeConnection(ctx context.Context, platformURL, override string)
 		return runtimeConnectionInformation{}, err
 	}
 	credentialEndpoint := strings.TrimSpace(manifest.Runtime.CredentialEndpoint)
-	if credentialEndpoint == "" {
+	trustBundleEndpoint := strings.TrimSpace(manifest.Runtime.TrustBundleEndpoint)
+	if !manifest.Runtime.MTLSRequired {
+		credentialEndpoint = ""
+		trustBundleEndpoint = ""
+	} else if credentialEndpoint == "" {
 		credentialEndpoint = platformOrigin + "/api/v1/runtime-credentials"
 	}
 	return runtimeConnectionInformation{
@@ -120,7 +124,7 @@ func resolveRuntimeConnection(ctx context.Context, platformURL, override string)
 		Policy:              policy,
 		MTLSRequired:        manifest.Runtime.MTLSRequired,
 		CredentialEndpoint:  credentialEndpoint,
-		TrustBundleEndpoint: strings.TrimSpace(manifest.Runtime.TrustBundleEndpoint),
+		TrustBundleEndpoint: trustBundleEndpoint,
 	}, nil
 }
 
