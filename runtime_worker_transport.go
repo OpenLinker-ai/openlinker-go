@@ -44,8 +44,9 @@ type RuntimeTransportDialer interface {
 }
 
 type sdkRuntimeTransportDialer struct {
-	mu      sync.RWMutex
-	runtime *Runtime
+	mu          sync.RWMutex
+	runtime     *Runtime
+	credentials *runtimeCredentialManager
 }
 
 func (dialer *sdkRuntimeTransportDialer) setRuntime(runtime *Runtime) {
@@ -68,6 +69,18 @@ func (dialer *sdkRuntimeTransportDialer) DialRuntimeWebSocket(
 	if runtime == nil {
 		return nil, errors.New("runtime WebSocket dialer is unavailable")
 	}
+	if dialer.credentials != nil {
+		if err := dialer.credentials.Ensure(ctx, false); err != nil {
+			return nil, err
+		}
+	}
+	client, err := runtime.DialRuntimeWebSocket(ctx, hello)
+	if err == nil || dialer.credentials == nil || !runtimeCredentialTLSFailure(err) {
+		return client, err
+	}
+	if renewErr := dialer.credentials.Ensure(ctx, true); renewErr != nil {
+		return nil, errors.Join(err, renewErr)
+	}
 	return runtime.DialRuntimeWebSocket(ctx, hello)
 }
 
@@ -75,6 +88,18 @@ func (dialer *sdkRuntimeTransportDialer) ProbeRuntimeWebSocket(ctx context.Conte
 	runtime := dialer.current()
 	if runtime == nil {
 		return errors.New("runtime WebSocket dialer is unavailable")
+	}
+	if dialer.credentials != nil {
+		if err := dialer.credentials.Ensure(ctx, false); err != nil {
+			return err
+		}
+	}
+	err := runtime.ProbeRuntimeWebSocket(ctx)
+	if err == nil || dialer.credentials == nil || !runtimeCredentialTLSFailure(err) {
+		return err
+	}
+	if renewErr := dialer.credentials.Ensure(ctx, true); renewErr != nil {
+		return errors.Join(err, renewErr)
 	}
 	return runtime.ProbeRuntimeWebSocket(ctx)
 }

@@ -270,7 +270,6 @@ func TestResolveRuntimeURLFailsClosedForUnavailableManifest(t *testing.T) {
 	}{
 		{name: "disabled", body: `{"base_urls":{},"runtime":{"enabled":false,"mtls_required":true}}`, want: "does not provide"},
 		{name: "missing origin", body: `{"base_urls":{},"runtime":{"enabled":true,"mtls_required":true}}`, want: "does not provide"},
-		{name: "mTLS disabled", body: `{"base_urls":{"runtime":"https://runtime.example.test"},"runtime":{"enabled":true,"mtls_required":false}}`, want: "expected mTLS"},
 		{name: "invalid JSON", body: `{`, want: "decode OpenLinker"},
 		{name: "trailing JSON", body: `{"runtime":{"enabled":false}} {}`, want: "trailing JSON"},
 		{name: "insecure runtime", body: `{"base_urls":{"runtime":"http://127.0.0.1:8443"},"runtime":{"enabled":true,"mtls_required":true}}`, want: "absolute HTTPS origin"},
@@ -287,6 +286,21 @@ func TestResolveRuntimeURLFailsClosedForUnavailableManifest(t *testing.T) {
 				t.Fatalf("error = %v, want substring %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestResolveRuntimeConnectionAllowsExplicitTokenOnlyPolicy(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"base_urls":{"runtime":%q},"runtime":{"enabled":true,"mtls_required":false,"credential_endpoint":%q}}`, server.URL, server.URL+"/api/v1/runtime-credentials")
+	}))
+	defer server.Close()
+	connection, err := resolveRuntimeConnection(context.Background(), server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if connection.MTLSRequired || connection.RuntimeURL != server.URL || connection.CredentialEndpoint == "" {
+		t.Fatalf("token-only connection = %#v", connection)
 	}
 }
 

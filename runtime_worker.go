@@ -46,8 +46,10 @@ type RuntimeWorker struct {
 	Logger  *log.Logger
 	OnReady func(RuntimeReadyPayload)
 
-	runtimeClient RuntimeClient
-	runtimeDialer RuntimeTransportDialer
+	runtimeClient       RuntimeClient
+	runtimeDialer       RuntimeTransportDialer
+	credentialManager   *runtimeCredentialManager
+	runtimeMTLSRequired bool
 
 	lifecycleMu            sync.Mutex
 	started                bool
@@ -126,8 +128,10 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 	if err := node.applyDefaultsAndValidate(); err != nil {
 		return err
 	}
+	connection := runtimeConnectionInformation{MTLSRequired: true}
 	if node.runtimeClient == nil {
-		connection, err := resolveRuntimeConnection(parent, node.PlatformURL, node.RuntimeURL)
+		var err error
+		connection, err = resolveRuntimeConnection(parent, node.PlatformURL, node.RuntimeURL)
 		if err != nil {
 			return err
 		}
@@ -135,6 +139,7 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 		if err = node.applyRuntimeTransportPolicy(connection.Policy); err != nil {
 			return err
 		}
+		node.runtimeMTLSRequired = connection.MTLSRequired
 	}
 	startupCtx, cancelStartup := context.WithCancel(parent)
 	defer cancelStartup()
@@ -157,12 +162,15 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 	node.store = node.Store
 
 	if node.runtimeClient == nil {
-		runtimeClient, httpClient, err := newRuntimeClient(node.RuntimeURL, node.AgentToken, node.MTLS)
+		if err = node.configureRuntimeSecurity(startupCtx, connection); err != nil {
+			return err
+		}
+		runtimeClient, httpClient, err := newRuntimeClient(node.RuntimeURL, node.AgentToken, node.NodeID, node.MTLS)
 		if err != nil {
 			return err
 		}
 		node.runtimeClient = runtimeClient
-		node.runtimeDialer = &sdkRuntimeTransportDialer{runtime: runtimeClient}
+		node.runtimeDialer = &sdkRuntimeTransportDialer{runtime: runtimeClient, credentials: node.credentialManager}
 		node.httpClient = httpClient
 	}
 	if node.runtimeDialer != nil {
@@ -208,6 +216,53 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 	case err := <-node.fatal:
 		return err
 	}
+}
+
+func (node *RuntimeWorker) configureRuntimeSecurity(
+	ctx context.Context,
+	connection runtimeConnectionInformation,
+) error {
+	node.MTLS.Disabled = !connection.MTLSRequired
+	if !connection.MTLSRequired {
+		if !validRuntimeUUID(node.NodeID) || !validRuntimeUUID(node.AgentID) {
+			return errors.New("RuntimeWorker ID and Agent ID are required for token-only Runtime transport")
+		}
+		node.MTLS.tlsConfig = nil
+		node.MTLS.credentialManager = nil
+		node.credentialManager = nil
+		return nil
+	}
+	explicitMTLS := node.MTLS.CertFile != "" && node.MTLS.KeyFile != "" && node.MTLS.CAFile != ""
+	if explicitMTLS {
+		return nil
+	}
+	credentialEndpoint := connection.CredentialEndpoint
+	if credentialEndpoint == "" && node.PlatformURL != "" {
+		platformOrigin, err := validatePlatformOrigin(node.PlatformURL)
+		if err != nil {
+			return err
+		}
+		credentialEndpoint = platformOrigin + "/api/v1/runtime-credentials"
+	}
+	manager, err := newRuntimeCredentialManager(
+		node.DataDir, credentialEndpoint, node.AgentToken, node.NodeID, node.AgentID,
+		node.NodeVersion, node.Capacity, node.Logger,
+	)
+	if err != nil {
+		return err
+	}
+	if err = manager.Ensure(ctx, false); err != nil {
+		return err
+	}
+	node.NodeID, node.AgentID = manager.Identity()
+	node.credentialManager = manager
+	node.MTLS.credentialManager = manager
+	node.MTLS.tlsConfig, err = manager.TLSConfig()
+	if err != nil {
+		return err
+	}
+	manager.Start(ctx)
+	return nil
 }
 
 // Run is the facade-friendly alias for Start.
@@ -294,11 +349,18 @@ func (node *RuntimeWorker) applyDefaultsAndValidate() error {
 	default:
 		return errors.New("transport must be auto, ws, or pull")
 	}
-	if !validRuntimeUUID(node.NodeID) {
+	explicitMTLS := node.MTLS.CertFile != "" || node.MTLS.KeyFile != "" || node.MTLS.CAFile != ""
+	if explicitMTLS && (node.MTLS.CertFile == "" || node.MTLS.KeyFile == "" || node.MTLS.CAFile == "") {
+		return errors.New("runtime mTLS cert, key, and CA files must be configured together")
+	}
+	if node.NodeID != "" && !validRuntimeUUID(node.NodeID) {
 		return errors.New("RuntimeWorker ID must be a non-zero lowercase UUID")
 	}
-	if !validRuntimeUUID(node.AgentID) {
+	if node.AgentID != "" && !validRuntimeUUID(node.AgentID) {
 		return errors.New("Agent ID must be a non-zero lowercase UUID")
+	}
+	if explicitMTLS && (!validRuntimeUUID(node.NodeID) || !validRuntimeUUID(node.AgentID)) {
+		return errors.New("RuntimeWorker ID and Agent ID are required with explicit mTLS files")
 	}
 	if node.AgentToken == "" && node.runtimeClient == nil {
 		return errors.New("Agent Token is required")
@@ -308,9 +370,6 @@ func (node *RuntimeWorker) applyDefaultsAndValidate() error {
 	}
 	if node.Handler == nil {
 		return errors.New("runtime handler is required")
-	}
-	if node.runtimeClient == nil && (node.MTLS.CertFile == "" || node.MTLS.KeyFile == "" || node.MTLS.CAFile == "") {
-		return errors.New("runtime mTLS cert, key, and CA files are required")
 	}
 	if node.Capacity == 0 {
 		node.Capacity = RuntimeWorkerDefaultCapacity
@@ -410,7 +469,7 @@ func (node *RuntimeWorker) shutdown(ctx context.Context) error {
 		node.store = nil
 	}
 	if node.httpClient != nil {
-		if transport, ok := node.httpClient.Transport.(*http.Transport); ok {
+		if transport, ok := node.httpClient.Transport.(interface{ CloseIdleConnections() }); ok {
 			transport.CloseIdleConnections()
 		}
 	}

@@ -18,6 +18,7 @@ import (
 
 const (
 	RuntimeAttachmentHeader     = "OpenLinker-Runtime-Attachment"
+	RuntimeNodeIDHeader         = "OpenLinker-Runtime-Node"
 	RuntimeFallbackReasonHeader = "OpenLinker-Runtime-Fallback-Reason"
 )
 

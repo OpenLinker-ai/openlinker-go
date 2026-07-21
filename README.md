@@ -257,16 +257,9 @@ confirms the assignment.
 ```go
 worker, err := openlinker.NewRuntimeWorker(openlinker.RuntimeWorkerConfig{
 	PlatformURL: "https://openlinker.example",
-	NodeID:      os.Getenv("OPENLINKER_NODE_ID"),
-	AgentID:     os.Getenv("OPENLINKER_AGENT_ID"),
 	AgentToken:  os.Getenv("OPENLINKER_AGENT_TOKEN"),
 	Transport:   openlinker.RuntimeTransportAuto,
 	DataDir:     "/var/lib/my-agent/runtime",
-	MTLS: openlinker.RuntimeMTLSConfig{
-		CertFile: "/run/openlinker/node.crt",
-		KeyFile:  "/run/openlinker/node.key",
-		CAFile:   "/run/openlinker/core-ca.crt",
-	},
 	Handler: openlinker.RuntimeHandlerFunc(func(ctx context.Context, run openlinker.RuntimeContext) (openlinker.RuntimeResult, error) {
 		if err := run.Emit("run.message.delta", map[string]any{"text": "working"}); err != nil {
 			return openlinker.RuntimeResult{}, err
@@ -285,6 +278,9 @@ if err := worker.Start(context.Background()); err != nil {
 Production workers should use the default `FileRuntimeStore` through `DataDir`,
 or inject another durable `RuntimeStore`. An in-memory store is suitable only
 for explicit tests. `NodeVersion` defaults to `openlinker-go/runtime-worker` and
+the SDK generates the Node ID/private key in `DataDir`, enrolls it with the
+Agent Token, and renews the 24-hour certificate automatically. Explicit
+`RuntimeMTLSConfig` files remain available only for external-PKI compatibility.
 can be set when the host binary has its own enrolled version.
 
 The canonical WebSocket endpoint is `/api/v1/agent-runtime/ws`; HTTP methods

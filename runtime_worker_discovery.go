@@ -27,11 +27,13 @@ type openLinkerDiscoveryManifest struct {
 		Runtime string `json:"runtime"`
 	} `json:"base_urls"`
 	Runtime struct {
-		Enabled          bool                               `json:"enabled"`
-		MTLSRequired     bool                               `json:"mtls_required"`
-		Transports       []string                           `json:"transports"`
-		DefaultTransport *string                            `json:"default_transport"`
-		TransportPolicy  *openLinkerManifestTransportPolicy `json:"transport_policy"`
+		Enabled             bool                               `json:"enabled"`
+		MTLSRequired        bool                               `json:"mtls_required"`
+		CredentialEndpoint  string                             `json:"credential_endpoint"`
+		TrustBundleEndpoint string                             `json:"trust_bundle_endpoint"`
+		Transports          []string                           `json:"transports"`
+		DefaultTransport    *string                            `json:"default_transport"`
+		TransportPolicy     *openLinkerManifestTransportPolicy `json:"transport_policy"`
 	} `json:"runtime"`
 }
 
@@ -46,14 +48,17 @@ type openLinkerManifestTransportPolicy struct {
 }
 
 type runtimeConnectionInformation struct {
-	RuntimeURL string
-	Policy     runtimeTransportPolicy
+	RuntimeURL          string
+	Policy              runtimeTransportPolicy
+	MTLSRequired        bool
+	CredentialEndpoint  string
+	TrustBundleEndpoint string
 }
 
 func resolveRuntimeConnection(ctx context.Context, platformURL, override string) (runtimeConnectionInformation, error) {
 	if strings.TrimSpace(override) != "" {
 		runtimeURL, err := validateRuntimeOrigin(override)
-		return runtimeConnectionInformation{RuntimeURL: runtimeURL, Policy: legacyRuntimeTransportPolicy()}, err
+		return runtimeConnectionInformation{RuntimeURL: runtimeURL, Policy: legacyRuntimeTransportPolicy(), MTLSRequired: true}, err
 	}
 	platformOrigin, err := validatePlatformOrigin(platformURL)
 	if err != nil {
@@ -95,13 +100,10 @@ func resolveRuntimeConnection(ctx context.Context, platformURL, override string)
 	if !manifest.Runtime.Enabled {
 		return runtimeConnectionInformation{}, errors.New("this OpenLinker instance does not provide a Runtime connection address")
 	}
-	if !manifest.Runtime.MTLSRequired {
-		return runtimeConnectionInformation{}, errors.New("OpenLinker connection information does not require the expected mTLS identity")
-	}
 	if strings.TrimSpace(manifest.BaseURLs.Runtime) == "" {
 		return runtimeConnectionInformation{}, errors.New("this OpenLinker instance does not provide a Runtime connection address")
 	}
-	runtimeURL, err := validateRuntimeOrigin(manifest.BaseURLs.Runtime)
+	runtimeURL, err := validateRuntimeOriginForPolicy(manifest.BaseURLs.Runtime, !manifest.Runtime.MTLSRequired)
 	if err != nil {
 		return runtimeConnectionInformation{}, err
 	}
@@ -109,7 +111,17 @@ func resolveRuntimeConnection(ctx context.Context, platformURL, override string)
 	if err != nil {
 		return runtimeConnectionInformation{}, err
 	}
-	return runtimeConnectionInformation{RuntimeURL: runtimeURL, Policy: policy}, nil
+	credentialEndpoint := strings.TrimSpace(manifest.Runtime.CredentialEndpoint)
+	if credentialEndpoint == "" {
+		credentialEndpoint = platformOrigin + "/api/v1/runtime-credentials"
+	}
+	return runtimeConnectionInformation{
+		RuntimeURL:          runtimeURL,
+		Policy:              policy,
+		MTLSRequired:        manifest.Runtime.MTLSRequired,
+		CredentialEndpoint:  credentialEndpoint,
+		TrustBundleEndpoint: strings.TrimSpace(manifest.Runtime.TrustBundleEndpoint),
+	}, nil
 }
 
 func resolveRuntimeURL(ctx context.Context, platformURL, override string) (string, error) {
@@ -137,6 +149,10 @@ func validatePlatformOrigin(raw string) (string, error) {
 
 func validateRuntimeOrigin(raw string) (string, error) {
 	return validateOrigin(raw, false, "Runtime connection address")
+}
+
+func validateRuntimeOriginForPolicy(raw string, allowLoopbackHTTP bool) (string, error) {
+	return validateOrigin(raw, allowLoopbackHTTP, "Runtime connection address")
 }
 
 func validateOrigin(raw string, allowLoopbackHTTP bool, label string) (string, error) {
