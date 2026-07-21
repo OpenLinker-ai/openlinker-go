@@ -3,7 +3,7 @@
 [English](runtime-worker-end-to-end.md)
 
 本文是 `openlinker-go` 中运行 Managed `RuntimeWorker` 的端到端操作手册，覆盖平台资源、
-Runtime Node、mTLS、Agent 身份、SDK 代码、持久化、真实调用、cancel、重启和 K8s 部署。
+Runtime Node 身份、发现得到的安全策略、Agent 身份、SDK 代码、持久化、真实调用、cancel、重启和 K8s 部署。
 
 只看到 `Runtime Ready` 不能说明 Agent 已经可用。完整验收分为三层：
 
@@ -23,12 +23,12 @@ Runtime Node、mTLS、Agent 身份、SDK 代码、持久化、真实调用、can
 | --- | --- | --- | --- |
 | 用户身份 | User Token 或登录 JWT | 创建 Run、查看结果、管理 Agent | 用户或管理员 |
 | Agent 身份 | `AgentToken` | Worker 代表哪个 Agent 接收任务 | Agent 注册或管理流程 |
-| Runtime Node 身份 | `NodeID` + mTLS cert/key | 哪个受信任计算节点连接 Runtime | SDK 与 Core 自动创建 |
+| Runtime Node 身份 | `NodeID`；仅 mTLS 策略需要 cert/key | 哪个计算节点连接 Runtime | SDK 与 Core 自动创建 |
 
 不要混用：
 
 - User Token 不能作为 Runtime 长期凭据。
-- Agent Token 与 SDK 生成的 Node 公钥一对一绑定，二者不能互相替代。
+- 平台发现决定 Runtime 使用 token-only 还是 mTLS，不能由客户端自行降级。
 - `NodeID` 不是 Pod ID、主机名或 SDK 生成的 WorkerID；它由 SDK 持久生成。
 
 ## 2. 谁应该直接使用 RuntimeWorker
@@ -61,7 +61,7 @@ openlinker.NewRuntimeWorker(config)
 2. 创建或确认 Agent
 3. 创建 active_runtime Agent Token
 4. 准备私有、持久化的 Runtime data 目录
-5. 启动 Worker，由 SDK 自动生成 Node 私钥并向 Core 申请证书
+5. 启动 Worker；token-only 不加载证书，mTLS 策略下由 SDK 自动登记并续期证书
 7. 实现 RuntimeHandler
 8. 创建并运行 RuntimeWorker
 9. 验证 Runtime Ready
@@ -123,11 +123,12 @@ err := openlinker.WithAgent(agent).
 首次运行需要 User Token。注册完成后保存 `AgentID` 和 `AgentToken`，后续启动不再使用 User
 Token。直接 `NewRuntimeWorker` 不会隐式创建 Agent。
 
-## 6. 自动 Runtime Node 和 mTLS
+## 6. 自动 Runtime Node 和发现驱动的安全策略
 
-首次启动时，SDK 在 `DataDir` 生成 P-256 Node 私钥和 Node ID，以本地私钥签署 CSR，再用
-Agent Token 向 Core 请求证书。私钥不会离开 Worker。Core 自动登记 Node，并签发 24 小时
-客户端证书；SDK 在 12–16 小时随机续期，正常轮换无需运维或重启。
+Worker 先读取平台发现清单。`mtls_required=false` 时使用 Agent Token、稳定的 Node ID 和
+Agent ID，不加载证书文件；`mtls_required=true` 时 SDK 在 `DataDir` 生成 P-256 Node 私钥，
+以本地私钥签署 CSR，再用 Agent Token 向 Core 请求证书。私钥不会离开 Worker。Core 自动
+登记 Node，并签发 24 小时客户端证书；SDK 在 12–16 小时随机续期。
 
 ### 6.1 NodeVersion 必须完全一致
 
@@ -164,7 +165,7 @@ Node capacity = 3
 ### 6.3 检查凭证
 
 Core Web 管理员的 Runtime Nodes 页面可以查看 Node 状态并执行排空、激活和撤销。Node 私钥、
-证书与信任链位于私有 `DataDir`，由 SDK 校验完整性和 `0600` 权限，不需要人工拆分或复制。
+在 mTLS 策略下，证书与信任链位于私有 `DataDir`，由 SDK 校验完整性和 `0600` 权限，不需要人工拆分或复制。
 
 ## 7. 准备运行配置
 
@@ -193,7 +194,6 @@ Runtime origin 与 mTLS/token-only 策略由 Worker 通过 `OPENLINKER_API_BASE`
 
 ```bash
 install -d -m 700 /var/lib/my-agent/runtime
-chmod 600 /run/openlinker/runtime-node.key
 ```
 
 要求：
@@ -295,7 +295,7 @@ CGO_ENABLED=0 go build -trimpath -o bin/my-runtime-worker ./cmd/my-runtime-worke
 ./bin/my-runtime-worker
 ```
 
-`OnReady` 只说明 mTLS、Agent Token、Node/Agent/contract 和 Runtime Session 成功。它不能证明
+`OnReady` 只说明发现到的安全策略、Agent Token、Node/Agent/contract 和 Runtime Session 成功。它不能证明
 用户能创建 Run、业务模型和工具可用、Result 已 ACK、cancel 和重启恢复可用。
 
 ## 11. 创建真实 Run
@@ -459,7 +459,9 @@ find /var/lib/my-agent/runtime -type f -exec chmod 0600 {} +
 
 这只恢复权限，不删除 identity 或 spool。
 
-### 14.4 mTLS Secret
+### 14.4 可选外部 PKI Secret
+
+仅发现要求 mTLS 且部署选择外部 PKI 兼容模式时挂载：
 
 ```yaml
 volumeMounts:
@@ -489,7 +491,7 @@ terminationGracePeriodSeconds: 90
 | `RUNTIME_CLIENT_UPGRADE_REQUIRED` | NodeVersion、protocol 或 contract 不一致 | 先核对登记 NodeVersion 与上报值 |
 | `runtime identity is corrupt` | 内容损坏、权限不是 `0600`，或错误复用 Node identity | 先检查权限，不要直接删除 DataDir |
 | `runtime spool key is invalid` | spool key 长度或权限被改变 | 检查 PVC、`fsGroup` 和文件模式 |
-| mTLS handshake 失败 | Core 不可达、证书续期失败或 Node 已撤销 | 检查 Core、Agent Token 与管理员 Node 状态 |
+| mTLS handshake 失败 | 当前策略要求 mTLS，且 Core 不可达、证书续期失败或 Node 已撤销 | 检查发现清单、Core、Agent Token 与管理员 Node 状态 |
 | HTTP 401/403 | Agent Token 无效、撤销或 scope 不足 | 检查 active_runtime Token |
 | Runtime 503 | Core 维护或 member 未 ready | 检查 Core `/readyz` |
 | WebSocket 不 fallback | 实际是认证、mTLS 或 contract 永久错误 | 修复配置，不要强制 fallback |
@@ -507,9 +509,9 @@ terminationGracePeriodSeconds: 90
 - [ ] NodeVersion 与 Worker 上报值完全一致。
 - [ ] Node capacity 足够。
 
-### mTLS 和持久化
+### 传输安全和持久化
 
-- [ ] 24 小时证书已自动签发，续期任务正常。
+- [ ] 实际 token-only/mTLS 策略与平台发现一致；若为 mTLS，证书签发和续期正常。
 - [ ] `DataDir` 持久化且独占。
 - [ ] 目录 `0700`、私有文件 `0600`。
 - [ ] K8s 设置 `fsGroupChangePolicy: OnRootMismatch`。

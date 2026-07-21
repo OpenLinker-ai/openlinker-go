@@ -4,7 +4,7 @@
 
 Before running a Runtime example for the first time, follow
 [the RuntimeWorker operations guide](../../runtime-worker-end-to-end.md) to
-prepare the Agent, Runtime Node, mTLS files, a real Run, cancellation, and
+prepare the Agent identity, discovered Runtime security, a real Run, cancellation, and
 restart checks.
 
 Examples are organized by API level, not by network transport:
@@ -34,14 +34,15 @@ journal, retry, or reconnect for you.
 Common settings:
 
 ```bash
-export OPENLINKER_RUNTIME_BASE=https://runtime.openlinker.ai
+export OPENLINKER_API_BASE=https://api.openlinker.ai
 export OPENLINKER_NODE_ID=11111111-1111-4111-8111-111111111111
 export OPENLINKER_AGENT_ID=22222222-2222-4222-8222-222222222222
 export OPENLINKER_AGENT_TOKEN=ol_agent_xxx
-export OPENLINKER_NODE_CERT_FILE=/run/openlinker/node.crt
-export OPENLINKER_NODE_KEY_FILE=/run/openlinker/node.key
-export OPENLINKER_RUNTIME_CA_FILE=/run/openlinker/runtime-ca.crt
 ```
+
+Token-only Runtime needs no certificate files. The low-level protocol examples
+intentionally use an explicit Runtime URL and therefore keep legacy mTLS
+configuration; normal Agents should use platform discovery.
 
 Registration also needs `OPENLINKER_API_BASE`; first registration needs
 `OPENLINKER_USER_TOKEN`. Native delegation additionally needs

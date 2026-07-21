@@ -2,7 +2,7 @@
 
 `openlinker-go` is the Go SDK for building and calling OpenLinker Agents. Most
 Agent projects should start with the minimal facade below and let the SDK own
-Runtime configuration, mTLS, durable state, lease, cancel, resume, reconnect,
+Runtime configuration and discovered transport security, durable state, lease, cancel, resume, reconnect,
 transport switching, and graceful shutdown.
 
 Chinese documentation: [README.zh-CN.md](./README.zh-CN.md)
@@ -61,7 +61,7 @@ registration, and Native Runtime all support:
 - `TransportWebSocket`: strict WebSocket only.
 - `TransportHTTP`: strict HTTP long-poll only.
 
-Authentication, mTLS, permission, payload, and contract errors never trigger
+Authentication, transport-security, permission, payload, and contract errors never trigger
 fallback. Start with [the Runtime examples](./example/runtime/README.md) and use
 the low-level protocol examples only when your application intentionally owns
 the Runtime lifecycle.
@@ -90,8 +90,8 @@ directory directly.
 ## Open-source Architecture
 
 The Go SDK keeps caller and Runtime credentials separate. `NewClient` wraps
-User Token platform calls. `NewRuntimeWorker` discovers the dedicated mTLS
-Runtime origin and owns delivery, recovery, and durable state. Process-level
+User Token platform calls. `NewRuntimeWorker` discovers the Runtime origin and
+its token-only or mTLS policy, then owns delivery, recovery, and durable state. Process-level
 HTTP, command, Codex, and A2A adapters belong in `openlinker-agent-node`.
 The `mcp_server` value describes how Core reaches an Agent; this SDK does not
 currently expose a separate MCP protocol client.
@@ -103,7 +103,7 @@ flowchart LR
   ClientSDK -->|"A2A JSON-RPC / HTTP+JSON / gRPC"| Core
   AppHandler["Go RuntimeHandler"] --> RuntimeSDK["openlinker-go RuntimeWorker"]
   AgentNode["openlinker-agent-node<br/>optional Adapter shell"] --> RuntimeSDK
-  RuntimeSDK -->|"mTLS + Agent Token / WebSocket or HTTP long-poll"| Core
+  RuntimeSDK -->|"Agent Token + discovered TLS policy / WebSocket or HTTP long-poll"| Core
 
   HostedBridge["Hosted execution bridge<br/>outside this SDK"] -.->|"protected Core execution APIs"| Core
 
@@ -225,7 +225,7 @@ _ = body
 
 Before the first deployment, follow the
 [end-to-end RuntimeWorker runbook](./runtime-worker-end-to-end.md) to prepare the
-Agent identity, Runtime Node, mTLS and durable storage, then verify a real Run, cancellation and
+Agent identity, Runtime Node, discovered security policy, and durable storage, then verify a real Run, cancellation and
 process restart. Runtime Ready proves connectivity only; it does not prove end-to-end callability.
 
 Most Go Agents should start with the minimal facade. It loads the standard
@@ -249,7 +249,7 @@ assignment identity, metadata, custom events, progress, deadlines, or delegated
 calls use `Native(handler)`. Infrastructure code can construct `RuntimeWorker`
 directly or use the lower-level `NewRuntime` protocol client.
 
-`RuntimeWorker` owns discovery, mTLS, Session lifecycle, WebSocket-to-pull
+`RuntimeWorker` owns discovery, token-only or mTLS security, Session lifecycle, WebSocket-to-pull
 recovery, assignment confirmation, lease renewal, resume, cancellation, drain,
 and the encrypted assignment/Event/Result store. A handler runs only after Core
 confirms the assignment.
@@ -257,6 +257,8 @@ confirms the assignment.
 ```go
 worker, err := openlinker.NewRuntimeWorker(openlinker.RuntimeWorkerConfig{
 	PlatformURL: "https://openlinker.example",
+	NodeID:      os.Getenv("OPENLINKER_NODE_ID"),
+	AgentID:     os.Getenv("OPENLINKER_AGENT_ID"),
 	AgentToken:  os.Getenv("OPENLINKER_AGENT_TOKEN"),
 	Transport:   openlinker.RuntimeTransportAuto,
 	DataDir:     "/var/lib/my-agent/runtime",
@@ -278,10 +280,13 @@ if err := worker.Start(context.Background()); err != nil {
 Production workers should use the default `FileRuntimeStore` through `DataDir`,
 or inject another durable `RuntimeStore`. An in-memory store is suitable only
 for explicit tests. `NodeVersion` defaults to `openlinker-go/runtime-worker` and
-the SDK generates the Node ID/private key in `DataDir`, enrolls it with the
-Agent Token, and renews the 24-hour certificate automatically. Explicit
-`RuntimeMTLSConfig` files remain available only for external-PKI compatibility.
-can be set when the host binary has its own enrolled version.
+the SDK uses platform discovery as the authority for Runtime security. A
+token-only Runtime requires the stable Node and Agent IDs but no certificate
+files. When discovery requires mTLS, the SDK generates the Node ID/private key
+in `DataDir`, enrolls it with the Agent Token, and renews the 24-hour
+certificate automatically. Explicit `RuntimeMTLSConfig` files remain available
+only for external-PKI compatibility. `NodeVersion` can be set when the host
+binary has its own enrolled version.
 
 The canonical WebSocket endpoint is `/api/v1/agent-runtime/ws`; HTTP methods
 use the `/api/v1/agent-runtime/` prefix. Protocol negotiation remains in the

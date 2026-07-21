@@ -4,7 +4,7 @@
 
 第一次运行任何 Runtime 示例前，先完成
 [《从零运行一个 RuntimeWorker：完整操作手册》](../../runtime-worker-end-to-end.zh-CN.md)
-中的 Agent 身份、Runtime Node、mTLS、真实 Run、cancel 和重启验证。
+中的 Agent 身份、发现得到的 Runtime 安全策略、真实 Run、cancel 和重启验证。
 
 Runtime 示例按照 API 层级组织，而不是按照 HTTP/WebSocket 传输方式组织：
 
@@ -33,14 +33,14 @@ Runtime 示例按照 API 层级组织，而不是按照 HTTP/WebSocket 传输方
 Runtime 示例通用环境变量：
 
 ```bash
-export OPENLINKER_RUNTIME_BASE=https://runtime.openlinker.ai
+export OPENLINKER_API_BASE=https://api.openlinker.ai
 export OPENLINKER_NODE_ID=11111111-1111-4111-8111-111111111111
 export OPENLINKER_AGENT_ID=22222222-2222-4222-8222-222222222222
 export OPENLINKER_AGENT_TOKEN=ol_agent_xxx
-export OPENLINKER_NODE_CERT_FILE=/run/openlinker/node.crt
-export OPENLINKER_NODE_KEY_FILE=/run/openlinker/node.key
-export OPENLINKER_RUNTIME_CA_FILE=/run/openlinker/runtime-ca.crt
 ```
+
+token-only Runtime 不需要证书文件。底层 protocol 示例因有意使用显式 Runtime URL，继续保留
+旧式 mTLS 配置；普通 Agent 应使用平台发现。
 
 注册运行还需要 `OPENLINKER_API_BASE`，首次运行需要 `OPENLINKER_USER_TOKEN`。Native delegation 额外需要 `OPENLINKER_TARGET_AGENT_ID`。
 
