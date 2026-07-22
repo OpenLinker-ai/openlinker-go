@@ -11,6 +11,9 @@ runtime connector, callback, and A2A contracts are declared stable.
 
 - Added typed `RecommendTask` and `CancelRun` user-client methods so JSON-first
   callers do not need to duplicate Core REST transport logic.
+- Added `RuntimeWorkerConfig.RequireTokenOnly`,
+  `ErrRuntimeSecurityPolicyUnsupported`, and the native-runner option for hosts
+  that deliberately omit mTLS and must fail closed when discovery requires it.
 
 ## [v0.2.0-rc1]
 
