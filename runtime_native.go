@@ -248,6 +248,10 @@ func (runner *NativeAgentRunner) WithAgentToken(value string) *NativeAgentRunner
 	runner.config.AgentToken = strings.TrimSpace(value)
 	return runner
 }
+func (runner *NativeAgentRunner) WithTokenOnlyRuntime(value bool) *NativeAgentRunner {
+	runner.config.RequireTokenOnly = value
+	return runner
+}
 func (runner *NativeAgentRunner) WithAgentID(value string) *NativeAgentRunner {
 	runner.config.AgentID = strings.TrimSpace(value)
 	return runner
@@ -569,6 +573,9 @@ func mergeRuntimeWorkerConfig(environment, explicit RuntimeWorkerConfig) Runtime
 	}
 	if explicit.AgentToken != "" {
 		merged.AgentToken = explicit.AgentToken
+	}
+	if explicit.RequireTokenOnly {
+		merged.RequireTokenOnly = true
 	}
 	if explicit.DataDir != "" {
 		merged.DataDir = explicit.DataDir

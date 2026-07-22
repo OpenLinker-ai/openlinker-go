@@ -293,6 +293,9 @@ func (node *RuntimeWorker) recoverRuntimePolicyLocked(ctx context.Context) (*Run
 	if err != nil {
 		return nil, &runtimePolicyRecoveryError{cause: fmt.Errorf("rediscover canonical manifest: %w", err)}
 	}
+	if node.RequireTokenOnly && connection.MTLSRequired {
+		return nil, &runtimePolicyRecoveryError{cause: &RuntimeSecurityPolicyUnsupportedError{RequiredPolicy: "mtls"}}
+	}
 	if _, err = node.runtimeTransportOrder(connection.Policy); err != nil {
 		return nil, &runtimePolicyRecoveryError{cause: err}
 	}

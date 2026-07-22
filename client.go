@@ -149,6 +149,16 @@ func (c *Client) GetAgentCard(ctx context.Context, slug string, extended bool) (
 	return &out, nil
 }
 
+// RecommendTask resolves one private task intent into skills and callable
+// Agent recommendations owned by the authenticated user.
+func (c *Client) RecommendTask(ctx context.Context, req RecommendTaskRequest) (*RecommendTaskResponse, error) {
+	var out RecommendTaskResponse
+	if err := c.do(ctx, http.MethodPost, "/tasks/recommend", nil, req, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *Client) RunAgent(ctx context.Context, req RunAgentRequest) (*RunResponse, error) {
 	return c.createRun(ctx, "/run", req)
 }
@@ -217,6 +227,16 @@ func (c *Client) StartAgentRunWithCallbacks(ctx context.Context, req RunAgentReq
 func (c *Client) GetRun(ctx context.Context, runID string) (*RunResponse, error) {
 	var out RunResponse
 	if err := c.do(ctx, http.MethodGet, "/runs/"+url.PathEscape(runID), nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CancelRun requests durable cancellation for one caller-owned Run.
+func (c *Client) CancelRun(ctx context.Context, runID string) (*RunResponse, error) {
+	var out RunResponse
+	path := "/runs/" + url.PathEscape(runID) + "/cancel"
+	if err := c.do(ctx, http.MethodPost, path, nil, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

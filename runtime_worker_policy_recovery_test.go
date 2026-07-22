@@ -236,6 +236,26 @@ func TestRuntimePolicyRecoveryRejectsMTLSRequirementChange(t *testing.T) {
 	}
 }
 
+func TestRuntimePolicyRecoveryTokenOnlyModeReturnsTypedSecurityError(t *testing.T) {
+	node := &RuntimeWorker{
+		PlatformURL:         "https://platform.example.test",
+		Transport:           RuntimeTransportAuto,
+		RequireTokenOnly:    true,
+		runtimeMTLSRequired: false,
+		runtimeDiscovery: func(context.Context, string) (runtimeConnectionInformation, error) {
+			return runtimeConnectionInformation{
+				RuntimeURL: "https://runtime.example.test", MTLSRequired: true,
+				Policy: legacyRuntimeTransportPolicy(),
+			}, nil
+		},
+	}
+
+	_, err := node.recoverRuntimePolicy(context.Background(), 0)
+	if !errors.Is(err, ErrRuntimeSecurityPolicyUnsupported) {
+		t.Fatalf("recovery error = %T %v", err, err)
+	}
+}
+
 func TestRuntimePolicyRecoveryRejectsExplicitTransportOutsideNewAllowlist(t *testing.T) {
 	var discoveryCalls atomic.Int32
 	node := &RuntimeWorker{

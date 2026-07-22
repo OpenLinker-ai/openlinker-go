@@ -112,6 +112,67 @@ type AgentCardResponse struct {
 	Signature                         JSON                  `json:"signature,omitempty"`
 }
 
+// RecommendTaskRequest describes one private task intent used to resolve
+// skills and callable Agent recommendations.
+type RecommendTaskRequest struct {
+	Query      string   `json:"query"`
+	TemplateID string   `json:"template_id,omitempty"`
+	SkillIDs   []string `json:"skill_ids,omitempty"`
+	MCPTools   []string `json:"mcp_tools,omitempty"`
+	AgentSlugs []string `json:"agent_slugs,omitempty"`
+}
+
+type TaskSkillRef struct {
+	ID          string `json:"id"`
+	Category    string `json:"category"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+type TaskMCPToolRef struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+type TaskAgentSummary struct {
+	ID                string   `json:"id"`
+	Slug              string   `json:"slug"`
+	Name              string   `json:"name"`
+	Description       string   `json:"description"`
+	PricePerCallCents int32    `json:"price_per_call_cents"`
+	TotalCalls        int32    `json:"total_calls"`
+	AvgRating         *float32 `json:"avg_rating,omitempty"`
+	CreatorName       string   `json:"creator_name"`
+	Tags              []string `json:"tags"`
+}
+
+type TaskRecommendation struct {
+	Agent         TaskAgentSummary `json:"agent"`
+	MatchScore    float32          `json:"match_score"`
+	Why           string           `json:"why"`
+	MatchedSkills []TaskSkillRef   `json:"matched_skills"`
+}
+
+type TaskNextAction struct {
+	Type       string `json:"type"`
+	Label      string `json:"label"`
+	Hint       string `json:"hint"`
+	Href       string `json:"href"`
+	ReasonCode string `json:"reason_code,omitempty"`
+	Reason     string `json:"reason"`
+}
+
+type RecommendTaskResponse struct {
+	TaskID          string               `json:"task_id"`
+	Visibility      string               `json:"visibility"`
+	ParsedSkills    []string             `json:"parsed_skills"`
+	ParsedSkillRefs []TaskSkillRef       `json:"parsed_skill_refs"`
+	MCPTools        []string             `json:"mcp_tools"`
+	MCPToolRefs     []TaskMCPToolRef     `json:"mcp_tool_refs"`
+	Recommendations []TaskRecommendation `json:"recommendations"`
+	NextAction      *TaskNextAction      `json:"next_action,omitempty"`
+}
+
 type RunAgentRequest struct {
 	AgentID  string `json:"agent_id"`
 	Input    any    `json:"input"`
