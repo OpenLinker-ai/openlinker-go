@@ -148,6 +148,78 @@ func TestRunAgentEncodesRequestBody(t *testing.T) {
 	}
 }
 
+func TestRecommendTaskEncodesRequestAndResponse(t *testing.T) {
+	var got RecommendTaskRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/tasks/recommend" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		if auth := r.Header.Get("Authorization"); auth != "Bearer ol_user_test" {
+			t.Fatalf("authorization = %q", auth)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Fatal(err)
+		}
+		writeJSON(t, w, RecommendTaskResponse{
+			TaskID:       "task-1",
+			Visibility:   "private",
+			ParsedSkills: []string{"summary"},
+			Recommendations: []TaskRecommendation{{
+				Agent:      TaskAgentSummary{ID: "agent-1", Slug: "writer", Name: "Writer"},
+				MatchScore: 0.95,
+				Why:        "matches summary",
+			}},
+		})
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL, WithUserToken("ol_user_test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.RecommendTask(context.Background(), RecommendTaskRequest{
+		Query:      "summarize a document",
+		TemplateID: "summary",
+		SkillIDs:   []string{"summary"},
+		MCPTools:   []string{"search_agents"},
+		AgentSlugs: []string{"writer"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Query != "summarize a document" || got.TemplateID != "summary" || len(got.SkillIDs) != 1 || got.AgentSlugs[0] != "writer" {
+		t.Fatalf("request = %#v", got)
+	}
+	if resp.TaskID != "task-1" || len(resp.Recommendations) != 1 || resp.Recommendations[0].Agent.Slug != "writer" {
+		t.Fatalf("response = %#v", resp)
+	}
+}
+
+func TestCancelRunPostsOwnedRun(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/runs/run-1/cancel" {
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		if r.Body != nil && r.ContentLength > 0 {
+			t.Fatalf("cancel body length = %d", r.ContentLength)
+		}
+		writeJSON(t, w, RunResponse{RunID: "run-1", Status: "running", CancelState: "requested"})
+	}))
+	defer server.Close()
+
+	client, err := NewClient(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.CancelRun(context.Background(), "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.RunID != "run-1" || resp.CancelState != "requested" {
+		t.Fatalf("response = %#v", resp)
+	}
+}
+
 func TestRunAgentWithCallbacksUsesPlatformStream(t *testing.T) {
 	var calls []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

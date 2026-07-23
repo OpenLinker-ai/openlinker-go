@@ -333,6 +333,27 @@ func TestResolveRuntimeConnectionAllowsExplicitTokenOnlyPolicy(t *testing.T) {
 	}
 }
 
+func TestRuntimeWorkerTokenOnlyModeRejectsMTLSDiscovery(t *testing.T) {
+	platform := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"base_urls":{"runtime":"https://runtime.example.test"},"runtime":{"enabled":true,"mtls_required":true}}`)
+	}))
+	defer platform.Close()
+	worker, err := NewRuntimeWorker(RuntimeWorkerConfig{
+		PlatformURL: platform.URL, NodeID: testNodeID, AgentID: testAgentID,
+		AgentToken: "ol_agent_test", RequireTokenOnly: true, DataDir: t.TempDir(), Capacity: 1,
+		Handler: RuntimeHandlerFunc(func(context.Context, RuntimeContext) (RuntimeResult, error) {
+			return RuntimeResult{Status: "success"}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = worker.Start(context.Background())
+	if !errors.Is(err, ErrRuntimeSecurityPolicyUnsupported) {
+		t.Fatalf("Start error = %T %v", err, err)
+	}
+}
+
 func TestResolveRuntimeURLRejectsOversizedManifest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Length", fmt.Sprintf("%d", openLinkerDiscoveryMaxBytes+1))

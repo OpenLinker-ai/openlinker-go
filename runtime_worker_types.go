@@ -3,6 +3,7 @@ package openlinker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -19,11 +20,13 @@ type RuntimeWorkerConfig struct {
 	NodeVersion string
 	AgentID     string
 	AgentToken  string
-	MTLS        RuntimeMTLSConfig
-	Store       RuntimeStore
-	DataDir     string
-	Handler     RuntimeHandler
-	Capacity    int64
+	// RequireTokenOnly rejects a discovered Runtime policy that requires mTLS.
+	RequireTokenOnly bool
+	MTLS             RuntimeMTLSConfig
+	Store            RuntimeStore
+	DataDir          string
+	Handler          RuntimeHandler
+	Capacity         int64
 
 	ClaimWait         time.Duration
 	CommandWait       time.Duration
@@ -32,6 +35,24 @@ type RuntimeWorkerConfig struct {
 	RetryMaximum      time.Duration
 	Logger            *log.Logger
 	OnReady           func(RuntimeReadyPayload)
+}
+
+var ErrRuntimeSecurityPolicyUnsupported = errors.New("openlinker: Runtime security policy is unsupported")
+
+type RuntimeSecurityPolicyUnsupportedError struct {
+	RequiredPolicy string
+}
+
+func (err *RuntimeSecurityPolicyUnsupportedError) Error() string {
+	policy := err.RequiredPolicy
+	if policy == "" {
+		policy = "unknown"
+	}
+	return fmt.Sprintf("%v: required policy %s", ErrRuntimeSecurityPolicyUnsupported, policy)
+}
+
+func (err *RuntimeSecurityPolicyUnsupportedError) Unwrap() error {
+	return ErrRuntimeSecurityPolicyUnsupported
 }
 
 // RuntimeWorkerDrainOptions controls a server-authoritative graceful drain.
@@ -82,6 +103,7 @@ func newRuntimeWorker(config RuntimeWorkerConfig, client RuntimeClient, dialer R
 		NodeVersion:       config.NodeVersion,
 		AgentID:           config.AgentID,
 		AgentToken:        config.AgentToken,
+		RequireTokenOnly:  config.RequireTokenOnly,
 		MTLS:              config.MTLS,
 		Store:             config.Store,
 		DataDir:           config.DataDir,

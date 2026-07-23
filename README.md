@@ -289,6 +289,11 @@ certificate automatically. Explicit `RuntimeMTLSConfig` files remain available
 only for external-PKI compatibility. `NodeVersion` can be set when the host
 binary has its own enrolled version.
 
+Hosts that intentionally do not ship mTLS support can set `RequireTokenOnly`.
+If discovery later requires mTLS, `Start` and policy recovery return an error
+matching `ErrRuntimeSecurityPolicyUnsupported`; they never downgrade, bypass
+discovery, or partially start a session.
+
 The canonical WebSocket endpoint is `/api/v1/agent-runtime/ws`; HTTP methods
 use the `/api/v1/agent-runtime/` prefix. Protocol negotiation remains in the
 handshake contract, not in public API names or URLs.
@@ -346,7 +351,9 @@ Application-side calls:
 - `RunAgentWithCallbacks`
 - `StartAgentRun`
 - `StartAgentRunWithCallbacks`
+- `RecommendTask`
 - `GetRun`
+- `CancelRun`
 - `ListRunEvents`
 - `ListRunArtifacts`
 - `ListRunMessages`

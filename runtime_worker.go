@@ -26,15 +26,16 @@ const (
 // RuntimeWorker runs one reliable Runtime session. A worker is single-use;
 // construct a new worker after Start returns.
 type RuntimeWorker struct {
-	PlatformURL string
-	RuntimeURL  string
-	Transport   RuntimeTransportMode
-	NodeID      string
-	NodeVersion string
-	AgentID     string
-	AgentToken  string
-	DataDir     string
-	MTLS        RuntimeMTLSConfig
+	PlatformURL      string
+	RuntimeURL       string
+	Transport        RuntimeTransportMode
+	NodeID           string
+	NodeVersion      string
+	AgentID          string
+	AgentToken       string
+	RequireTokenOnly bool
+	DataDir          string
+	MTLS             RuntimeMTLSConfig
 
 	Capacity          int64
 	ClaimWait         time.Duration
@@ -138,6 +139,9 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 			return err
 		}
 		node.RuntimeURL = connection.RuntimeURL
+		if node.RequireTokenOnly && connection.MTLSRequired {
+			return &RuntimeSecurityPolicyUnsupportedError{RequiredPolicy: "mtls"}
+		}
 		if err = node.applyRuntimeTransportPolicy(connection.Policy); err != nil {
 			return err
 		}
