@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 type spoolPermission struct {
@@ -640,13 +642,26 @@ func runtimeErrorIsPermanent(err error) bool {
 	if errors.As(err, &recoveryErr) || runtimePolicyRecoverySignal(err) {
 		return true
 	}
+	var closeErr *websocket.CloseError
+	if errors.As(err, &closeErr) {
+		switch closeErr.Code {
+		case RuntimeWSCloseAuthenticationFailed,
+			RuntimeWSCloseClientUpgradeRequired,
+			RuntimeWSCloseSessionConflict,
+			RuntimeWSCloseRequiredFeatureMissing:
+			return true
+		default:
+			return false
+		}
+	}
 	code := runtimeErrorCode(err)
 	switch code {
-	case "UNAUTHORIZED", "FORBIDDEN", "PERMISSION_DENIED", "RUNTIME_CLIENT_UPGRADE_REQUIRED", "RUNTIME_REQUIRED_FEATURE_MISSING", "RUNTIME_SESSION_CONFLICT":
+	case "AUTHENTICATION_FAILED", "UNAUTHORIZED", "FORBIDDEN", "PERMISSION_DENIED",
+		"RUNTIME_CLIENT_UPGRADE_REQUIRED", "RUNTIME_REQUIRED_FEATURE_MISSING",
+		"RUNTIME_SESSION_CONFLICT":
 		return true
 	}
-	var runtimeErr *Error
-	return errors.As(err, &runtimeErr) && runtimeErr.StatusCode >= 400 && runtimeErr.StatusCode < 500 && runtimeErr.StatusCode != 408 && runtimeErr.StatusCode != 409 && runtimeErr.StatusCode != 429
+	return false
 }
 
 func runtimeAttachErrorIsRetryable(err error) bool {

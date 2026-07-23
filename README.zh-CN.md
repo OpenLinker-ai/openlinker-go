@@ -245,7 +245,6 @@ if err := openlinker.WithAgent(MyAgent{}).Run(context.Background()); err != nil 
 ```go
 worker, err := openlinker.NewRuntimeWorker(openlinker.RuntimeWorkerConfig{
 	PlatformURL: "https://openlinker.example",
-	NodeID:      os.Getenv("OPENLINKER_NODE_ID"),
 	AgentID:     os.Getenv("OPENLINKER_AGENT_ID"),
 	AgentToken:  os.Getenv("OPENLINKER_AGENT_TOKEN"),
 	Transport:   openlinker.RuntimeTransportAuto,
@@ -267,8 +266,9 @@ if err := worker.Start(context.Background()); err != nil {
 
 生产环境应通过 `DataDir` 使用默认 `FileRuntimeStore`，也可以注入其他持久化
 `RuntimeStore`。内存实现只适合明确的测试。平台发现是 Runtime 安全策略的权威来源：
-token-only Runtime 只需要稳定的 Node ID、Agent ID 和 Agent Token，不需要证书文件；发现明确
-要求 mTLS 时，SDK 会自动登记并续期证书，外部 PKI 才需要显式 `RuntimeMTLSConfig`。
+token-only Runtime 省略 `NodeID` 时会从 Agent Token 派生稳定、仅限该凭证的 Node ID，
+不需要证书文件；已有安装身份仍可显式传入 `NodeID`。发现明确要求 mTLS 时，SDK 会自动登记
+并续期证书，外部 PKI 才需要显式 `RuntimeMTLSConfig`。
 `NodeVersion` 默认是 `openlinker-go/runtime-worker`；宿主程序有独立登记版本时应显式设置。
 
 WebSocket 的标准端点是 `/api/v1/agent-runtime/ws`，HTTP 方法统一使用

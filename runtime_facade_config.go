@@ -117,7 +117,7 @@ func (config RuntimeWorkerConfig) Validate(requireClient bool) error {
 	completeMTLS := strings.TrimSpace(config.MTLS.CertFile) != "" &&
 		strings.TrimSpace(config.MTLS.KeyFile) != "" &&
 		strings.TrimSpace(config.MTLS.CAFile) != ""
-	if !validRuntimeUUID(strings.TrimSpace(config.NodeID)) {
+	if strings.TrimSpace(config.NodeID) != "" && !validRuntimeUUID(strings.TrimSpace(config.NodeID)) {
 		problems = append(problems, EnvNodeID+" must be a non-zero lowercase UUID")
 	}
 	if !validRuntimeUUID(strings.TrimSpace(config.AgentID)) {

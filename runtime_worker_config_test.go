@@ -24,7 +24,7 @@ func TestRuntimeWorkerConfigReportsAllMissingValues(t *testing.T) {
 	if !errors.As(err, &configErr) {
 		t.Fatalf("error = %T %v", err, err)
 	}
-	for _, key := range []string{EnvNodeID, EnvAgentID, EnvRuntimeBase, EnvAPIBase, EnvAgentToken, EnvRuntimeDataDir} {
+	for _, key := range []string{EnvAgentID, EnvRuntimeBase, EnvAPIBase, EnvAgentToken, EnvRuntimeDataDir} {
 		if !strings.Contains(err.Error(), key) {
 			t.Fatalf("error %q does not contain %s", err, key)
 		}
@@ -34,7 +34,6 @@ func TestRuntimeWorkerConfigReportsAllMissingValues(t *testing.T) {
 func TestRuntimeWorkerConfigAllowsDiscoveryWithoutMTLS(t *testing.T) {
 	config := RuntimeWorkerConfig{
 		PlatformURL: "https://api.example.com",
-		NodeID:      testNodeID,
 		AgentID:     testAgentID,
 		AgentToken:  "ol_agent_test",
 		DataDir:     t.TempDir(),

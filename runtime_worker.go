@@ -2,6 +2,8 @@ package openlinker
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
@@ -224,8 +226,11 @@ func (node *RuntimeWorker) configureRuntimeSecurity(
 ) error {
 	node.MTLS.Disabled = !connection.MTLSRequired
 	if !connection.MTLSRequired {
+		if node.NodeID == "" {
+			node.NodeID = tokenScopedRuntimeNodeID(node.AgentToken)
+		}
 		if !validRuntimeUUID(node.NodeID) || !validRuntimeUUID(node.AgentID) {
-			return errors.New("RuntimeWorker ID and Agent ID are required for token-only Runtime transport")
+			return errors.New("RuntimeWorker Agent ID is required and Node ID must be valid for token-only Runtime transport")
 		}
 		node.MTLS.tlsConfig = nil
 		node.MTLS.credentialManager = nil
@@ -263,6 +268,15 @@ func (node *RuntimeWorker) configureRuntimeSecurity(
 	}
 	manager.Start(ctx)
 	return nil
+}
+
+func tokenScopedRuntimeNodeID(agentToken string) string {
+	sum := sha256.Sum256([]byte("openlinker/runtime-worker/token-scoped-node/v1\x00" + agentToken))
+	bytes := append([]byte(nil), sum[:16]...)
+	bytes[6] = (bytes[6] & 0x0f) | 0x50
+	bytes[8] = (bytes[8] & 0x3f) | 0x80
+	value := hex.EncodeToString(bytes)
+	return value[:8] + "-" + value[8:12] + "-" + value[12:16] + "-" + value[16:20] + "-" + value[20:]
 }
 
 // Run is the facade-friendly alias for Start.
