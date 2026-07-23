@@ -91,7 +91,7 @@ func main() {
 	worker, err := openlinker.NewRuntimeWorker(openlinker.RuntimeWorkerConfig{
 		PlatformURL: required("OPENLINKER_URL"),
 		RuntimeURL:  strings.TrimSpace(os.Getenv("OPENLINKER_RUNTIME_URL")),
-		NodeID:      required("OPENLINKER_NODE_ID"),
+		NodeID:      strings.TrimSpace(os.Getenv("OPENLINKER_NODE_ID")),
 		NodeVersion: "openlinker-go/runtime-worker",
 		AgentID:     required("OPENLINKER_AGENT_ID"),
 		AgentToken:  required("OPENLINKER_AGENT_TOKEN"),
@@ -99,9 +99,9 @@ func main() {
 		Capacity:    1,
 		DataDir:     required("OPENLINKER_RUNTIME_DATA_DIR"),
 		MTLS: openlinker.RuntimeMTLSConfig{
-			CertFile: required("OPENLINKER_RUNTIME_MTLS_CERT_FILE"),
-			KeyFile:  required("OPENLINKER_RUNTIME_MTLS_KEY_FILE"),
-			CAFile:   required("OPENLINKER_RUNTIME_MTLS_CA_FILE"),
+			CertFile: strings.TrimSpace(os.Getenv("OPENLINKER_RUNTIME_MTLS_CERT_FILE")),
+			KeyFile:  strings.TrimSpace(os.Getenv("OPENLINKER_RUNTIME_MTLS_KEY_FILE")),
+			CAFile:   strings.TrimSpace(os.Getenv("OPENLINKER_RUNTIME_MTLS_CA_FILE")),
 		},
 		RetryMinimum:      durationMilliseconds("OPENLINKER_RUNTIME_RETRY_MIN_MS", 100*time.Millisecond),
 		RetryMaximum:      durationMilliseconds("OPENLINKER_RUNTIME_RETRY_MAX_MS", time.Second),

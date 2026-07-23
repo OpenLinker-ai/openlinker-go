@@ -24,7 +24,6 @@ import (
 
 func TestRuntimeTokenOnlySecuritySkipsAutomaticCredentialManager(t *testing.T) {
 	node := &RuntimeWorker{
-		NodeID:      testNodeID,
 		AgentID:     testAgentID,
 		AgentToken:  "ol_agent_token_only",
 		NodeVersion: runtimeWorkerSDKAgent,
@@ -46,12 +45,18 @@ func TestRuntimeTokenOnlySecuritySkipsAutomaticCredentialManager(t *testing.T) {
 	if !node.MTLS.Disabled {
 		t.Fatal("token-only transport did not disable mTLS")
 	}
+	if node.NodeID != tokenScopedRuntimeNodeID(node.AgentToken) || !validRuntimeUUID(node.NodeID) {
+		t.Fatalf("token-only Node ID = %q", node.NodeID)
+	}
+	if node.NodeID != "d6bb911d-7ad6-528b-9a8e-34e2785975fd" {
+		t.Fatalf("cross-SDK token-only Node ID = %q", node.NodeID)
+	}
 }
 
-func TestRuntimeTokenOnlySecurityRequiresConfiguredIdentity(t *testing.T) {
+func TestRuntimeTokenOnlySecurityRequiresAgentIdentity(t *testing.T) {
 	node := &RuntimeWorker{AgentToken: "ol_agent_token_only"}
 	err := node.configureRuntimeSecurity(context.Background(), runtimeConnectionInformation{MTLSRequired: false})
-	if err == nil || !strings.Contains(err.Error(), "RuntimeWorker ID and Agent ID are required") {
+	if err == nil || !strings.Contains(err.Error(), "Agent ID is required") {
 		t.Fatalf("token-only identity error = %v", err)
 	}
 }

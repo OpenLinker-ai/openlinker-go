@@ -44,6 +44,13 @@ layering. Pin the exact RC tag during validation; do not depend on `main`,
 
 ### Changed
 
+- Token-only Runtime Workers now derive a deterministic, token-scoped Node ID
+  when `OPENLINKER_NODE_ID` is omitted. Explicit mTLS deployments still require
+  their provisioned Node identity.
+- Runtime authentication fatality is now conservative and forward-compatible:
+  only enumerated permanent HTTP error and WebSocket close shapes terminate a
+  Worker; unknown auth-like failures remain recoverable for DB-backed
+  revalidation.
 - Reconciled the high-level API-mode work with the remote reliable worker. The
   encrypted `RuntimeStore`, transport generation fencing, assignment journal,
   spool, resume, cancel, and drain implementations remain the single canonical

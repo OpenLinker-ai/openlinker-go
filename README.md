@@ -257,7 +257,6 @@ confirms the assignment.
 ```go
 worker, err := openlinker.NewRuntimeWorker(openlinker.RuntimeWorkerConfig{
 	PlatformURL: "https://openlinker.example",
-	NodeID:      os.Getenv("OPENLINKER_NODE_ID"),
 	AgentID:     os.Getenv("OPENLINKER_AGENT_ID"),
 	AgentToken:  os.Getenv("OPENLINKER_AGENT_TOKEN"),
 	Transport:   openlinker.RuntimeTransportAuto,
@@ -281,8 +280,10 @@ Production workers should use the default `FileRuntimeStore` through `DataDir`,
 or inject another durable `RuntimeStore`. An in-memory store is suitable only
 for explicit tests. `NodeVersion` defaults to `openlinker-go/runtime-worker` and
 the SDK uses platform discovery as the authority for Runtime security. A
-token-only Runtime requires the stable Node and Agent IDs but no certificate
-files. When discovery requires mTLS, the SDK generates the Node ID/private key
+token-only Runtime derives a stable token-scoped Node ID when `NodeID` is
+omitted, and requires no certificate files. An explicit `NodeID` remains
+available for an existing installation identity. When discovery requires mTLS,
+the SDK generates the Node ID/private key
 in `DataDir`, enrolls it with the Agent Token, and renews the 24-hour
 certificate automatically. Explicit `RuntimeMTLSConfig` files remain available
 only for external-PKI compatibility. `NodeVersion` can be set when the host
