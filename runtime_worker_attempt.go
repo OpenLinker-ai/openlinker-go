@@ -119,10 +119,15 @@ func (node *RuntimeWorker) executeAttempt(attempt *activeRuntimeAttempt) {
 		return
 	}
 	handlerCtx, stopHandler := context.WithCancel(attempt.ctx)
+	runtimeIdentity := node.store.Identity()
+	node.stateMu.RLock()
+	ready := node.ready
+	node.stateMu.RUnlock()
 	runCtx := RuntimeContext{
 		RunID:             attempt.identity.RunID,
 		AgentID:           attempt.identity.AgentID,
 		AttemptIdentity:   sdkAttemptIdentity(attempt.identity),
+		Authority:         runtimeAuthorityFromMetadata(metadata, runtimeIdentity, ready),
 		AttemptDeadlineAt: attempt.payload.AttemptDeadlineAt,
 		RunDeadlineAt:     attempt.payload.RunDeadlineAt,
 		Input:             input,

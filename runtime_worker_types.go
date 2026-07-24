@@ -172,6 +172,7 @@ type RuntimeContext struct {
 	RunID             string
 	AgentID           string
 	AttemptIdentity   RuntimeAttemptIdentity
+	Authority         *RuntimeAuthorityContext
 	AttemptDeadlineAt time.Time
 	RunDeadlineAt     time.Time
 	Input             any
@@ -179,6 +180,16 @@ type RuntimeContext struct {
 
 	emit      func(eventType string, payload any) error
 	callAgent func(context.Context, string, any, RuntimeCallOptions) (any, error)
+}
+
+// RuntimeAuthorityContext is Core-owned execution identity that must never be
+// accepted from caller tool arguments. The Worker removes its private wire
+// representation from Metadata before invoking the handler.
+type RuntimeAuthorityContext struct {
+	PrincipalScopeID    string
+	RuntimeSessionID    string
+	RuntimeSessionEpoch int64
+	RuntimeAttachmentID string
 }
 
 // Deadline returns the earlier of the Attempt and Run deadlines.
