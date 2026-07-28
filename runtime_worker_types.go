@@ -27,6 +27,9 @@ type RuntimeWorkerConfig struct {
 	DataDir          string
 	Handler          RuntimeHandler
 	Capacity         int64
+	// OptionalFeatures appends stable, validated capability identifiers to the
+	// Runtime hello. Required protocol features are always included.
+	OptionalFeatures []string
 
 	ClaimWait         time.Duration
 	CommandWait       time.Duration
@@ -109,6 +112,7 @@ func newRuntimeWorker(config RuntimeWorkerConfig, client RuntimeClient, dialer R
 		DataDir:           config.DataDir,
 		Handler:           config.Handler,
 		Capacity:          config.Capacity,
+		OptionalFeatures:  append([]string(nil), config.OptionalFeatures...),
 		ClaimWait:         config.ClaimWait,
 		CommandWait:       config.CommandWait,
 		HeartbeatInterval: config.HeartbeatInterval,

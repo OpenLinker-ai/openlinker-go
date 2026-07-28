@@ -123,11 +123,21 @@ func (node *RuntimeWorker) executeAttempt(attempt *activeRuntimeAttempt) {
 	node.stateMu.RLock()
 	ready := node.ready
 	node.stateMu.RUnlock()
+	authority, err := runtimeAuthorityFromMetadata(metadata, runtimeIdentity, ready)
+	if err != nil {
+		node.persistAttemptFailure(
+			attempt,
+			startedAt,
+			"ASSIGNMENT_AUTHORITY_INVALID",
+			"assignment Runtime authority is invalid",
+		)
+		return
+	}
 	runCtx := RuntimeContext{
 		RunID:             attempt.identity.RunID,
 		AgentID:           attempt.identity.AgentID,
 		AttemptIdentity:   sdkAttemptIdentity(attempt.identity),
-		Authority:         runtimeAuthorityFromMetadata(metadata, runtimeIdentity, ready),
+		Authority:         authority,
 		AttemptDeadlineAt: attempt.payload.AttemptDeadlineAt,
 		RunDeadlineAt:     attempt.payload.RunDeadlineAt,
 		Input:             input,

@@ -132,6 +132,9 @@ func (config RuntimeWorkerConfig) Validate(requireClient bool) error {
 	if config.Store == nil && strings.TrimSpace(config.DataDir) == "" {
 		problems = append(problems, EnvRuntimeDataDir+" is missing")
 	}
+	if _, err := normalizeRuntimeOptionalFeatures(config.OptionalFeatures); err != nil {
+		problems = append(problems, err.Error())
+	}
 	if explicitMTLS && !completeMTLS {
 		problems = append(problems, EnvNodeCertFile+", "+EnvNodeKeyFile+", and "+EnvRuntimeCAFile+" must be configured together")
 	}

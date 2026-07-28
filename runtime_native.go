@@ -586,6 +586,9 @@ func mergeRuntimeWorkerConfig(environment, explicit RuntimeWorkerConfig) Runtime
 	if explicit.Capacity != 0 {
 		merged.Capacity = explicit.Capacity
 	}
+	if explicit.OptionalFeatures != nil {
+		merged.OptionalFeatures = append([]string(nil), explicit.OptionalFeatures...)
+	}
 	if explicit.MTLS.CertFile != "" {
 		merged.MTLS.CertFile = explicit.MTLS.CertFile
 	}
