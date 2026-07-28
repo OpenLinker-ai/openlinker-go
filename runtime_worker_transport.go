@@ -47,6 +47,7 @@ type sdkRuntimeTransportDialer struct {
 	mu          sync.RWMutex
 	runtime     *Runtime
 	credentials *runtimeCredentialManager
+	extensions  *runtimeExtensionRegistry
 }
 
 func (dialer *sdkRuntimeTransportDialer) setRuntime(runtime *Runtime) {
@@ -55,17 +56,28 @@ func (dialer *sdkRuntimeTransportDialer) setRuntime(runtime *Runtime) {
 	dialer.mu.Unlock()
 }
 
-func (dialer *sdkRuntimeTransportDialer) current() *Runtime {
+func (dialer *sdkRuntimeTransportDialer) setExtensions(
+	extensions *runtimeExtensionRegistry,
+) {
+	dialer.mu.Lock()
+	dialer.extensions = extensions
+	dialer.mu.Unlock()
+}
+
+func (dialer *sdkRuntimeTransportDialer) current() (
+	*Runtime,
+	*runtimeExtensionRegistry,
+) {
 	dialer.mu.RLock()
 	defer dialer.mu.RUnlock()
-	return dialer.runtime
+	return dialer.runtime, dialer.extensions
 }
 
 func (dialer *sdkRuntimeTransportDialer) DialRuntimeWebSocket(
 	ctx context.Context,
 	hello RuntimeHelloPayload,
 ) (RuntimeDuplexClient, error) {
-	runtime := dialer.current()
+	runtime, extensions := dialer.current()
 	if runtime == nil {
 		return nil, errors.New("runtime WebSocket dialer is unavailable")
 	}
@@ -74,18 +86,18 @@ func (dialer *sdkRuntimeTransportDialer) DialRuntimeWebSocket(
 			return nil, err
 		}
 	}
-	client, err := runtime.DialRuntimeWebSocket(ctx, hello)
+	client, err := runtime.dialRuntimeWebSocketWithExtensions(ctx, hello, extensions)
 	if err == nil || dialer.credentials == nil || !runtimeCredentialTLSFailure(err) {
 		return client, err
 	}
 	if renewErr := dialer.credentials.Ensure(ctx, true); renewErr != nil {
 		return nil, errors.Join(err, renewErr)
 	}
-	return runtime.DialRuntimeWebSocket(ctx, hello)
+	return runtime.dialRuntimeWebSocketWithExtensions(ctx, hello, extensions)
 }
 
 func (dialer *sdkRuntimeTransportDialer) ProbeRuntimeWebSocket(ctx context.Context) error {
-	runtime := dialer.current()
+	runtime, _ := dialer.current()
 	if runtime == nil {
 		return errors.New("runtime WebSocket dialer is unavailable")
 	}
@@ -352,20 +364,20 @@ func (client *switchingRuntimeClient) PollRuntimeCommands(ctx context.Context, s
 	return active.PollRuntimeCommands(callCtx, sessionID, wait)
 }
 
-func (client *switchingRuntimeClient) PublishRuntimeBrowserViewerFrame(
+func (client *switchingRuntimeClient) PublishRuntimeExtension(
 	ctx context.Context,
-	request RuntimeBrowserViewerFramePayload,
-) (*RuntimeBrowserViewerFrameAckPayload, error) {
+	request RuntimeExtensionRequest,
+) (*RuntimeExtensionReply, error) {
 	active, callCtx, done, err := client.begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer done()
-	viewer, ok := active.(runtimeBrowserViewerClient)
+	extensions, ok := active.(runtimeExtensionClient)
 	if !ok {
-		return nil, errors.New("runtime Browser Viewer requires WebSocket transport")
+		return nil, errors.New("runtime extensions require WebSocket transport")
 	}
-	return viewer.PublishRuntimeBrowserViewerFrame(callCtx, request)
+	return extensions.PublishRuntimeExtension(callCtx, request)
 }
 
 func (client *switchingRuntimeClient) AckRuntimeCancel(ctx context.Context, request RuntimeRunCancelAckPayload) (*RuntimeRunCancellationState, error) {

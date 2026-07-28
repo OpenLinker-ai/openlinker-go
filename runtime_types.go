@@ -14,29 +14,26 @@ const (
 type RuntimeMessageType string
 
 const (
-	RuntimeHello                 RuntimeMessageType = "runtime.hello"
-	RuntimeReady                 RuntimeMessageType = "runtime.ready"
-	RuntimeRunAssigned           RuntimeMessageType = "run.assigned"
-	RuntimeAssignmentAck         RuntimeMessageType = "run.assignment.ack"
-	RuntimeAssignmentConfirmed   RuntimeMessageType = "run.assignment.confirmed"
-	RuntimeAssignmentReject      RuntimeMessageType = "run.assignment.reject"
-	RuntimeAssignmentRejected    RuntimeMessageType = "run.assignment.rejected"
-	RuntimeLeaseRenew            RuntimeMessageType = "run.lease.renew"
-	RuntimeLeaseRenewed          RuntimeMessageType = "run.lease.renewed"
-	RuntimeRunEvent              RuntimeMessageType = "run.event"
-	RuntimeRunEventAck           RuntimeMessageType = "run.event.ack"
-	RuntimeRunResult             RuntimeMessageType = "run.result"
-	RuntimeRunResultAck          RuntimeMessageType = "run.result.ack"
-	RuntimeRunCancel             RuntimeMessageType = "run.cancel"
-	RuntimeRunCancelAck          RuntimeMessageType = "run.cancel.ack"
-	RuntimeResume                RuntimeMessageType = "runtime.resume"
-	RuntimeResumeAccepted        RuntimeMessageType = "run.resume.accepted"
-	RuntimeLeaseRevoked          RuntimeMessageType = "run.lease.revoked"
-	RuntimeDrain                 RuntimeMessageType = "runtime.drain"
-	RuntimeBrowserViewerCommand  RuntimeMessageType = "browser.viewer.command"
-	RuntimeBrowserViewerFrame    RuntimeMessageType = "browser.viewer.frame"
-	RuntimeBrowserViewerFrameAck RuntimeMessageType = "browser.viewer.frame.ack"
-	RuntimeError                 RuntimeMessageType = "runtime.error"
+	RuntimeHello               RuntimeMessageType = "runtime.hello"
+	RuntimeReady               RuntimeMessageType = "runtime.ready"
+	RuntimeRunAssigned         RuntimeMessageType = "run.assigned"
+	RuntimeAssignmentAck       RuntimeMessageType = "run.assignment.ack"
+	RuntimeAssignmentConfirmed RuntimeMessageType = "run.assignment.confirmed"
+	RuntimeAssignmentReject    RuntimeMessageType = "run.assignment.reject"
+	RuntimeAssignmentRejected  RuntimeMessageType = "run.assignment.rejected"
+	RuntimeLeaseRenew          RuntimeMessageType = "run.lease.renew"
+	RuntimeLeaseRenewed        RuntimeMessageType = "run.lease.renewed"
+	RuntimeRunEvent            RuntimeMessageType = "run.event"
+	RuntimeRunEventAck         RuntimeMessageType = "run.event.ack"
+	RuntimeRunResult           RuntimeMessageType = "run.result"
+	RuntimeRunResultAck        RuntimeMessageType = "run.result.ack"
+	RuntimeRunCancel           RuntimeMessageType = "run.cancel"
+	RuntimeRunCancelAck        RuntimeMessageType = "run.cancel.ack"
+	RuntimeResume              RuntimeMessageType = "runtime.resume"
+	RuntimeResumeAccepted      RuntimeMessageType = "run.resume.accepted"
+	RuntimeLeaseRevoked        RuntimeMessageType = "run.lease.revoked"
+	RuntimeDrain               RuntimeMessageType = "runtime.drain"
+	RuntimeError               RuntimeMessageType = "runtime.error"
 )
 
 type RuntimeEnvelopeFields struct {
@@ -340,67 +337,12 @@ type RuntimeDrainPayload struct {
 	Inflight   int64     `json:"inflight"`
 }
 
-type RuntimeBrowserViewerAction string
-
-const (
-	RuntimeBrowserViewerClaim     RuntimeBrowserViewerAction = "claim"
-	RuntimeBrowserViewerRelease   RuntimeBrowserViewerAction = "release"
-	RuntimeBrowserViewerResume    RuntimeBrowserViewerAction = "resume"
-	RuntimeBrowserViewerTerminate RuntimeBrowserViewerAction = "terminate"
-	RuntimeBrowserViewerInput     RuntimeBrowserViewerAction = "input"
-)
-
-type RuntimeBrowserViewerInputPayload struct {
-	Kind           string  `json:"kind"`
-	PointerAction  string  `json:"pointer_action,omitempty"`
-	KeyboardAction string  `json:"keyboard_action,omitempty"`
-	X              *int    `json:"x,omitempty"`
-	Y              *int    `json:"y,omitempty"`
-	Button         string  `json:"button,omitempty"`
-	ClickCount     int     `json:"click_count,omitempty"`
-	Key            string  `json:"key,omitempty"`
-	Text           string  `json:"text,omitempty"`
-	DeltaX         float64 `json:"delta_x,omitempty"`
-	DeltaY         float64 `json:"delta_y,omitempty"`
-}
-
-type RuntimeBrowserViewerCommandPayload struct {
-	AttemptIdentity      RuntimeAttemptIdentity            `json:"attempt_identity"`
-	Action               RuntimeBrowserViewerAction        `json:"action"`
-	BrowserSessionID     string                            `json:"browser_session_id"`
-	SessionEpoch         uint64                            `json:"session_epoch"`
-	AttachmentID         string                            `json:"attachment_id"`
-	PreviousControlEpoch uint64                            `json:"previous_control_epoch"`
-	ControlEpoch         uint64                            `json:"control_epoch"`
-	Input                *RuntimeBrowserViewerInputPayload `json:"input,omitempty"`
-	DeadlineAt           time.Time                         `json:"deadline_at"`
-}
-
-type RuntimeBrowserViewerFramePayload struct {
-	AttemptIdentity  RuntimeAttemptIdentity `json:"attempt_identity"`
-	BrowserSessionID string                 `json:"browser_session_id"`
-	SessionEpoch     uint64                 `json:"session_epoch"`
-	AttachmentID     string                 `json:"attachment_id"`
-	ControlEpoch     uint64                 `json:"control_epoch"`
-	FrameSeq         uint64                 `json:"frame_seq"`
-	MIMEType         string                 `json:"mime_type"`
-	Data             []byte                 `json:"data"`
-	Width            int                    `json:"width"`
-	Height           int                    `json:"height"`
-}
-
-type RuntimeBrowserViewerFrameAckPayload struct {
-	AttemptIdentity RuntimeAttemptIdentity `json:"attempt_identity"`
-	ControlEpoch    uint64                 `json:"control_epoch"`
-	FrameSeq        uint64                 `json:"frame_seq"`
-}
-
 type RuntimeDecodedPendingCommand struct {
-	Type   RuntimeMessageType
-	Cancel *RuntimeRunCancelPayload
-	Drain  *RuntimeDrainPayload
-	Revoke *RuntimeRunLeaseRevokedPayload
-	Viewer *RuntimeBrowserViewerCommandPayload
+	Type      RuntimeMessageType
+	Cancel    *RuntimeRunCancelPayload
+	Drain     *RuntimeDrainPayload
+	Revoke    *RuntimeRunLeaseRevokedPayload
+	Extension *RuntimeExtensionCommand
 }
 
 type RuntimeCallAgentAuthorization struct {

@@ -135,6 +135,9 @@ func (config RuntimeWorkerConfig) Validate(requireClient bool) error {
 	if _, err := normalizeRuntimeOptionalFeatures(config.OptionalFeatures); err != nil {
 		problems = append(problems, err.Error())
 	}
+	if _, _, err := normalizeRuntimeExtensionRoutes(config.ExtensionRoutes); err != nil {
+		problems = append(problems, err.Error())
+	}
 	if explicitMTLS && !completeMTLS {
 		problems = append(problems, EnvNodeCertFile+", "+EnvNodeKeyFile+", and "+EnvRuntimeCAFile+" must be configured together")
 	}

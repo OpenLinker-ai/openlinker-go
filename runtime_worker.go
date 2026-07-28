@@ -40,6 +40,7 @@ type RuntimeWorker struct {
 
 	Capacity          int64
 	OptionalFeatures  []string
+	ExtensionRoutes   []RuntimeExtensionRoute
 	ClaimWait         time.Duration
 	CommandWait       time.Duration
 	HeartbeatInterval time.Duration
@@ -53,6 +54,7 @@ type RuntimeWorker struct {
 
 	runtimeClient       RuntimeClient
 	runtimeDialer       RuntimeTransportDialer
+	extensionRegistry   *runtimeExtensionRegistry
 	credentialManager   *runtimeCredentialManager
 	runtimeMTLSRequired bool
 
@@ -178,7 +180,11 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 			return err
 		}
 		node.runtimeClient = runtimeClient
-		node.runtimeDialer = &sdkRuntimeTransportDialer{runtime: runtimeClient, credentials: node.credentialManager}
+		node.runtimeDialer = &sdkRuntimeTransportDialer{
+			runtime:     runtimeClient,
+			credentials: node.credentialManager,
+			extensions:  node.extensionRegistry,
+		}
 		node.httpClient = httpClient
 	}
 	if node.runtimeDialer != nil {
@@ -402,6 +408,15 @@ func (node *RuntimeWorker) applyDefaultsAndValidate() error {
 		return err
 	}
 	node.OptionalFeatures = features
+	routes, registry, err := normalizeRuntimeExtensionRoutes(node.ExtensionRoutes)
+	if err != nil {
+		return err
+	}
+	node.ExtensionRoutes = routes
+	node.extensionRegistry = registry
+	if dialer, ok := node.runtimeDialer.(*sdkRuntimeTransportDialer); ok {
+		dialer.setExtensions(registry)
+	}
 	if node.ClaimWait <= 0 {
 		node.ClaimWait = RuntimeWorkerDefaultClaimWait
 	}

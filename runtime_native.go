@@ -589,6 +589,9 @@ func mergeRuntimeWorkerConfig(environment, explicit RuntimeWorkerConfig) Runtime
 	if explicit.OptionalFeatures != nil {
 		merged.OptionalFeatures = append([]string(nil), explicit.OptionalFeatures...)
 	}
+	if explicit.ExtensionRoutes != nil {
+		merged.ExtensionRoutes = append([]RuntimeExtensionRoute(nil), explicit.ExtensionRoutes...)
+	}
 	if explicit.MTLS.CertFile != "" {
 		merged.MTLS.CertFile = explicit.MTLS.CertFile
 	}

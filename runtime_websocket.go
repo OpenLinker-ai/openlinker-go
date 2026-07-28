@@ -69,6 +69,7 @@ type RuntimeWebSocket struct {
 
 	assignments chan RuntimeWebSocketAssignment
 	commands    chan RuntimeWebSocketCommand
+	extensions  *runtimeExtensionRegistry
 
 	finishOnce sync.Once
 	errMu      sync.RWMutex
@@ -108,6 +109,14 @@ func (r *Runtime) DialRuntimeWebSocket(
 	ctx context.Context,
 	hello RuntimeHelloPayload,
 ) (*RuntimeWebSocket, error) {
+	return r.dialRuntimeWebSocketWithExtensions(ctx, hello, nil)
+}
+
+func (r *Runtime) dialRuntimeWebSocketWithExtensions(
+	ctx context.Context,
+	hello RuntimeHelloPayload,
+	extensions *runtimeExtensionRegistry,
+) (*RuntimeWebSocket, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -140,6 +149,7 @@ func (r *Runtime) DialRuntimeWebSocket(
 		done:          make(chan struct{}),
 		assignments:   make(chan RuntimeWebSocketAssignment, runtimeWSPushQueueSize),
 		commands:      make(chan RuntimeWebSocketCommand, runtimeWSPushQueueSize),
+		extensions:    extensions,
 		pending:       make(map[string]*runtimeWSPending),
 		abandoned:     make(map[string]time.Time),
 		offers:        make(map[string]string),
@@ -341,7 +351,7 @@ func (c *RuntimeWebSocket) readLoop() {
 			c.closeProtocol(err)
 			return
 		}
-		envelope, err := decodeRuntimeWSEnvelope(raw)
+		envelope, err := decodeRuntimeWSEnvelopeWithExtensions(raw, c.extensions)
 		if err != nil {
 			c.closeProtocol(err)
 			return
@@ -376,8 +386,7 @@ func (c *RuntimeWebSocket) routeEnvelope(envelope RuntimeEnvelope) error {
 		case c.assignments <- RuntimeWebSocketAssignment{MessageID: envelope.MessageID, Payload: payload}:
 			return nil
 		}
-	case RuntimeRunCancel, RuntimeDrain, RuntimeLeaseRevoked,
-		RuntimeBrowserViewerCommand:
+	case RuntimeRunCancel, RuntimeDrain, RuntimeLeaseRevoked:
 		command := RuntimePendingCommand{Type: envelope.Type, Payload: append(json.RawMessage(nil), envelope.Payload...)}
 		decoded, err := DecodeRuntimePendingCommand(command)
 		if err != nil {
@@ -395,12 +404,31 @@ func (c *RuntimeWebSocket) routeEnvelope(envelope RuntimeEnvelope) error {
 			return nil
 		}
 	default:
+		if _, registered := c.extensions.command(envelope.Type); registered {
+			command := RuntimePendingCommand{
+				Type:    envelope.Type,
+				Payload: append(json.RawMessage(nil), envelope.Payload...),
+			}
+			decoded, err := decodeRuntimeExtensionCommand(command, c.extensions)
+			if err != nil {
+				return err
+			}
+			select {
+			case <-c.ctx.Done():
+				return c.ctx.Err()
+			case c.commands <- RuntimeWebSocketCommand{
+				MessageID: envelope.MessageID,
+				Command:   decoded,
+			}:
+				return nil
+			}
+		}
 		return fmt.Errorf("openlinker: unexpected runtime WebSocket push %q", envelope.Type)
 	}
 }
 
 func (c *RuntimeWebSocket) routeReply(envelope RuntimeEnvelope) error {
-	if err := validateRuntimeWSReplyPayload(envelope); err != nil {
+	if err := validateRuntimeWSReplyPayloadWithExtensions(envelope, c.extensions); err != nil {
 		return err
 	}
 	c.pendingMu.Lock()
@@ -512,7 +540,12 @@ func (c *RuntimeWebSocket) request(
 	if replyCount < 1 {
 		return nil, "", errors.New("openlinker: runtime WebSocket request needs a reply")
 	}
-	envelope, raw, err := newRuntimeWSEnvelope(messageType, replyTo, payload)
+	envelope, raw, err := newRuntimeWSEnvelopeWithExtensions(
+		messageType,
+		replyTo,
+		payload,
+		c.extensions,
+	)
 	if err != nil {
 		return nil, "", err
 	}
@@ -700,6 +733,20 @@ func newRuntimeWSEnvelope(
 	replyTo string,
 	payload any,
 ) (RuntimeEnvelope, []byte, error) {
+	return newRuntimeWSEnvelopeWithExtensions(
+		messageType,
+		replyTo,
+		payload,
+		nil,
+	)
+}
+
+func newRuntimeWSEnvelopeWithExtensions(
+	messageType RuntimeMessageType,
+	replyTo string,
+	payload any,
+	extensions *runtimeExtensionRegistry,
+) (RuntimeEnvelope, []byte, error) {
 	messageID, err := newRuntimeMessageID()
 	if err != nil {
 		return RuntimeEnvelope{}, nil, err
@@ -719,7 +766,7 @@ func newRuntimeWSEnvelope(
 		},
 		Payload: rawPayload,
 	}
-	if err = validateRuntimeWSEnvelope(envelope); err != nil {
+	if err = validateRuntimeWSEnvelopeWithExtensions(envelope, extensions); err != nil {
 		return RuntimeEnvelope{}, nil, err
 	}
 	raw, err := json.Marshal(envelope)
@@ -733,6 +780,13 @@ func newRuntimeWSEnvelope(
 }
 
 func decodeRuntimeWSEnvelope(raw []byte) (RuntimeEnvelope, error) {
+	return decodeRuntimeWSEnvelopeWithExtensions(raw, nil)
+}
+
+func decodeRuntimeWSEnvelopeWithExtensions(
+	raw []byte,
+	extensions *runtimeExtensionRegistry,
+) (RuntimeEnvelope, error) {
 	if len(raw) == 0 || int64(len(raw)) > RuntimeMaxMessageBytes {
 		return RuntimeEnvelope{}, errors.New("openlinker: runtime WebSocket message is empty or too large")
 	}
@@ -740,7 +794,7 @@ func decodeRuntimeWSEnvelope(raw []byte) (RuntimeEnvelope, error) {
 	if err := decodeRuntimeResponse(bytes.NewReader(raw), &envelope); err != nil {
 		return RuntimeEnvelope{}, fmt.Errorf("openlinker: decode runtime WebSocket envelope: %w", err)
 	}
-	if err := validateRuntimeWSEnvelope(envelope); err != nil {
+	if err := validateRuntimeWSEnvelopeWithExtensions(envelope, extensions); err != nil {
 		return RuntimeEnvelope{}, err
 	}
 	return envelope, nil
@@ -758,6 +812,13 @@ func decodeRuntimeWSPayload[P any](envelope RuntimeEnvelope, expected RuntimeMes
 }
 
 func validateRuntimeWSReplyPayload(envelope RuntimeEnvelope) error {
+	return validateRuntimeWSReplyPayloadWithExtensions(envelope, nil)
+}
+
+func validateRuntimeWSReplyPayloadWithExtensions(
+	envelope RuntimeEnvelope,
+	extensions *runtimeExtensionRegistry,
+) error {
 	switch envelope.Type {
 	case RuntimeReady:
 		payload, err := decodeRuntimeWSPayload[RuntimeReadyPayload](envelope, RuntimeReady)
@@ -823,15 +884,6 @@ func validateRuntimeWSReplyPayload(envelope RuntimeEnvelope) error {
 			return err
 		}
 		return validateRuntimeDrain(payload)
-	case RuntimeBrowserViewerFrameAck:
-		payload, err := decodeRuntimeWSPayload[RuntimeBrowserViewerFrameAckPayload](
-			envelope,
-			RuntimeBrowserViewerFrameAck,
-		)
-		if err != nil {
-			return err
-		}
-		return validateRuntimeBrowserViewerFrameAck(payload)
 	case RuntimeError:
 		payload, err := decodeRuntimeWSPayload[RuntimeErrorBody](envelope, RuntimeError)
 		if err != nil {
@@ -839,15 +891,27 @@ func validateRuntimeWSReplyPayload(envelope RuntimeEnvelope) error {
 		}
 		return validateRuntimeErrorBody(payload)
 	default:
+		if _, registered := extensions.reply(envelope.Type); registered {
+			return nil
+		}
 		return fmt.Errorf("openlinker: unexpected runtime WebSocket reply %q", envelope.Type)
 	}
 }
 
 func validateRuntimeWSEnvelope(envelope RuntimeEnvelope) error {
+	return validateRuntimeWSEnvelopeWithExtensions(envelope, nil)
+}
+
+func validateRuntimeWSEnvelopeWithExtensions(
+	envelope RuntimeEnvelope,
+	extensions *runtimeExtensionRegistry,
+) error {
 	if envelope.ProtocolVersion != RuntimeProtocolVersion || envelope.RuntimeContractID != RuntimeContractID {
 		return errors.New("openlinker: runtime WebSocket contract mismatch")
 	}
-	if !runtimeUUID(envelope.MessageID) || envelope.SentAt.IsZero() || !runtimeWSMessageType(envelope.Type) {
+	if !runtimeUUID(envelope.MessageID) ||
+		envelope.SentAt.IsZero() ||
+		!runtimeWSMessageTypeWithExtensions(envelope.Type, extensions) {
 		return errors.New("openlinker: invalid runtime WebSocket envelope")
 	}
 	if envelope.ReplyToMessageID != "" {
@@ -855,7 +919,8 @@ func validateRuntimeWSEnvelope(envelope RuntimeEnvelope) error {
 			return errors.New("openlinker: invalid runtime WebSocket reply correlation")
 		}
 	}
-	if runtimeWSRequiresReplyTo(envelope.Type) && envelope.ReplyToMessageID == "" {
+	if runtimeWSRequiresReplyToWithExtensions(envelope.Type, extensions) &&
+		envelope.ReplyToMessageID == "" {
 		return errors.New("openlinker: runtime WebSocket reply_to_message_id is required")
 	}
 	var object map[string]json.RawMessage
@@ -872,8 +937,6 @@ func runtimeWSMessageType(value RuntimeMessageType) bool {
 		RuntimeLeaseRenew, RuntimeLeaseRenewed, RuntimeRunEvent, RuntimeRunEventAck,
 		RuntimeRunResult, RuntimeRunResultAck, RuntimeRunCancel, RuntimeRunCancelAck,
 		RuntimeResume, RuntimeResumeAccepted, RuntimeLeaseRevoked, RuntimeDrain,
-		RuntimeBrowserViewerCommand, RuntimeBrowserViewerFrame,
-		RuntimeBrowserViewerFrameAck,
 		RuntimeError:
 		return true
 	default:
@@ -881,16 +944,44 @@ func runtimeWSMessageType(value RuntimeMessageType) bool {
 	}
 }
 
+func runtimeWSMessageTypeWithExtensions(
+	value RuntimeMessageType,
+	extensions *runtimeExtensionRegistry,
+) bool {
+	if runtimeWSMessageType(value) {
+		return true
+	}
+	if _, ok := extensions.command(value); ok {
+		return true
+	}
+	if _, ok := extensions.request(value); ok {
+		return true
+	}
+	_, ok := extensions.reply(value)
+	return ok
+}
+
 func runtimeWSRequiresReplyTo(value RuntimeMessageType) bool {
 	switch value {
 	case RuntimeReady, RuntimeAssignmentAck, RuntimeAssignmentConfirmed,
 		RuntimeAssignmentReject, RuntimeAssignmentRejected, RuntimeLeaseRenewed,
 		RuntimeRunEventAck, RuntimeRunResultAck, RuntimeRunCancelAck,
-		RuntimeResumeAccepted, RuntimeBrowserViewerFrameAck, RuntimeError:
+		RuntimeResumeAccepted, RuntimeError:
 		return true
 	default:
 		return false
 	}
+}
+
+func runtimeWSRequiresReplyToWithExtensions(
+	value RuntimeMessageType,
+	extensions *runtimeExtensionRegistry,
+) bool {
+	if runtimeWSRequiresReplyTo(value) {
+		return true
+	}
+	_, ok := extensions.reply(value)
+	return ok
 }
 
 func newRuntimeMessageID() (string, error) {

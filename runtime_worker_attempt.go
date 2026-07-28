@@ -29,7 +29,7 @@ type activeRuntimeAttempt struct {
 
 	leaseMu        sync.RWMutex
 	leaseExpiresAt time.Time
-	viewerCommands chan RuntimeBrowserViewerCommandPayload
+	extensions     chan RuntimeExtensionCommand
 }
 
 func (attempt *activeRuntimeAttempt) setLeaseExpiry(value time.Time) {
@@ -70,7 +70,7 @@ func (node *RuntimeWorker) startConfirmedAttempt(record AssignmentJournalRecord,
 		renewStop:      make(chan struct{}),
 		renewDone:      make(chan struct{}),
 		leaseExpiresAt: leaseExpiry,
-		viewerCommands: make(chan RuntimeBrowserViewerCommandPayload, 64),
+		extensions:     make(chan RuntimeExtensionCommand, 64),
 	}
 	node.active[record.Identity.AttemptID] = attempt
 	// shutdown sets draining under the same lock before waiting. Adding here
@@ -120,7 +120,6 @@ func (node *RuntimeWorker) executeAttempt(attempt *activeRuntimeAttempt) {
 		node.persistAttemptFailure(attempt, startedAt, "ATTEMPT_DEADLINE_EXCEEDED", "Attempt deadline elapsed before handler execution")
 		return
 	}
-	handlerCtx, stopHandler := context.WithCancel(attempt.ctx)
 	runtimeIdentity := node.store.Identity()
 	node.stateMu.RLock()
 	ready := node.ready
@@ -135,6 +134,7 @@ func (node *RuntimeWorker) executeAttempt(attempt *activeRuntimeAttempt) {
 		)
 		return
 	}
+	handlerCtx, stopHandler := context.WithCancel(attempt.ctx)
 	runCtx := RuntimeContext{
 		RunID:             attempt.identity.RunID,
 		AgentID:           attempt.identity.AgentID,
@@ -144,39 +144,45 @@ func (node *RuntimeWorker) executeAttempt(attempt *activeRuntimeAttempt) {
 		RunDeadlineAt:     attempt.payload.RunDeadlineAt,
 		Input:             input,
 		Metadata:          metadata,
-		BrowserViewer: &RuntimeBrowserViewer{
-			commands: attempt.viewerCommands,
-		},
 	}
-	runCtx.BrowserViewer.publish = func(
+	if len(node.ExtensionRoutes) != 0 {
+		runCtx.Extensions = &RuntimeExtensions{
+			commands: attempt.extensions,
+		}
+	}
+	publishExtension := func(
 		ctx context.Context,
-		frame RuntimeBrowserViewerFramePayload,
-	) error {
+		request RuntimeExtensionRequest,
+	) (*RuntimeExtensionReply, error) {
 		if attempt.finished.Load() || attempt.canceled.Load() ||
 			handlerCtx.Err() != nil {
-			return context.Canceled
+			return nil, context.Canceled
 		}
-		if frame.AttemptIdentity != sdkAttemptIdentity(attempt.identity) {
-			return errors.New("openlinker: browser Viewer frame Attempt identity mismatch")
+		identity, identityErr := runtimeExtensionAttemptIdentity(request.Payload)
+		if identityErr != nil {
+			return nil, identityErr
 		}
-		client, ok := node.runtimeClient.(runtimeBrowserViewerClient)
+		if identity != sdkAttemptIdentity(attempt.identity) {
+			return nil, errors.New("openlinker: Runtime extension Attempt identity mismatch")
+		}
+		client, ok := node.runtimeClient.(runtimeExtensionClient)
 		if !ok {
-			return errors.New("openlinker: browser Viewer transport is unavailable")
+			return nil, errors.New("openlinker: Runtime extension transport is unavailable")
 		}
 		if ctx == nil {
 			ctx = context.Background()
 		}
-		ack, err := client.PublishRuntimeBrowserViewerFrame(ctx, frame)
+		reply, err := client.PublishRuntimeExtension(ctx, request)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if ack == nil ||
-			ack.AttemptIdentity != frame.AttemptIdentity ||
-			ack.ControlEpoch != frame.ControlEpoch ||
-			ack.FrameSeq != frame.FrameSeq {
-			return ErrRuntimeProtocolMismatch
+		if reply == nil {
+			return nil, ErrRuntimeProtocolMismatch
 		}
-		return nil
+		return reply, nil
+	}
+	if runCtx.Extensions != nil {
+		runCtx.Extensions.publish = publishExtension
 	}
 	runCtx.emit = func(eventType string, payload any) error {
 		if attempt.finished.Load() || attempt.canceled.Load() {

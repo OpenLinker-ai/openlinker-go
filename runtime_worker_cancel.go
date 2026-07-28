@@ -35,7 +35,7 @@ func (node *RuntimeWorker) commandLoop() {
 			return
 		}
 		for _, command := range response.Commands {
-			decoded, err := command.Decode()
+			decoded, err := node.decodePendingCommand(command)
 			if err != nil {
 				node.reportFatal(err)
 				return
@@ -63,15 +63,24 @@ func (node *RuntimeWorker) handleDecodedCommand(command RuntimeDecodedPendingCom
 		if command.Revoke != nil {
 			node.handleLeaseRevoke(*command.Revoke)
 		}
-	case RuntimeBrowserViewerCommand:
-		if command.Viewer != nil {
-			node.handleBrowserViewerCommand(*command.Viewer)
+	default:
+		if command.Extension != nil {
+			node.handleExtensionCommand(*command.Extension)
 		}
 	}
 }
 
-func (node *RuntimeWorker) handleBrowserViewerCommand(
-	command RuntimeBrowserViewerCommandPayload,
+func (node *RuntimeWorker) decodePendingCommand(
+	command RuntimePendingCommand,
+) (RuntimeDecodedPendingCommand, error) {
+	if _, registered := node.extensionRegistry.command(command.Type); registered {
+		return decodeRuntimeExtensionCommand(command, node.extensionRegistry)
+	}
+	return DecodeRuntimePendingCommand(command)
+}
+
+func (node *RuntimeWorker) handleExtensionCommand(
+	command RuntimeExtensionCommand,
 ) {
 	active := node.activeAttempt(command.AttemptIdentity.AttemptID)
 	if active == nil ||
@@ -81,12 +90,12 @@ func (node *RuntimeWorker) handleBrowserViewerCommand(
 		return
 	}
 	select {
-	case active.viewerCommands <- command:
+	case active.extensions <- command:
 	case <-active.ctx.Done():
 	case <-node.runtimeCtx.Done():
 	default:
-		// The channel is intentionally bounded. Saturation fences the viewer
-		// command rather than blocking cancellation and lease processing.
+		// The channel is intentionally bounded. Saturation rejects the optional
+		// extension push rather than blocking cancellation and lease processing.
 	}
 }
 

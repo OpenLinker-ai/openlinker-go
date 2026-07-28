@@ -37,11 +37,11 @@ type runtimeDrainClient interface {
 	DrainRuntimeSession(context.Context, string, RuntimeDrainPayload) (*RuntimeDrainPayload, error)
 }
 
-type runtimeBrowserViewerClient interface {
-	PublishRuntimeBrowserViewerFrame(
+type runtimeExtensionClient interface {
+	PublishRuntimeExtension(
 		context.Context,
-		RuntimeBrowserViewerFramePayload,
-	) (*RuntimeBrowserViewerFrameAckPayload, error)
+		RuntimeExtensionRequest,
+	) (*RuntimeExtensionReply, error)
 }
 
 type RuntimeMTLSConfig struct {

@@ -320,40 +320,38 @@ func (c *RuntimeWebSocket) PollRuntimeCommands(
 	}
 }
 
-func (c *RuntimeWebSocket) PublishRuntimeBrowserViewerFrame(
+func (c *RuntimeWebSocket) PublishRuntimeExtension(
 	ctx context.Context,
-	request RuntimeBrowserViewerFramePayload,
-) (*RuntimeBrowserViewerFrameAckPayload, error) {
-	if err := validateRuntimeBrowserViewerFrame(request); err != nil {
+	request RuntimeExtensionRequest,
+) (*RuntimeExtensionReply, error) {
+	route, registered := c.extensions.request(request.Type)
+	if !registered {
+		return nil, errors.New("openlinker: Runtime extension request is not registered")
+	}
+	identity, err := runtimeExtensionAttemptIdentity(request.Payload)
+	if err != nil {
 		return nil, err
 	}
-	if request.AttemptIdentity.RuntimeSessionID != c.hello.RuntimeSessionID {
-		return nil, errors.New("openlinker: browser Viewer frame session mismatch")
+	if identity.RuntimeSessionID != c.hello.RuntimeSessionID {
+		return nil, errors.New("openlinker: Runtime extension request session mismatch")
 	}
 	envelope, err := c.requestOne(
 		ctx,
-		RuntimeBrowserViewerFrame,
+		route.RequestType,
 		"",
-		request,
-		RuntimeBrowserViewerFrameAck,
+		request.Payload,
+		route.ReplyType,
 	)
 	if err != nil {
 		return nil, err
 	}
-	ack, err := decodeRuntimeWSPayload[RuntimeBrowserViewerFrameAckPayload](
-		envelope,
-		RuntimeBrowserViewerFrameAck,
-	)
-	if err != nil {
-		return nil, err
+	if envelope.Type != route.ReplyType {
+		return nil, errors.New("openlinker: Runtime extension reply type mismatch")
 	}
-	if err := validateRuntimeBrowserViewerFrameAck(ack); err != nil ||
-		ack.AttemptIdentity != request.AttemptIdentity ||
-		ack.ControlEpoch != request.ControlEpoch ||
-		ack.FrameSeq != request.FrameSeq {
-		return nil, errors.New("openlinker: browser Viewer frame acknowledgement mismatch")
-	}
-	return &ack, nil
+	return &RuntimeExtensionReply{
+		Type:    envelope.Type,
+		Payload: append(json.RawMessage(nil), envelope.Payload...),
+	}, nil
 }
 
 func (c *RuntimeWebSocket) AckRuntimeCancel(
@@ -462,9 +460,11 @@ func commandPayload(command RuntimeDecodedPendingCommand) ([]byte, error) {
 		if command.Revoke != nil {
 			return json.Marshal(command.Revoke)
 		}
-	case RuntimeBrowserViewerCommand:
-		if command.Viewer != nil {
-			return json.Marshal(command.Viewer)
+	default:
+		if command.Extension != nil &&
+			command.Extension.Type == command.Type &&
+			len(command.Extension.Payload) != 0 {
+			return append([]byte(nil), command.Extension.Payload...), nil
 		}
 	}
 	return nil, errors.New("openlinker: invalid runtime WebSocket command")
