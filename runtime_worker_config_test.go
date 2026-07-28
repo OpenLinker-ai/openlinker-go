@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -80,6 +81,38 @@ func TestRuntimeWorkerConfigRejectsPartialMTLSWithDiscovery(t *testing.T) {
 	err := config.Validate(true)
 	if err == nil || !strings.Contains(err.Error(), "must be configured together") {
 		t.Fatalf("partial mTLS error = %v", err)
+	}
+}
+
+func TestRuntimeWorkerOptionalFeaturesAreValidatedAndStable(t *testing.T) {
+	features, err := normalizeRuntimeOptionalFeatures([]string{
+		"z_extension.v1",
+		"browser_execution_profile.v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(features, ",") != "browser_execution_profile.v1,z_extension.v1" {
+		t.Fatalf("normalized optional features = %#v", features)
+	}
+	for _, invalid := range [][]string{
+		{""},
+		{"Browser"},
+		{"-leading"},
+		{"lease_fence"},
+		{"duplicate", "duplicate"},
+	} {
+		if _, err := normalizeRuntimeOptionalFeatures(invalid); err == nil {
+			t.Fatalf("optional features %#v were accepted", invalid)
+		}
+	}
+	if got := normalizeRuntimeHelloFeatures(nil); !reflect.DeepEqual(got, RuntimeRequiredFeatures()) {
+		t.Fatalf("default hello features changed: %#v", got)
+	}
+	got := normalizeRuntimeHelloFeatures([]string{"browser_execution_profile.v1"})
+	if len(got) != len(RuntimeRequiredFeatures())+1 ||
+		got[len(got)-1] != "browser_execution_profile.v1" {
+		t.Fatalf("optional hello features = %#v", got)
 	}
 }
 

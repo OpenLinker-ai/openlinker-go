@@ -31,9 +31,14 @@ func (node *RuntimeWorker) runtimeHello() RuntimeHelloPayload {
 		SessionEpoch:     identity.SessionEpoch,
 		NodeVersion:      node.NodeVersion,
 		Capacity:         capacity,
-		Features:         RuntimeRequiredFeatures(),
+		Features:         normalizeRuntimeHelloFeatures(node.OptionalFeatures),
 		ContractDigest:   RuntimeContractDigest,
 	}
+}
+
+func normalizeRuntimeHelloFeatures(optional []string) []string {
+	features := RuntimeRequiredFeatures()
+	return append(features, optional...)
 }
 
 func (node *RuntimeWorker) createSessionWithRetry(parent context.Context) (*RuntimeReadyPayload, error) {

@@ -29,6 +29,7 @@ type activeRuntimeAttempt struct {
 
 	leaseMu        sync.RWMutex
 	leaseExpiresAt time.Time
+	extensions     chan RuntimeExtensionCommand
 }
 
 func (attempt *activeRuntimeAttempt) setLeaseExpiry(value time.Time) {
@@ -69,6 +70,7 @@ func (node *RuntimeWorker) startConfirmedAttempt(record AssignmentJournalRecord,
 		renewStop:      make(chan struct{}),
 		renewDone:      make(chan struct{}),
 		leaseExpiresAt: leaseExpiry,
+		extensions:     make(chan RuntimeExtensionCommand, 64),
 	}
 	node.active[record.Identity.AttemptID] = attempt
 	// shutdown sets draining under the same lock before waiting. Adding here
@@ -118,20 +120,69 @@ func (node *RuntimeWorker) executeAttempt(attempt *activeRuntimeAttempt) {
 		node.persistAttemptFailure(attempt, startedAt, "ATTEMPT_DEADLINE_EXCEEDED", "Attempt deadline elapsed before handler execution")
 		return
 	}
-	handlerCtx, stopHandler := context.WithCancel(attempt.ctx)
 	runtimeIdentity := node.store.Identity()
 	node.stateMu.RLock()
 	ready := node.ready
 	node.stateMu.RUnlock()
+	authority, err := runtimeAuthorityFromMetadata(metadata, runtimeIdentity, ready)
+	if err != nil {
+		node.persistAttemptFailure(
+			attempt,
+			startedAt,
+			"ASSIGNMENT_AUTHORITY_INVALID",
+			"assignment Runtime authority is invalid",
+		)
+		return
+	}
+	handlerCtx, stopHandler := context.WithCancel(attempt.ctx)
 	runCtx := RuntimeContext{
 		RunID:             attempt.identity.RunID,
 		AgentID:           attempt.identity.AgentID,
 		AttemptIdentity:   sdkAttemptIdentity(attempt.identity),
-		Authority:         runtimeAuthorityFromMetadata(metadata, runtimeIdentity, ready),
+		Authority:         authority,
 		AttemptDeadlineAt: attempt.payload.AttemptDeadlineAt,
 		RunDeadlineAt:     attempt.payload.RunDeadlineAt,
 		Input:             input,
 		Metadata:          metadata,
+	}
+	if len(node.ExtensionRoutes) != 0 {
+		runCtx.Extensions = &RuntimeExtensions{
+			commands: attempt.extensions,
+		}
+	}
+	publishExtension := func(
+		ctx context.Context,
+		request RuntimeExtensionRequest,
+	) (*RuntimeExtensionReply, error) {
+		if attempt.finished.Load() || attempt.canceled.Load() ||
+			handlerCtx.Err() != nil {
+			return nil, context.Canceled
+		}
+		identity, identityErr := runtimeExtensionAttemptIdentity(request.Payload)
+		if identityErr != nil {
+			return nil, identityErr
+		}
+		if identity != sdkAttemptIdentity(attempt.identity) {
+			return nil, errors.New("openlinker: Runtime extension Attempt identity mismatch")
+		}
+		client, ok := node.runtimeClient.(runtimeExtensionClient)
+		if !ok {
+			return nil, errors.New("openlinker: Runtime extension transport is unavailable")
+		}
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		reply, err := client.PublishRuntimeExtension(ctx, request)
+		if err != nil {
+			return nil, err
+		}
+		if reply == nil {
+			return nil, ErrRuntimeProtocolMismatch
+		}
+		return reply, nil
+	}
+	if runCtx.Extensions != nil {
+		runCtx.Extensions.publish = publishExtension
 	}
 	runCtx.emit = func(eventType string, payload any) error {
 		if attempt.finished.Load() || attempt.canceled.Load() {

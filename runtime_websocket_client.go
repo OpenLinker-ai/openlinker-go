@@ -320,6 +320,40 @@ func (c *RuntimeWebSocket) PollRuntimeCommands(
 	}
 }
 
+func (c *RuntimeWebSocket) PublishRuntimeExtension(
+	ctx context.Context,
+	request RuntimeExtensionRequest,
+) (*RuntimeExtensionReply, error) {
+	route, registered := c.extensions.request(request.Type)
+	if !registered {
+		return nil, errors.New("openlinker: Runtime extension request is not registered")
+	}
+	identity, err := runtimeExtensionAttemptIdentity(request.Payload)
+	if err != nil {
+		return nil, err
+	}
+	if identity.RuntimeSessionID != c.hello.RuntimeSessionID {
+		return nil, errors.New("openlinker: Runtime extension request session mismatch")
+	}
+	envelope, err := c.requestOne(
+		ctx,
+		route.RequestType,
+		"",
+		request.Payload,
+		route.ReplyType,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if envelope.Type != route.ReplyType {
+		return nil, errors.New("openlinker: Runtime extension reply type mismatch")
+	}
+	return &RuntimeExtensionReply{
+		Type:    envelope.Type,
+		Payload: append(json.RawMessage(nil), envelope.Payload...),
+	}, nil
+}
+
 func (c *RuntimeWebSocket) AckRuntimeCancel(
 	ctx context.Context,
 	request RuntimeRunCancelAckPayload,
@@ -425,6 +459,12 @@ func commandPayload(command RuntimeDecodedPendingCommand) ([]byte, error) {
 	case RuntimeLeaseRevoked:
 		if command.Revoke != nil {
 			return json.Marshal(command.Revoke)
+		}
+	default:
+		if command.Extension != nil &&
+			command.Extension.Type == command.Type &&
+			len(command.Extension.Payload) != 0 {
+			return append([]byte(nil), command.Extension.Payload...), nil
 		}
 	}
 	return nil, errors.New("openlinker: invalid runtime WebSocket command")

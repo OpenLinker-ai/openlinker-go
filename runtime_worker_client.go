@@ -37,6 +37,13 @@ type runtimeDrainClient interface {
 	DrainRuntimeSession(context.Context, string, RuntimeDrainPayload) (*RuntimeDrainPayload, error)
 }
 
+type runtimeExtensionClient interface {
+	PublishRuntimeExtension(
+		context.Context,
+		RuntimeExtensionRequest,
+	) (*RuntimeExtensionReply, error)
+}
+
 type RuntimeMTLSConfig struct {
 	CertFile   string
 	KeyFile    string

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,8 @@ type RuntimeWorker struct {
 	MTLS             RuntimeMTLSConfig
 
 	Capacity          int64
+	OptionalFeatures  []string
+	ExtensionRoutes   []RuntimeExtensionRoute
 	ClaimWait         time.Duration
 	CommandWait       time.Duration
 	HeartbeatInterval time.Duration
@@ -51,6 +54,7 @@ type RuntimeWorker struct {
 
 	runtimeClient       RuntimeClient
 	runtimeDialer       RuntimeTransportDialer
+	extensionRegistry   *runtimeExtensionRegistry
 	credentialManager   *runtimeCredentialManager
 	runtimeMTLSRequired bool
 
@@ -176,7 +180,11 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 			return err
 		}
 		node.runtimeClient = runtimeClient
-		node.runtimeDialer = &sdkRuntimeTransportDialer{runtime: runtimeClient, credentials: node.credentialManager}
+		node.runtimeDialer = &sdkRuntimeTransportDialer{
+			runtime:     runtimeClient,
+			credentials: node.credentialManager,
+			extensions:  node.extensionRegistry,
+		}
 		node.httpClient = httpClient
 	}
 	if node.runtimeDialer != nil {
@@ -395,6 +403,20 @@ func (node *RuntimeWorker) applyDefaultsAndValidate() error {
 	if node.Capacity < 1 || node.Capacity > RuntimeMaxNodeCapacity {
 		return fmt.Errorf("capacity must be between 1 and %d", RuntimeMaxNodeCapacity)
 	}
+	features, err := normalizeRuntimeOptionalFeatures(node.OptionalFeatures)
+	if err != nil {
+		return err
+	}
+	node.OptionalFeatures = features
+	routes, registry, err := normalizeRuntimeExtensionRoutes(node.ExtensionRoutes)
+	if err != nil {
+		return err
+	}
+	node.ExtensionRoutes = routes
+	node.extensionRegistry = registry
+	if dialer, ok := node.runtimeDialer.(*sdkRuntimeTransportDialer); ok {
+		dialer.setExtensions(registry)
+	}
 	if node.ClaimWait <= 0 {
 		node.ClaimWait = RuntimeWorkerDefaultClaimWait
 	}
@@ -417,6 +439,35 @@ func (node *RuntimeWorker) applyDefaultsAndValidate() error {
 		node.webSocketProbeTimeout = 10 * time.Second
 	}
 	return nil
+}
+
+func normalizeRuntimeOptionalFeatures(features []string) ([]string, error) {
+	required := RuntimeRequiredFeatures()
+	seen := make(map[string]struct{}, len(required)+len(features))
+	for _, feature := range required {
+		seen[feature] = struct{}{}
+	}
+	normalized := make([]string, 0, len(features))
+	for _, feature := range features {
+		if feature == "" || len(feature) > 100 {
+			return nil, errors.New("runtime optional feature is invalid")
+		}
+		for index, character := range feature {
+			if (character >= 'a' && character <= 'z') ||
+				(character >= '0' && character <= '9') ||
+				(index > 0 && (character == '_' || character == '-' || character == '.')) {
+				continue
+			}
+			return nil, errors.New("runtime optional feature is invalid")
+		}
+		if _, duplicate := seen[feature]; duplicate {
+			return nil, errors.New("runtime optional features must be unique and distinct from required features")
+		}
+		seen[feature] = struct{}{}
+		normalized = append(normalized, feature)
+	}
+	sort.Strings(normalized)
+	return normalized, nil
 }
 
 func (node *RuntimeWorker) startRuntimeLoops() {

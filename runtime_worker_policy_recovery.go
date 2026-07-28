@@ -200,6 +200,19 @@ func (client *policyRecoveringRuntimeClient) PollRuntimeCommands(ctx context.Con
 	return value.(*RuntimeCommandsResponse), err
 }
 
+func (client *policyRecoveringRuntimeClient) PublishRuntimeExtension(
+	ctx context.Context,
+	request RuntimeExtensionRequest,
+) (*RuntimeExtensionReply, error) {
+	value, err := client.call(ctx, func() (any, error) {
+		return client.transport.PublishRuntimeExtension(ctx, request)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return value.(*RuntimeExtensionReply), nil
+}
+
 func (client *policyRecoveringRuntimeClient) AckRuntimeCancel(ctx context.Context, request RuntimeRunCancelAckPayload) (*RuntimeRunCancellationState, error) {
 	value, err := client.call(ctx, func() (any, error) { return client.transport.AckRuntimeCancel(ctx, request) })
 	if value == nil {

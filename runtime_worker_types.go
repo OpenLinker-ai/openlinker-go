@@ -27,6 +27,12 @@ type RuntimeWorkerConfig struct {
 	DataDir          string
 	Handler          RuntimeHandler
 	Capacity         int64
+	// OptionalFeatures appends stable, validated capability identifiers to the
+	// Runtime hello. Required protocol features are always included.
+	OptionalFeatures []string
+	// ExtensionRoutes explicitly registers optional WebSocket message triples.
+	// Unregistered message types remain protocol errors.
+	ExtensionRoutes []RuntimeExtensionRoute
 
 	ClaimWait         time.Duration
 	CommandWait       time.Duration
@@ -109,6 +115,8 @@ func newRuntimeWorker(config RuntimeWorkerConfig, client RuntimeClient, dialer R
 		DataDir:           config.DataDir,
 		Handler:           config.Handler,
 		Capacity:          config.Capacity,
+		OptionalFeatures:  append([]string(nil), config.OptionalFeatures...),
+		ExtensionRoutes:   append([]RuntimeExtensionRoute(nil), config.ExtensionRoutes...),
 		ClaimWait:         config.ClaimWait,
 		CommandWait:       config.CommandWait,
 		HeartbeatInterval: config.HeartbeatInterval,
@@ -177,6 +185,7 @@ type RuntimeContext struct {
 	RunDeadlineAt     time.Time
 	Input             any
 	Metadata          RuntimeJSONMap
+	Extensions        *RuntimeExtensions
 
 	emit      func(eventType string, payload any) error
 	callAgent func(context.Context, string, any, RuntimeCallOptions) (any, error)

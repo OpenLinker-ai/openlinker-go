@@ -982,6 +982,73 @@ func TestRuntimeExpiredAttemptDeadlineDoesNotInvokeAdapter(t *testing.T) {
 	}
 }
 
+func TestRuntimeMalformedAuthorityDoesNotInvokeAdapter(t *testing.T) {
+	store := openRuntimeStoreForTest(t, t.TempDir())
+	identity := runtimeTestAttemptIdentity(store.Identity())
+	if err := store.CreateAssignment(testAssignmentRecord(identity)); err != nil {
+		t.Fatal(err)
+	}
+	payload := runtimeTestAssignmentPayload(identity)
+	payload.Metadata = json.RawMessage(`{
+		"source":"test",
+		"_openlinker_runtime_authority":{
+			"principal_scope_id":"not/an/opaque-id",
+			"source":"core"
+		}
+	}`)
+	if err := store.StoreAssignmentPayload(payload); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []AssignmentState{AssignmentStateACKSent, AssignmentStateConfirmed} {
+		if _, err := store.AdvanceAssignment(identity.AssignmentMessageID, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record, err := store.Assignment(identity.AssignmentMessageID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var adapterCalls atomic.Int32
+	node := &RuntimeWorker{
+		Handler: testRuntimeHandlerFunc(func(context.Context, any, RuntimeContext) (any, error) {
+			adapterCalls.Add(1)
+			return RuntimeJSONMap{}, nil
+		}),
+		runtimeClient: newFakeRuntimeClient(),
+		store:         store,
+		runtimeCtx:    context.Background(),
+		active:        make(map[string]*activeRuntimeAttempt),
+		wakeSpool:     make(chan struct{}, 1),
+		ready:         &RuntimeReadyPayload{AttachmentID: testAttachmentID},
+	}
+	if err := node.startConfirmedAttempt(record, payload, time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		node.executions.Wait()
+		close(done)
+	}()
+	waitForTestSignal(t, done, 2*time.Second, "invalid authority failure Result")
+	if adapterCalls.Load() != 0 {
+		t.Fatalf("invalid authority invoked adapter %d time(s)", adapterCalls.Load())
+	}
+	result, err := store.PendingResult(identity.AttemptID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payloadResult RuntimeRunResultPayload
+	if err := decodeStrictJSON(result.Payload, &payloadResult); err != nil {
+		t.Fatal(err)
+	}
+	if payloadResult.Status != "failed" ||
+		payloadResult.Error == nil ||
+		payloadResult.Error.ErrorCode != "ASSIGNMENT_AUTHORITY_INVALID" ||
+		payloadResult.Error.Message != "assignment Runtime authority is invalid" {
+		t.Fatalf("invalid authority Result = %#v", payloadResult)
+	}
+}
+
 func TestAssignmentPayloadIsEncryptedDurableAndFailsClosedOnCorruption(t *testing.T) {
 	dataDir := t.TempDir()
 	store := openRuntimeStoreForTest(t, dataDir)

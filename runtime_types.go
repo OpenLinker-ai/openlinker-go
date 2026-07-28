@@ -338,10 +338,11 @@ type RuntimeDrainPayload struct {
 }
 
 type RuntimeDecodedPendingCommand struct {
-	Type   RuntimeMessageType
-	Cancel *RuntimeRunCancelPayload
-	Drain  *RuntimeDrainPayload
-	Revoke *RuntimeRunLeaseRevokedPayload
+	Type      RuntimeMessageType
+	Cancel    *RuntimeRunCancelPayload
+	Drain     *RuntimeDrainPayload
+	Revoke    *RuntimeRunLeaseRevokedPayload
+	Extension *RuntimeExtensionCommand
 }
 
 type RuntimeCallAgentAuthorization struct {
