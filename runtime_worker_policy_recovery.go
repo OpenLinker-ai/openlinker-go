@@ -200,6 +200,19 @@ func (client *policyRecoveringRuntimeClient) PollRuntimeCommands(ctx context.Con
 	return value.(*RuntimeCommandsResponse), err
 }
 
+func (client *policyRecoveringRuntimeClient) PublishRuntimeBrowserViewerFrame(
+	ctx context.Context,
+	request RuntimeBrowserViewerFramePayload,
+) (*RuntimeBrowserViewerFrameAckPayload, error) {
+	value, err := client.call(ctx, func() (any, error) {
+		return client.transport.PublishRuntimeBrowserViewerFrame(ctx, request)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return value.(*RuntimeBrowserViewerFrameAckPayload), nil
+}
+
 func (client *policyRecoveringRuntimeClient) AckRuntimeCancel(ctx context.Context, request RuntimeRunCancelAckPayload) (*RuntimeRunCancellationState, error) {
 	value, err := client.call(ctx, func() (any, error) { return client.transport.AckRuntimeCancel(ctx, request) })
 	if value == nil {

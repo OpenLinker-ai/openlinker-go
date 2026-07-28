@@ -376,7 +376,8 @@ func (c *RuntimeWebSocket) routeEnvelope(envelope RuntimeEnvelope) error {
 		case c.assignments <- RuntimeWebSocketAssignment{MessageID: envelope.MessageID, Payload: payload}:
 			return nil
 		}
-	case RuntimeRunCancel, RuntimeDrain, RuntimeLeaseRevoked:
+	case RuntimeRunCancel, RuntimeDrain, RuntimeLeaseRevoked,
+		RuntimeBrowserViewerCommand:
 		command := RuntimePendingCommand{Type: envelope.Type, Payload: append(json.RawMessage(nil), envelope.Payload...)}
 		decoded, err := DecodeRuntimePendingCommand(command)
 		if err != nil {
@@ -822,6 +823,15 @@ func validateRuntimeWSReplyPayload(envelope RuntimeEnvelope) error {
 			return err
 		}
 		return validateRuntimeDrain(payload)
+	case RuntimeBrowserViewerFrameAck:
+		payload, err := decodeRuntimeWSPayload[RuntimeBrowserViewerFrameAckPayload](
+			envelope,
+			RuntimeBrowserViewerFrameAck,
+		)
+		if err != nil {
+			return err
+		}
+		return validateRuntimeBrowserViewerFrameAck(payload)
 	case RuntimeError:
 		payload, err := decodeRuntimeWSPayload[RuntimeErrorBody](envelope, RuntimeError)
 		if err != nil {
@@ -862,6 +872,8 @@ func runtimeWSMessageType(value RuntimeMessageType) bool {
 		RuntimeLeaseRenew, RuntimeLeaseRenewed, RuntimeRunEvent, RuntimeRunEventAck,
 		RuntimeRunResult, RuntimeRunResultAck, RuntimeRunCancel, RuntimeRunCancelAck,
 		RuntimeResume, RuntimeResumeAccepted, RuntimeLeaseRevoked, RuntimeDrain,
+		RuntimeBrowserViewerCommand, RuntimeBrowserViewerFrame,
+		RuntimeBrowserViewerFrameAck,
 		RuntimeError:
 		return true
 	default:
@@ -874,7 +886,7 @@ func runtimeWSRequiresReplyTo(value RuntimeMessageType) bool {
 	case RuntimeReady, RuntimeAssignmentAck, RuntimeAssignmentConfirmed,
 		RuntimeAssignmentReject, RuntimeAssignmentRejected, RuntimeLeaseRenewed,
 		RuntimeRunEventAck, RuntimeRunResultAck, RuntimeRunCancelAck,
-		RuntimeResumeAccepted, RuntimeError:
+		RuntimeResumeAccepted, RuntimeBrowserViewerFrameAck, RuntimeError:
 		return true
 	default:
 		return false

@@ -37,6 +37,13 @@ type runtimeDrainClient interface {
 	DrainRuntimeSession(context.Context, string, RuntimeDrainPayload) (*RuntimeDrainPayload, error)
 }
 
+type runtimeBrowserViewerClient interface {
+	PublishRuntimeBrowserViewerFrame(
+		context.Context,
+		RuntimeBrowserViewerFramePayload,
+	) (*RuntimeBrowserViewerFrameAckPayload, error)
+}
+
 type RuntimeMTLSConfig struct {
 	CertFile   string
 	KeyFile    string

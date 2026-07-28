@@ -181,9 +181,34 @@ type RuntimeContext struct {
 	RunDeadlineAt     time.Time
 	Input             any
 	Metadata          RuntimeJSONMap
+	BrowserViewer     *RuntimeBrowserViewer
 
 	emit      func(eventType string, payload any) error
 	callAgent func(context.Context, string, any, RuntimeCallOptions) (any, error)
+}
+
+// RuntimeBrowserViewer is an Attempt-scoped transient control channel.
+// Commands and JPEG frames are never added to the durable event spool.
+type RuntimeBrowserViewer struct {
+	commands <-chan RuntimeBrowserViewerCommandPayload
+	publish  func(context.Context, RuntimeBrowserViewerFramePayload) error
+}
+
+func (viewer *RuntimeBrowserViewer) Commands() <-chan RuntimeBrowserViewerCommandPayload {
+	if viewer == nil {
+		return nil
+	}
+	return viewer.commands
+}
+
+func (viewer *RuntimeBrowserViewer) PublishFrame(
+	ctx context.Context,
+	frame RuntimeBrowserViewerFramePayload,
+) error {
+	if viewer == nil || viewer.publish == nil {
+		return errors.New("openlinker: browser Viewer transport is unavailable")
+	}
+	return viewer.publish(ctx, frame)
 }
 
 // RuntimeAuthorityContext is Core-owned execution identity that must never be

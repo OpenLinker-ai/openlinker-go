@@ -352,6 +352,22 @@ func (client *switchingRuntimeClient) PollRuntimeCommands(ctx context.Context, s
 	return active.PollRuntimeCommands(callCtx, sessionID, wait)
 }
 
+func (client *switchingRuntimeClient) PublishRuntimeBrowserViewerFrame(
+	ctx context.Context,
+	request RuntimeBrowserViewerFramePayload,
+) (*RuntimeBrowserViewerFrameAckPayload, error) {
+	active, callCtx, done, err := client.begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	viewer, ok := active.(runtimeBrowserViewerClient)
+	if !ok {
+		return nil, errors.New("runtime Browser Viewer requires WebSocket transport")
+	}
+	return viewer.PublishRuntimeBrowserViewerFrame(callCtx, request)
+}
+
 func (client *switchingRuntimeClient) AckRuntimeCancel(ctx context.Context, request RuntimeRunCancelAckPayload) (*RuntimeRunCancellationState, error) {
 	active, callCtx, done, err := client.begin(ctx)
 	if err != nil {

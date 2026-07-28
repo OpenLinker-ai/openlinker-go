@@ -320,6 +320,42 @@ func (c *RuntimeWebSocket) PollRuntimeCommands(
 	}
 }
 
+func (c *RuntimeWebSocket) PublishRuntimeBrowserViewerFrame(
+	ctx context.Context,
+	request RuntimeBrowserViewerFramePayload,
+) (*RuntimeBrowserViewerFrameAckPayload, error) {
+	if err := validateRuntimeBrowserViewerFrame(request); err != nil {
+		return nil, err
+	}
+	if request.AttemptIdentity.RuntimeSessionID != c.hello.RuntimeSessionID {
+		return nil, errors.New("openlinker: browser Viewer frame session mismatch")
+	}
+	envelope, err := c.requestOne(
+		ctx,
+		RuntimeBrowserViewerFrame,
+		"",
+		request,
+		RuntimeBrowserViewerFrameAck,
+	)
+	if err != nil {
+		return nil, err
+	}
+	ack, err := decodeRuntimeWSPayload[RuntimeBrowserViewerFrameAckPayload](
+		envelope,
+		RuntimeBrowserViewerFrameAck,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateRuntimeBrowserViewerFrameAck(ack); err != nil ||
+		ack.AttemptIdentity != request.AttemptIdentity ||
+		ack.ControlEpoch != request.ControlEpoch ||
+		ack.FrameSeq != request.FrameSeq {
+		return nil, errors.New("openlinker: browser Viewer frame acknowledgement mismatch")
+	}
+	return &ack, nil
+}
+
 func (c *RuntimeWebSocket) AckRuntimeCancel(
 	ctx context.Context,
 	request RuntimeRunCancelAckPayload,
@@ -425,6 +461,10 @@ func commandPayload(command RuntimeDecodedPendingCommand) ([]byte, error) {
 	case RuntimeLeaseRevoked:
 		if command.Revoke != nil {
 			return json.Marshal(command.Revoke)
+		}
+	case RuntimeBrowserViewerCommand:
+		if command.Viewer != nil {
+			return json.Marshal(command.Viewer)
 		}
 	}
 	return nil, errors.New("openlinker: invalid runtime WebSocket command")

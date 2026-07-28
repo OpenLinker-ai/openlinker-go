@@ -29,6 +29,7 @@ type activeRuntimeAttempt struct {
 
 	leaseMu        sync.RWMutex
 	leaseExpiresAt time.Time
+	viewerCommands chan RuntimeBrowserViewerCommandPayload
 }
 
 func (attempt *activeRuntimeAttempt) setLeaseExpiry(value time.Time) {
@@ -69,6 +70,7 @@ func (node *RuntimeWorker) startConfirmedAttempt(record AssignmentJournalRecord,
 		renewStop:      make(chan struct{}),
 		renewDone:      make(chan struct{}),
 		leaseExpiresAt: leaseExpiry,
+		viewerCommands: make(chan RuntimeBrowserViewerCommandPayload, 64),
 	}
 	node.active[record.Identity.AttemptID] = attempt
 	// shutdown sets draining under the same lock before waiting. Adding here
@@ -142,6 +144,39 @@ func (node *RuntimeWorker) executeAttempt(attempt *activeRuntimeAttempt) {
 		RunDeadlineAt:     attempt.payload.RunDeadlineAt,
 		Input:             input,
 		Metadata:          metadata,
+		BrowserViewer: &RuntimeBrowserViewer{
+			commands: attempt.viewerCommands,
+		},
+	}
+	runCtx.BrowserViewer.publish = func(
+		ctx context.Context,
+		frame RuntimeBrowserViewerFramePayload,
+	) error {
+		if attempt.finished.Load() || attempt.canceled.Load() ||
+			handlerCtx.Err() != nil {
+			return context.Canceled
+		}
+		if frame.AttemptIdentity != sdkAttemptIdentity(attempt.identity) {
+			return errors.New("openlinker: browser Viewer frame Attempt identity mismatch")
+		}
+		client, ok := node.runtimeClient.(runtimeBrowserViewerClient)
+		if !ok {
+			return errors.New("openlinker: browser Viewer transport is unavailable")
+		}
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		ack, err := client.PublishRuntimeBrowserViewerFrame(ctx, frame)
+		if err != nil {
+			return err
+		}
+		if ack == nil ||
+			ack.AttemptIdentity != frame.AttemptIdentity ||
+			ack.ControlEpoch != frame.ControlEpoch ||
+			ack.FrameSeq != frame.FrameSeq {
+			return ErrRuntimeProtocolMismatch
+		}
+		return nil
 	}
 	runCtx.emit = func(eventType string, payload any) error {
 		if attempt.finished.Load() || attempt.canceled.Load() {

@@ -63,6 +63,30 @@ func (node *RuntimeWorker) handleDecodedCommand(command RuntimeDecodedPendingCom
 		if command.Revoke != nil {
 			node.handleLeaseRevoke(*command.Revoke)
 		}
+	case RuntimeBrowserViewerCommand:
+		if command.Viewer != nil {
+			node.handleBrowserViewerCommand(*command.Viewer)
+		}
+	}
+}
+
+func (node *RuntimeWorker) handleBrowserViewerCommand(
+	command RuntimeBrowserViewerCommandPayload,
+) {
+	active := node.activeAttempt(command.AttemptIdentity.AttemptID)
+	if active == nil ||
+		sdkAttemptIdentity(active.identity) != command.AttemptIdentity ||
+		active.finished.Load() ||
+		active.canceled.Load() {
+		return
+	}
+	select {
+	case active.viewerCommands <- command:
+	case <-active.ctx.Done():
+	case <-node.runtimeCtx.Done():
+	default:
+		// The channel is intentionally bounded. Saturation fences the viewer
+		// command rather than blocking cancellation and lease processing.
 	}
 }
 
