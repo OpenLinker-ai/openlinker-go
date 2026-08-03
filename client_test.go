@@ -92,6 +92,9 @@ func TestRunAgentEncodesRequestBody(t *testing.T) {
 			StartedAt: "2026-07-18T00:00:00Z", FinishedAt: "2026-07-18T00:00:01Z", Source: "api",
 			RuntimeContractID: "openlinker.runtime.v2", RuntimeTransport: "websocket",
 			RuntimeTransportReason: "recovery", RuntimeTransportChangedAt: "2026-07-18T00:00:00Z",
+			BrowserInteractionPolicy: "full", BrowserInteractionPolicyGeneration: 7,
+			BrowserMutationOrigins:       []string{"https://example.com"},
+			BrowserMutationOriginsSHA256: strings.Repeat("a", 64), BrowserContractID: "openlinker.browser.v2",
 			DispatchState: "terminal", AttemptCount: 1, MaxAttempts: 3, LatestAttemptID: "attempt-1",
 		})
 	}))
@@ -122,6 +125,10 @@ func TestRunAgentEncodesRequestBody(t *testing.T) {
 	if resp.AgentConnectionMode != "runtime" || resp.RuntimeTransport != "websocket" ||
 		resp.RuntimeTransportReason != "recovery" || resp.DispatchState != "terminal" || resp.AttemptCount != 1 {
 		t.Fatalf("run execution evidence = %#v", resp)
+	}
+	if resp.BrowserInteractionPolicy != "full" || resp.BrowserInteractionPolicyGeneration != 7 ||
+		len(resp.BrowserMutationOrigins) != 1 || resp.BrowserContractID != "openlinker.browser.v2" {
+		t.Fatalf("run Browser authority evidence = %#v", resp)
 	}
 	if got["agent_id"] != "00000000-0000-0000-0000-000000000001" {
 		t.Fatalf("agent_id = %#v", got["agent_id"])

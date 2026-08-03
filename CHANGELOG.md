@@ -5,6 +5,24 @@ All notable changes to `openlinker-go` will be documented in this file.
 This SDK is currently pre-1.0. Breaking changes may happen before the Core API,
 runtime connector, callback, and A2A contracts are declared stable.
 
+## [v0.2.0-rc5] - Unreleased
+
+### Added
+
+- Added trusted Browser execution authority to Runtime assignments, including
+  execution profile, interaction policy generation, and an exact canonical
+  mutation-origin scope with SHA-256 binding.
+- Added Browser policy and contract evidence to typed Run responses and the
+  public Core client contract fixture.
+
+### Security
+
+- Runtime Workers now fail closed when Browser authority is incomplete,
+  broadened, non-canonical, duplicated, unsorted, or digest-mismatched.
+- Browser mutation origins use the same strict HTTPS, IDNA, numeric-port, IPv4,
+  and IPv6 canonicalization rules as Core and the Browser protocol. Ambiguous
+  legacy IPv4 spellings and IPv4-mapped IPv6 are rejected.
+
 ## [v0.2.0-rc2] - Unreleased
 
 ### Added

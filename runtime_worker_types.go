@@ -195,10 +195,15 @@ type RuntimeContext struct {
 // accepted from caller tool arguments. The Worker removes its private wire
 // representation from Metadata before invoking the handler.
 type RuntimeAuthorityContext struct {
-	PrincipalScopeID    string
-	RuntimeSessionID    string
-	RuntimeSessionEpoch int64
-	RuntimeAttachmentID string
+	PrincipalScopeID                   string
+	RuntimeSessionID                   string
+	RuntimeSessionEpoch                int64
+	RuntimeAttachmentID                string
+	ExecutionProfile                   string
+	BrowserInteractionPolicy           string
+	BrowserInteractionPolicyGeneration int64
+	BrowserMutationOrigins             []string
+	BrowserMutationOriginsSHA256       string
 }
 
 // Deadline returns the earlier of the Attempt and Run deadlines.
