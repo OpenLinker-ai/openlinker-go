@@ -551,9 +551,10 @@ func TestRuntimeCancelACKsStoppedOnlyAfterAdapterExited(t *testing.T) {
 		return len(node.cancellations) == 0
 	}, "completed cancellation to leave the in-flight dedupe set")
 	eventuallyForTest(t, 2*time.Second, func() bool {
-		record, err := node.store.Assignment(deterministicRuntimeUUID("assignment", testAttemptID, testLeaseID))
-		return err == nil && record.State == AssignmentStateRevoked
-	}, "canceled Attempt journal to become revoked")
+		_, err := node.store.Assignment(deterministicRuntimeUUID("assignment", testAttemptID, testLeaseID))
+		return errors.Is(err, ErrAssignmentNotFound)
+	}, "canceled Attempt durable state to be retired")
+	assertRuntimeSpoolRecordCountsForTest(t, dataDir, 0, 0, 0)
 	stopRuntimeWorkerForTest(t, node, errCh)
 
 	cancelMu.Lock()
@@ -563,6 +564,268 @@ func TestRuntimeCancelACKsStoppedOnlyAfterAdapterExited(t *testing.T) {
 	cancelMu.Unlock()
 	if polledSession != client.helloSnapshot().RuntimeSessionID {
 		t.Fatalf("command poll session = %q, want %q", polledSession, client.helloSnapshot().RuntimeSessionID)
+	}
+}
+
+func TestRuntimeCancelStoppedRetiresEventsResultAndAssignmentPayload(t *testing.T) {
+	dataDir := t.TempDir()
+	store := openRuntimeStoreForTest(t, dataDir)
+	identity := persistStartedAssignmentForTest(t, store, "cancel-terminal-cleanup")
+	if err := store.StoreAssignmentPayload(runtimeTestAssignmentPayload(identity)); err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.AppendEvent(identity, "run.progress", json.RawMessage(`{"step":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.AppendEvent(identity, "run.progress", json.RawMessage(`{"step":2}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AckEvent(identity.AttemptID, second.ClientEventID, second.ClientEventSeq); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendResult(identity, "success", json.RawMessage(`{"answer":42}`)); err != nil {
+		t.Fatal(err)
+	}
+	client := newFakeRuntimeClient()
+	node := runtimeWorkerForTerminalCleanupTest(store, client, identity.AttemptID)
+	node.handleCancelCommand(runtimeCancelCommandForTest(identity))
+
+	if _, err := store.Assignment(identity.AssignmentMessageID); !errors.Is(err, ErrAssignmentNotFound) {
+		t.Fatalf("Assignment after stopped cancellation error = %v", err)
+	}
+	if _, err := store.AssignmentPayload(identity.AttemptID); !errors.Is(err, ErrSpoolRecordNotFound) {
+		t.Fatalf("Assignment payload after stopped cancellation error = %v", err)
+	}
+	if _, err := store.PendingResult(identity.AttemptID); !errors.Is(err, ErrAssignmentNotFound) {
+		t.Fatalf("Result after stopped cancellation error = %v", err)
+	}
+	if _, err := store.PendingEvents(identity.AttemptID); !errors.Is(err, ErrAssignmentNotFound) {
+		t.Fatalf("Events after stopped cancellation error = %v", err)
+	}
+	if first.ClientEventSeq != 1 {
+		t.Fatalf("first Event sequence = %d", first.ClientEventSeq)
+	}
+	assertRuntimeSpoolRecordCountsForTest(t, dataDir, 0, 0, 0)
+	select {
+	case fatal := <-node.fatal:
+		t.Fatalf("terminal cleanup reported fatal error: %v", fatal)
+	default:
+	}
+	node.stateMu.RLock()
+	_, allowed := node.spoolAllowed[identity.AttemptID]
+	node.stateMu.RUnlock()
+	if allowed {
+		t.Fatal("canceled Attempt retained spool upload permission")
+	}
+}
+
+func TestRuntimeCancelStoppedACKFailurePreservesDurableState(t *testing.T) {
+	dataDir := t.TempDir()
+	store := openRuntimeStoreForTest(t, dataDir)
+	identity := persistStartedAssignmentForTest(t, store, "cancel-stopped-ack-failure")
+	if err := store.StoreAssignmentPayload(runtimeTestAssignmentPayload(identity)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendEvent(identity, "run.progress", json.RawMessage(`{"step":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	result, err := store.AppendResult(identity, "success", json.RawMessage(`{"answer":42}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := newFakeRuntimeClient()
+	client.cancelAckFn = func(_ context.Context, request RuntimeRunCancelAckPayload) (*RuntimeRunCancellationState, error) {
+		if request.CancelState == RuntimeCancelStopped {
+			return nil, &Error{StatusCode: 403, Code: "FORBIDDEN", Message: "cancel ACK denied"}
+		}
+		return &RuntimeRunCancellationState{
+			CancellationID: request.CancellationID,
+			CancelState:    request.CancelState,
+			UpdatedAt:      time.Now().UTC(),
+		}, nil
+	}
+	node := runtimeWorkerForTerminalCleanupTest(store, client, identity.AttemptID)
+	node.handleCancelCommand(runtimeCancelCommandForTest(identity))
+
+	record, err := store.Assignment(identity.AssignmentMessageID)
+	if err != nil || record.State != AssignmentStateFinished {
+		t.Fatalf("Assignment after failed stopped ACK = %#v, %v", record, err)
+	}
+	if _, err := store.AssignmentPayload(identity.AttemptID); err != nil {
+		t.Fatalf("Assignment payload was not retained: %v", err)
+	}
+	if _, err := store.PendingResult(identity.AttemptID); err != nil {
+		t.Fatalf("Result %s was not retained: %v", result.ResultID, err)
+	}
+	pending, err := store.PendingEvents(identity.AttemptID)
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("pending Events after failed stopped ACK = %#v, %v", pending, err)
+	}
+	assertRuntimeSpoolRecordCountsForTest(t, dataDir, 1, 1, 1)
+	node.stateMu.RLock()
+	_, allowed := node.spoolAllowed[identity.AttemptID]
+	node.stateMu.RUnlock()
+	if !allowed {
+		t.Fatal("failed stopped ACK removed spool upload permission")
+	}
+}
+
+func TestRuntimeTerminalCleanupSurvivesJournalInterruptions(t *testing.T) {
+	for _, interruptAfter := range []int{1, 2, 3} {
+		t.Run(fmt.Sprintf("wal_sync_%d", interruptAfter), func(t *testing.T) {
+			dataDir := t.TempDir()
+			store := openRuntimeStoreForTest(t, dataDir)
+			identity := persistStartedAssignmentForTest(t, store, fmt.Sprintf("cleanup-crash-%d", interruptAfter))
+			if err := store.StoreAssignmentPayload(runtimeTestAssignmentPayload(identity)); err != nil {
+				t.Fatal(err)
+			}
+			for sequence := 1; sequence <= 2; sequence++ {
+				if _, err := store.AppendEvent(identity, "run.progress", json.RawMessage(fmt.Sprintf(`{"step":%d}`, sequence))); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := store.AppendResult(identity, "success", json.RawMessage(`{"answer":42}`)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.AdvanceAssignment(identity.AssignmentMessageID, AssignmentStateRevoked); err != nil {
+				t.Fatal(err)
+			}
+			record, err := store.Assignment(identity.AssignmentMessageID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			injected := errors.New("simulated terminal cleanup crash")
+			walSyncs := 0
+			store.setDurableHookForTest(func(point, _ string) error {
+				if point != durableAfterWALSync {
+					return nil
+				}
+				walSyncs++
+				if walSyncs == interruptAfter {
+					return injected
+				}
+				return nil
+			})
+			node := runtimeWorkerForTerminalCleanupTest(store, newFakeRuntimeClient(), identity.AttemptID)
+			if err := node.retireTerminalAttempt(record, true); !errors.Is(err, injected) {
+				t.Fatalf("cleanup interruption error = %v", err)
+			}
+			if err := store.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			store = openRuntimeStoreForTest(t, dataDir)
+			node = runtimeWorkerForTerminalCleanupTest(store, newFakeRuntimeClient(), identity.AttemptID)
+			if err := node.retireTerminalAttempt(record, true); err != nil {
+				t.Fatalf("cleanup after reopen: %v", err)
+			}
+			if _, err := store.Assignment(identity.AssignmentMessageID); !errors.Is(err, ErrAssignmentNotFound) {
+				t.Fatalf("Assignment after recovered cleanup error = %v", err)
+			}
+			assertRuntimeSpoolRecordCountsForTest(t, dataDir, 0, 0, 0)
+		})
+	}
+}
+
+func TestRuntimeTerminalCleanupDeletesValidRejectedAssignment(t *testing.T) {
+	store := openRuntimeStoreForTest(t, t.TempDir())
+	identity := testAttemptIdentity(store.Identity(), "cleanup-rejected")
+	if err := store.CreateAssignment(testAssignmentRecord(identity)); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []AssignmentState{AssignmentStateRejectSent, AssignmentStateRejected} {
+		if _, err := store.AdvanceAssignment(identity.AssignmentMessageID, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record, err := store.Assignment(identity.AssignmentMessageID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AppendEvent(identity, "run.progress", json.RawMessage(`{"invalid":true}`)); !errors.Is(err, ErrAssignmentTransition) {
+		t.Fatalf("Event on rejected Assignment error = %v", err)
+	}
+	if _, err := store.AppendResult(identity, "failed", json.RawMessage(`{"invalid":true}`)); !errors.Is(err, ErrAssignmentTransition) {
+		t.Fatalf("Result on rejected Assignment error = %v", err)
+	}
+	node := runtimeWorkerForTerminalCleanupTest(store, newFakeRuntimeClient(), identity.AttemptID)
+	if err := node.retireTerminalAttempt(record, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Assignment(identity.AssignmentMessageID); !errors.Is(err, ErrAssignmentNotFound) {
+		t.Fatalf("rejected Assignment cleanup error = %v", err)
+	}
+}
+
+func TestRuntimeCancelCleanupDoesNotChangeOtherAttempt(t *testing.T) {
+	dataDir := t.TempDir()
+	store := openRuntimeStoreForTest(t, dataDir)
+	canceled := persistStartedAssignmentForTest(t, store, "cancel-isolated-a")
+	unrelated := persistStartedAssignmentForTest(t, store, "cancel-isolated-b")
+	for _, identity := range []AttemptIdentity{canceled, unrelated} {
+		if err := store.StoreAssignmentPayload(runtimeTestAssignmentPayload(identity)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.AppendEvent(unrelated, "run.progress", json.RawMessage(`{"unrelated":true}`)); err != nil {
+		t.Fatal(err)
+	}
+	node := runtimeWorkerForTerminalCleanupTest(store, newFakeRuntimeClient(), canceled.AttemptID)
+	node.handleCancelCommand(runtimeCancelCommandForTest(canceled))
+
+	if _, err := store.Assignment(canceled.AssignmentMessageID); !errors.Is(err, ErrAssignmentNotFound) {
+		t.Fatalf("canceled Assignment error = %v", err)
+	}
+	record, err := store.Assignment(unrelated.AssignmentMessageID)
+	if err != nil || record.State != AssignmentStateStarted {
+		t.Fatalf("unrelated Assignment = %#v, %v", record, err)
+	}
+	if _, err := store.AssignmentPayload(unrelated.AttemptID); err != nil {
+		t.Fatalf("unrelated Assignment payload: %v", err)
+	}
+	pending, err := store.PendingEvents(unrelated.AttemptID)
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("unrelated pending Events = %#v, %v", pending, err)
+	}
+	assertRuntimeSpoolRecordCountsForTest(t, dataDir, 1, 1, 0)
+}
+
+func runtimeWorkerForTerminalCleanupTest(store RuntimeStore, client RuntimeClient, attemptID string) *RuntimeWorker {
+	return &RuntimeWorker{
+		runtimeClient: client,
+		store:         store,
+		runtimeCtx:    context.Background(),
+		active:        make(map[string]*activeRuntimeAttempt),
+		spoolAllowed:  map[string]spoolPermission{attemptID: {events: true, result: true}},
+		fatal:         make(chan error, 1),
+	}
+}
+
+func runtimeCancelCommandForTest(identity AttemptIdentity) RuntimeRunCancelPayload {
+	return RuntimeRunCancelPayload{
+		CancellationID:  testCancellationID,
+		AttemptIdentity: sdkAttemptIdentity(identity),
+		ReasonCode:      "USER_REQUESTED",
+		DeadlineAt:      time.Now().Add(3 * time.Second).UTC(),
+	}
+}
+
+func assertRuntimeSpoolRecordCountsForTest(t *testing.T, dataDir string, assignments, events, results int) {
+	t.Helper()
+	for _, expectation := range []struct {
+		directory string
+		want      int
+	}{
+		{directory: assignmentSpoolDirectory, want: assignments},
+		{directory: eventSpoolDirectory, want: events},
+		{directory: resultSpoolDirectory, want: results},
+	} {
+		paths, err := filepath.Glob(filepath.Join(dataDir, expectation.directory, "*"+spoolRecordExtension))
+		if err != nil || len(paths) != expectation.want {
+			t.Fatalf("%s record count = %d, want %d (err=%v)", expectation.directory, len(paths), expectation.want, err)
+		}
 	}
 }
 

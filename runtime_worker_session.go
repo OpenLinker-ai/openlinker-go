@@ -447,7 +447,7 @@ func (node *RuntimeWorker) resumeDurableStateWithClient(parent context.Context, 
 					return err
 				}
 			}
-			if err := node.clearAttemptFromResume(record, decision.Decision); err != nil {
+			if err := node.retireTerminalAttempt(record, decision.Decision == RuntimeResumeRevoked); err != nil {
 				return err
 			}
 		}
@@ -472,8 +472,23 @@ func (node *RuntimeWorker) stopActiveAttemptForResume(ctx context.Context, attem
 	}
 }
 
-func (node *RuntimeWorker) clearAttemptFromResume(record AssignmentJournalRecord, decision RuntimeResumeDecision) error {
-	if decision == RuntimeResumeRevoked && record.State != AssignmentStateResultACKed && record.State != AssignmentStateRejected && record.State != AssignmentStateRevoked {
+// retireTerminalAttempt clears the exact terminal Attempt through durable,
+// restart-safe Store transitions. revoke is true only after Core has made the
+// Attempt terminal (for example through a stopped cancel ACK or a revoked
+// resume decision). A missing Assignment means a prior cleanup completed.
+func (node *RuntimeWorker) retireTerminalAttempt(record AssignmentJournalRecord, revoke bool) error {
+	current, err := node.store.Assignment(record.Identity.AssignmentMessageID)
+	if errors.Is(err, ErrAssignmentNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if current.Identity != record.Identity {
+		return ErrSpoolRecordConflict
+	}
+	record = current
+	if revoke && !isAssignmentTerminal(record.State) {
 		if _, err := node.store.AdvanceAssignment(record.Identity.AssignmentMessageID, AssignmentStateRevoked); err != nil {
 			return err
 		}
@@ -501,7 +516,11 @@ func (node *RuntimeWorker) clearAttemptFromResume(record AssignmentJournalRecord
 			return err
 		}
 	}
-	return node.store.DeleteAssignment(record.Identity.AssignmentMessageID)
+	if err := node.store.DeleteAssignment(record.Identity.AssignmentMessageID); errors.Is(err, ErrAssignmentNotFound) {
+		return nil
+	} else {
+		return err
+	}
 }
 
 func (node *RuntimeWorker) localAttemptIdentity(identity RuntimeAttemptIdentity) (AttemptIdentity, error) {

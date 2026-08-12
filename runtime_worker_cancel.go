@@ -148,22 +148,20 @@ func (node *RuntimeWorker) handleCancelCommand(command RuntimeRunCancelPayload) 
 		node.logf("runtime cancel stopped ACK will retry: %v", scrubRuntimeError(err))
 		return
 	}
+	// A confirmed stopped ACK is the linearization point for local retirement.
+	// Revoke the upload permission first so the concurrent spool loop cannot
+	// publish an Event or Result to a Run that Core has already made terminal.
 	node.stateMu.Lock()
 	delete(node.spoolAllowed, record.Identity.AttemptID)
 	node.stateMu.Unlock()
-	current, err := node.store.Assignment(record.Identity.AssignmentMessageID)
-	if err != nil {
-		if !errors.Is(err, ErrAssignmentNotFound) && node.runtimeCtx.Err() == nil {
-			node.reportFatal(err)
+	cleanupErr := node.retireTerminalAttempt(record, true)
+	node.retireActiveAttempt(active)
+	if cleanupErr != nil {
+		if node.runtimeCtx.Err() == nil {
+			node.reportFatal(cleanupErr)
 		}
 		return
 	}
-	if current.State != AssignmentStateResultACKed && current.State != AssignmentStateRejected && current.State != AssignmentStateRevoked {
-		if _, err := node.store.AdvanceAssignment(record.Identity.AssignmentMessageID, AssignmentStateRevoked); err != nil {
-			node.reportFatal(err)
-		}
-	}
-	node.retireActiveAttempt(node.activeAttempt(record.Identity.AttemptID))
 }
 
 func (node *RuntimeWorker) ackCancelOnce(command RuntimeRunCancelPayload, state RuntimeCancelState, errorCode string) error {
