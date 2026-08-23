@@ -1,7 +1,6 @@
 package openlinker
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -208,9 +207,11 @@ func runtimeExtensionAttemptIdentity(
 		)
 	}
 	var identity RuntimeAttemptIdentity
-	decoder := json.NewDecoder(bytes.NewReader(rawIdentity))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&identity); err != nil {
+	// attempt_identity always carries the complete standard Runtime identity,
+	// but an extension may bind additional product-owned evidence to that same
+	// identity object. The SDK validates every standard field below and leaves
+	// those additional fields to the extension owner's strict payload decoder.
+	if err := json.Unmarshal(rawIdentity, &identity); err != nil {
 		return RuntimeAttemptIdentity{}, errors.New(
 			"openlinker: Runtime extension attempt_identity is invalid",
 		)
