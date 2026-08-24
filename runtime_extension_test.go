@@ -68,8 +68,19 @@ func TestRuntimeExtensionsRouteOnlyRegisteredAttemptScopedMessages(t *testing.T)
 		t.Fatal(err)
 	}
 	identity := testRuntimeExtensionAttemptIdentity()
+	identityWithExtensionEvidence := map[string]any{
+		"run_id":             identity.RunID,
+		"attempt_id":         identity.AttemptID,
+		"lease_id":           identity.LeaseID,
+		"fencing_token":      identity.FencingToken,
+		"node_id":            identity.NodeID,
+		"agent_id":           identity.AgentID,
+		"worker_id":          identity.WorkerID,
+		"runtime_session_id": identity.RuntimeSessionID,
+		"product_epoch":      7,
+	}
 	payload, err := json.Marshal(map[string]any{
-		"attempt_identity": identity,
+		"attempt_identity": identityWithExtensionEvidence,
 		"extension_value":  "opaque-to-sdk",
 	})
 	if err != nil {
