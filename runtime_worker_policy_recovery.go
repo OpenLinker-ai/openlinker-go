@@ -229,6 +229,16 @@ func (client *policyRecoveringRuntimeClient) CallRuntimeAgent(ctx context.Contex
 	return value.(*RuntimeRunSummary), err
 }
 
+func (client *policyRecoveringRuntimeClient) ReadRuntimeDelegatedRun(ctx context.Context, authorization RuntimeCallAgentAuthorization, runID string) (*RuntimeDelegatedRun, error) {
+	value, err := client.call(ctx, func() (any, error) {
+		return client.transport.ReadRuntimeDelegatedRun(ctx, authorization, runID)
+	})
+	if value == nil {
+		return nil, err
+	}
+	return value.(*RuntimeDelegatedRun), err
+}
+
 func (node *RuntimeWorker) currentPolicyRevision() uint64 {
 	revision, _ := node.policyRecoverySnapshot()
 	return revision

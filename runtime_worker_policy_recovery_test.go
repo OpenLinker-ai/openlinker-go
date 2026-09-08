@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -143,6 +144,31 @@ func TestRuntimePolicyRecoverySecondSignalDoesNotLoop(t *testing.T) {
 		harness.createCalls.Load() != 1 || harness.newHeartbeatCalls.Load() != 1 {
 		t.Fatalf("second signal looped: discovery=%d old=%d create=%d new=%d",
 			harness.discoveryCalls.Load(), harness.oldHeartbeatCalls.Load(), harness.createCalls.Load(), harness.newHeartbeatCalls.Load())
+	}
+}
+
+func TestRuntimePolicyRecoveryDelegatedReadPreservesAttemptAuthority(t *testing.T) {
+	harness := newRuntimePolicyRecoveryHarness(t, false, true)
+	authorization := RuntimeCallAgentAuthorization{
+		NodeEnvelope: "ol_ctx_v2.current.payload.signature", AgentInvocationToken: delegatedTestToken(), IdempotencyKey: "read-after-policy-change",
+	}
+	var reads atomic.Int32
+	harness.client.transport.replaceCallClient(&delegatedTransportTestClient{
+		fakeRuntimeClient: harness.oldClient,
+		read: func(_ context.Context, auth RuntimeCallAgentAuthorization, id string) (*RuntimeDelegatedRun, error) {
+			reads.Add(1)
+			if auth != authorization || id != runtimeTestRunID {
+				t.Error("initial read authority changed")
+			}
+			return nil, runtimePolicyChangedTestError()
+		},
+	})
+	result, err := harness.client.ReadRuntimeDelegatedRun(context.Background(), authorization, runtimeTestRunID)
+	if err != nil || result == nil || result.Output["summary"] != "recovered child" {
+		t.Fatalf("read after policy recovery = %#v, %v", result, err)
+	}
+	if reads.Load() != 1 || harness.discoveryCalls.Load() != 1 || harness.resumeCalls.Load() != 1 {
+		t.Fatalf("read/discovery/resume = %d/%d/%d", reads.Load(), harness.discoveryCalls.Load(), harness.resumeCalls.Load())
 	}
 }
 
@@ -299,6 +325,20 @@ func newRuntimePolicyRecoveryHarness(t *testing.T, retrySignals bool, durable bo
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case request.URL.Path == runtimeDelegatedRunReadPath:
+			body, _ := io.ReadAll(request.Body)
+			proof, err := BuildRuntimeInvocationProof(delegatedTestToken(), RuntimeInvocationProofRequest{
+				Method: request.Method, Path: request.URL.Path, Body: body,
+				Context: "ol_ctx_v2.current.payload.signature", IdempotencyKey: "read-after-policy-change",
+			})
+			if err != nil || request.Header.Get("Authorization") != "Bearer "+delegatedTestToken() || request.Header.Get(runtimeInvocationProofHeader) != proof {
+				t.Error("recovered delegated read lost Attempt authority")
+				http.Error(w, "wrong authority", http.StatusForbidden)
+				return
+			}
+			writeRuntimeTestJSON(t, w, RuntimeDelegatedRun{RuntimeRunSummary: RuntimeRunSummary{
+				RunID: runtimeTestRunID, Status: RuntimeRunSuccess, DispatchState: RuntimeDispatchTerminal,
+			}, Output: map[string]any{"summary": "recovered child"}})
 		case request.URL.Path == "/api/v1/agent-runtime/sessions":
 			harness.createCalls.Add(1)
 			harness.createReason.Store(request.Header.Get(RuntimeFallbackReasonHeader))
