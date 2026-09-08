@@ -397,4 +397,18 @@ func (client *switchingRuntimeClient) CallRuntimeAgent(ctx context.Context, auth
 	return callClient.CallRuntimeAgent(ctx, authorization, request)
 }
 
+func (client *switchingRuntimeClient) ReadRuntimeDelegatedRun(ctx context.Context, authorization RuntimeCallAgentAuthorization, runID string) (*RuntimeDelegatedRun, error) {
+	// Delegation uses Attempt-scoped HTTP authority, independently of the
+	// active assignment transport, just like CallRuntimeAgent.
+	callClient := client.callRuntimeClient()
+	if callClient == nil {
+		return nil, ErrRuntimeTransportSwitching
+	}
+	reader, ok := callClient.(runtimeDelegatedRunClient)
+	if !ok {
+		return nil, ErrRuntimeDelegationUnsupported
+	}
+	return reader.ReadRuntimeDelegatedRun(ctx, authorization, runID)
+}
+
 var _ RuntimeClient = (*switchingRuntimeClient)(nil)

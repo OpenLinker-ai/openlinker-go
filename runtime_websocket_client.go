@@ -394,6 +394,13 @@ func (c *RuntimeWebSocket) CallRuntimeAgent(
 	return c.runtime.CallRuntimeAgent(ctx, authorization, request)
 }
 
+func (c *RuntimeWebSocket) ReadRuntimeDelegatedRun(ctx context.Context, authorization RuntimeCallAgentAuthorization, runID string) (*RuntimeDelegatedRun, error) {
+	if c == nil || c.runtime == nil {
+		return nil, errors.New("openlinker: runtime WebSocket is nil")
+	}
+	return c.runtime.ReadRuntimeDelegatedRun(ctx, authorization, runID)
+}
+
 func (c *RuntimeWebSocket) offerMessageID(identity RuntimeAttemptIdentity) (string, error) {
 	c.correlationMu.RLock()
 	messageID := c.offers[runtimeAttemptKey(identity)]

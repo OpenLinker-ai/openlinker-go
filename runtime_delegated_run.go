@@ -26,6 +26,15 @@ type runtimeDelegatedRunClient interface {
 	ReadRuntimeDelegatedRun(context.Context, RuntimeCallAgentAuthorization, string) (*RuntimeDelegatedRun, error)
 }
 
+// Keep this capability optional for custom RuntimeClient implementations, but
+// require every SDK-owned transport wrapper to preserve it.
+var (
+	_ runtimeDelegatedRunClient = (*Runtime)(nil)
+	_ runtimeDelegatedRunClient = (*RuntimeWebSocket)(nil)
+	_ runtimeDelegatedRunClient = (*switchingRuntimeClient)(nil)
+	_ runtimeDelegatedRunClient = (*policyRecoveringRuntimeClient)(nil)
+)
+
 func (r *Runtime) ReadRuntimeDelegatedRun(ctx context.Context, authorization RuntimeCallAgentAuthorization, runID string) (*RuntimeDelegatedRun, error) {
 	if r == nil || r.client == nil {
 		return nil, errors.New("openlinker: runtime client is nil")
