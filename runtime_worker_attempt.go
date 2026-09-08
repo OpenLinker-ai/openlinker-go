@@ -197,6 +197,11 @@ func (node *RuntimeWorker) executeAttempt(attempt *activeRuntimeAttempt) {
 		node.signalSpool()
 		return nil
 	}
+	if _, ok := node.runtimeClient.(runtimeDelegatedRunClient); ok && runtimeDelegationReadAdvertised(attempt.payload.AgentInvocationToken) {
+		runCtx.readDelegatedRun = func(ctx context.Context, runID string) (*RuntimeDelegatedRun, error) {
+			return node.readDelegatedRunForAttempt(ctx, attempt, runID)
+		}
+	}
 	runCtx.callAgent = func(ctx context.Context, targetAgentID string, input any, options RuntimeCallOptions) (any, error) {
 		if attempt.finished.Load() || attempt.canceled.Load() || handlerCtx.Err() != nil {
 			return nil, context.Canceled

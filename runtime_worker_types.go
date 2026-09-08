@@ -187,8 +187,9 @@ type RuntimeContext struct {
 	Metadata          RuntimeJSONMap
 	Extensions        *RuntimeExtensions
 
-	emit      func(eventType string, payload any) error
-	callAgent func(context.Context, string, any, RuntimeCallOptions) (any, error)
+	emit             func(eventType string, payload any) error
+	callAgent        func(context.Context, string, any, RuntimeCallOptions) (any, error)
+	readDelegatedRun func(context.Context, string) (*RuntimeDelegatedRun, error)
 }
 
 // RuntimeAuthorityContext is Core-owned execution identity that must never be
