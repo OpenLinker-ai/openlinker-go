@@ -1,0 +1,40 @@
+{
+  "name": "openlinker-core-tasks",
+  "version": "v1",
+  "package": "github.com/OpenLinker-ai/openlinker-go",
+  "scope": "core-tasks",
+  "rules": {
+    "allowed_paths": [
+      "/api/v1/tasks/recommend"
+    ],
+    "forbidden_path_prefixes": [
+      "/api/v1/cloud",
+      "/api/v1/billing",
+      "/api/v1/wallet",
+      "/api/v1/stripe"
+    ]
+  },
+  "endpoints": [
+    {
+      "client_method": "recommendTask",
+      "http_method": "POST",
+      "path": "/api/v1/tasks/recommend",
+      "auth": "access_token",
+      "required_scope": "tasks:create",
+      "success_statuses": [
+        200
+      ],
+      "response_fields": [
+        "task_id",
+        "visibility",
+        "parsed_skills",
+        "parsed_skill_refs",
+        "mcp_tools",
+        "mcp_tool_refs",
+        "recommendations",
+        "next_action"
+      ],
+      "source": "openlinker-core/pkg/task/handler.go"
+    }
+  ]
+}

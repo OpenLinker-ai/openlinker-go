@@ -72,6 +72,34 @@ func TestCoreClientV1ContractMapsToImplementedMethods(t *testing.T) {
 	}
 }
 
+func TestOptionalSDKContractsMapToImplementedMethods(t *testing.T) {
+	for _, test := range []struct {
+		file, path, method string
+		target             reflect.Type
+	}{
+		{"core-tasks.v1.json", "/api/v1/tasks/recommend", "RecommendTask", reflect.TypeOf(&Client{})},
+		{"core-runtime-delegation.json", runtimeDelegatedRunReadPath, "ReadRuntimeDelegatedRun", reflect.TypeOf(&Runtime{})},
+	} {
+		t.Run(test.file, func(t *testing.T) {
+			var contract struct {
+				Entries []struct {
+					Path   string `json:"path"`
+					Method string `json:"client_method"`
+				} `json:"endpoints"`
+			}
+			if err := json.Unmarshal(readContractFile(t, "contracts/"+test.file), &contract); err != nil {
+				t.Fatal(err)
+			}
+			if len(contract.Entries) != 1 || contract.Entries[0].Path != test.path || exportedMethodName(contract.Entries[0].Method) != test.method {
+				t.Fatal("optional contract widened or lost its SDK method")
+			}
+			if _, ok := test.target.MethodByName(test.method); !ok {
+				t.Fatal("missing contract method")
+			}
+		})
+	}
+}
+
 func TestRuntimeContractMatchesExportedConstants(t *testing.T) {
 	raw := readContractFile(t, "contracts/core-runtime.json")
 	type runtimeEndpointContract struct {

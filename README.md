@@ -364,6 +364,23 @@ A2A helpers:
 - JSON-RPC / HTTP+JSON: `A2AClient`
 - gRPC: `A2AGRPCClient`
 
+## Optional delegated result reads
+
+Set `RuntimeWorkerConfig.OptionalFeatures` to
+`[]string{RuntimeDelegatedRunReadFeature}` to request delegated result reads.
+Within a confirmed Handler, check `run.CanReadDelegatedRuns()` before calling
+`run.ReadDelegatedRun(ctx, childRunID)`. The result contains status, dispatch state,
+output and error fields. Core verifies the current Attempt capability and direct
+child ownership. Legacy assignments return `ErrRuntimeDelegationUnsupported`;
+reads stop when the Attempt is canceled or already finished. The base Runtime
+contract digest and required features remain unchanged.
+
+`Client.CancelRun` requests Core cancellation; inspect `CancelState` and the later
+Run status before treating it as terminal. `Client.RecommendTask` creates a private
+Core task with `tasks:create`. Their existing implementations are now recorded in
+the client and narrow `contracts/core-tasks.v1.json` manifests; optional Runtime
+reads are recorded in `contracts/core-runtime-delegation.json`.
+
 ## Development
 
 ```bash
