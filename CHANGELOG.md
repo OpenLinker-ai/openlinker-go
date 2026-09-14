@@ -1,5 +1,14 @@
 # Changelog
 
+## SDK feature synchronization — Unreleased
+
+- Align the three SDKs on Core Run cancellation and private task recommendation
+  contracts; keep task recommendation separate from the general client manifest.
+- Document optional Attempt-scoped delegated result reads and the negotiated
+  `delegated_run_read.v1` capability without changing the base Runtime digest.
+- Register and verify existing Go APIs; no Go Runtime implementation or module
+  dependency changed in this synchronization.
+
 All notable changes to `openlinker-go` will be documented in this file.
 
 This SDK is currently pre-1.0. Breaking changes may happen before the Core API,

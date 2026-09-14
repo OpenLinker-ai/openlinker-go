@@ -199,6 +199,17 @@
       "auth": "access_token",
       "required_scope": "runs:read",
       "source": "openlinker-core/pkg/runtime/handler.go"
+    },
+    {
+      "client_method": "cancelRun",
+      "http_method": "POST",
+      "path": "/api/v1/runs/{id}/cancel",
+      "auth": "access_token",
+      "required_scope": "runs:cancel",
+      "success_statuses": [
+        200
+      ],
+      "source": "openlinker-core/pkg/runtime/handler.go"
     }
   ]
 }

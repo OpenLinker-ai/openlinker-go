@@ -1,0 +1,37 @@
+{
+  "name": "openlinker-core-runtime-delegation",
+  "version": "v1",
+  "package": "github.com/OpenLinker-ai/openlinker-go",
+  "scope": "core-runtime-delegation",
+  "rules": {
+    "optional_feature": "delegated_run_read.v1",
+    "capability_audience": "openlinker.runtime.v2/delegation",
+    "authority": "core_live_attempt_and_direct_child",
+    "attachment_header": false
+  },
+  "endpoints": [
+    {
+      "client_method": "readRuntimeDelegatedRun",
+      "http_method": "POST",
+      "path": "/api/v1/agent-runtime/delegated-runs/read",
+      "auth": "assignment_invocation_capability",
+      "required_headers": [
+        "Idempotency-Key",
+        "OpenLinker-Invocation-Context",
+        "OpenLinker-Invocation-Proof"
+      ],
+      "success_statuses": [
+        200
+      ],
+      "response_fields": [
+        "run_id",
+        "status",
+        "dispatch_state",
+        "output",
+        "error_code",
+        "error_message"
+      ],
+      "source": "openlinker-core/pkg/runtime/delegated_run.go"
+    }
+  ]
+}

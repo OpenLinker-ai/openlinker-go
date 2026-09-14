@@ -337,6 +337,20 @@ A2A helper：
 - JSON-RPC / HTTP+JSON：`A2AClient`
 - gRPC：`A2AGRPCClient`
 
+## 可选委派结果读取
+
+设置 `RuntimeWorkerConfig.OptionalFeatures` 为
+`[]string{RuntimeDelegatedRunReadFeature}` 后申请委派结果读取。在已确认的 Handler 中，
+先检查 `run.CanReadDelegatedRuns()`，再调用 `run.ReadDelegatedRun(ctx, childRunID)`，
+取得状态、输出和错误。Core 验证当前 Attempt 临时凭据及直接子 Run 归属。
+旧任务返回 `ErrRuntimeDelegationUnsupported`；任务取消或已结束时停止读取。
+基础 Runtime digest 和必需功能集保持不变。
+
+现有 `Client.CancelRun` 只请求 Core 取消，须检查 `CancelState` 和后续 Run 终态。
+`Client.RecommendTask` 创建私有 Core Task，需要 `tasks:create`。本次将现有接口补录到
+Client 及独立的 `contracts/core-tasks.v1.json` 契约，可选委派读取记录在
+`contracts/core-runtime-delegation.json`。
+
 ## 开发
 
 ```bash
