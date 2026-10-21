@@ -263,7 +263,7 @@ func (node *RuntimeWorker) configureRuntimeSecurity(
 	}
 	manager, err := newRuntimeCredentialManager(
 		node.DataDir, credentialEndpoint, node.AgentToken, node.NodeID, node.AgentID,
-		node.NodeVersion, node.Capacity, node.Logger,
+		node.NodeVersion, node.Capacity, node.OptionalFeatures, node.Logger,
 	)
 	if err != nil {
 		return err
