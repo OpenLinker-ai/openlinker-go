@@ -16,6 +16,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -83,6 +84,7 @@ func TestRuntimeCredentialManagerGeneratesBindsAndRenewsOneKey(t *testing.T) {
 	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})
 	var calls atomic.Int32
 	var firstThumbprint string
+	optional := []string{"test_optional.v1"}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.Header.Get("authorization") != "Bearer ol_agent_automatic_test" {
 			http.Error(w, "token", http.StatusUnauthorized)
@@ -91,6 +93,20 @@ func TestRuntimeCredentialManagerGeneratesBindsAndRenewsOneKey(t *testing.T) {
 		var body runtimeCredentialIssueRequest
 		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		wantFeatures := RuntimeRequiredFeatures()
+		wantVersion := runtimeWorkerSDKAgent
+		if calls.Load() > 0 {
+			wantFeatures = normalizeRuntimeHelloFeatures(optional)
+		}
+		if calls.Load() > 1 {
+			wantVersion = "test-upgraded-node"
+			wantFeatures = normalizeRuntimeHelloFeatures([]string{"test_optional.v1", "test_upgrade.v1"})
+		}
+		if !slices.Equal(body.Features, wantFeatures) || body.NodeVersion != wantVersion {
+			t.Errorf("credential request features/version = %v/%s, want %v/%s", body.Features, body.NodeVersion, wantFeatures, wantVersion)
+			http.Error(w, "exact approved features/version required", http.StatusConflict)
 			return
 		}
 		block, _ := pem.Decode([]byte(body.CSRPEM))
@@ -130,15 +146,14 @@ func TestRuntimeCredentialManagerGeneratesBindsAndRenewsOneKey(t *testing.T) {
 	defer server.Close()
 
 	directory := t.TempDir()
-	manager, err := newRuntimeCredentialManager(
-		directory, server.URL, "ol_agent_automatic_test", "", "", runtimeWorkerSDKAgent, 1, nil,
-	)
-	if err != nil {
+	node := &RuntimeWorker{DataDir: directory, AgentToken: "ol_agent_automatic_test", NodeVersion: runtimeWorkerSDKAgent, Capacity: 1, OptionalFeatures: optional}
+	connection := runtimeConnectionInformation{MTLSRequired: true, CredentialEndpoint: server.URL}
+	workerContext, stopWorker := context.WithCancel(t.Context())
+	defer stopWorker()
+	if err = node.configureRuntimeSecurity(workerContext, connection); err != nil {
 		t.Fatal(err)
 	}
-	if err = manager.Ensure(t.Context(), false); err != nil {
-		t.Fatal(err)
-	}
+	manager := node.credentialManager
 	nodeID, agentID := manager.Identity()
 	if !validRuntimeUUID(nodeID) || agentID != testAgentID || calls.Load() != 1 {
 		t.Fatalf("identity=%s/%s calls=%d", nodeID, agentID, calls.Load())
@@ -156,5 +171,18 @@ func TestRuntimeCredentialManagerGeneratesBindsAndRenewsOneKey(t *testing.T) {
 	tlsConfig, err := manager.TLSConfig()
 	if err != nil || tlsConfig.GetClientCertificate == nil || tlsConfig.RootCAs == nil {
 		t.Fatalf("automatic TLS config=%#v err=%v", tlsConfig, err)
+	}
+	// Recreate the production Worker over the same persisted key after an
+	// operator-authorized version/feature change, then force a real HTTP renewal.
+	stopWorker()
+	upgraded := &RuntimeWorker{DataDir: directory, AgentToken: node.AgentToken, AgentID: agentID, NodeID: nodeID, NodeVersion: "test-upgraded-node", Capacity: 1, OptionalFeatures: []string{"test_optional.v1", "test_upgrade.v1"}}
+	if err = upgraded.configureRuntimeSecurity(t.Context(), connection); err != nil {
+		t.Fatal(err)
+	}
+	if err = upgraded.credentialManager.Ensure(t.Context(), true); err != nil || calls.Load() != 3 {
+		t.Fatalf("upgraded renewal calls=%d err=%v", calls.Load(), err)
+	}
+	if gotNode, gotAgent := upgraded.credentialManager.Identity(); gotNode != nodeID || gotAgent != agentID {
+		t.Fatal("renewal changed identity")
 	}
 }

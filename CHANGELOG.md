@@ -1,5 +1,13 @@
 # Changelog
 
+## Runtime certificate renewal — Unreleased
+
+- Keep initial enrollment on the baseline contract and send the same configured
+  optional capabilities as Hello when renewing an existing certificate. Core
+  still authorizes version/feature changes; renewal preserves the existing key.
+- Test the production Worker security setup through signed enrollment, HTTP
+  renewal and restart with a changed version/capability set over the same state.
+
 ## SDK feature synchronization — Unreleased
 
 - Align the three SDKs on Core Run cancellation and private task recommendation
@@ -193,3 +201,17 @@ layering. Pin the exact RC tag during validation; do not depend on `main`,
   and CI workflow.
 - Added Apache-2.0 license, contributing guide, security policy, code of
   conduct, and support guidance.
+
+### Runtime certificate deployment compatibility
+
+Deployment order matters for mTLS: deploy the Core certificate-renewal
+compatibility fix before switching Node or Plugin Host to the corresponding SDK.
+An older Core rejects renewal requests containing approved extensions. Release
+notes must pin the minimum compatible Core commit; schema 099 alone does not
+identify this fix. Preserve the existing DataDir and private key during upgrade.
+
+A retained local certificate is evidence of a prior enrollment. If Core loses
+the associated binding/Node records during a database reset or restore, the SDK
+does not silently downgrade the renewal request to a fresh enrollment. Restore
+the matching Core identity state or use an explicit administrative recovery plan;
+do not clear the DataDir or spool to bypass this mismatch.

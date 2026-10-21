@@ -78,7 +78,7 @@ func NewRuntimeA2AProxy(ctx context.Context, config RuntimeA2AProxyConfig) (*Run
 		}
 		manager, managerErr := newRuntimeCredentialManager(
 			config.DataDir, credentialEndpoint, config.AgentToken,
-			config.NodeID, config.AgentID, config.NodeVersion, config.Capacity, nil,
+			config.NodeID, config.AgentID, config.NodeVersion, config.Capacity, nil, nil,
 		)
 		if managerErr != nil {
 			return nil, managerErr

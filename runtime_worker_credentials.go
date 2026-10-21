@@ -82,6 +82,7 @@ type runtimeCredentialManager struct {
 	credentialEndpoint string
 	agentToken         string
 	nodeVersion        string
+	features           []string
 	capacity           int64
 	logger             *log.Logger
 	disk               runtimeCredentialDisk
@@ -93,8 +94,13 @@ type runtimeCredentialManager struct {
 func newRuntimeCredentialManager(
 	dataDir, credentialEndpoint, agentToken, configuredNodeID, configuredAgentID, nodeVersion string,
 	capacity int64,
+	optionalFeatures []string,
 	logger *log.Logger,
 ) (*runtimeCredentialManager, error) {
+	optional, err := normalizeRuntimeOptionalFeatures(optionalFeatures)
+	if err != nil {
+		return nil, err
+	}
 	endpoint, err := validateRuntimeCredentialEndpoint(credentialEndpoint)
 	if err != nil {
 		return nil, err
@@ -121,6 +127,7 @@ func newRuntimeCredentialManager(
 		credentialEndpoint: endpoint,
 		agentToken:         strings.TrimSpace(agentToken),
 		nodeVersion:        strings.TrimSpace(nodeVersion),
+		features:           normalizeRuntimeHelloFeatures(optional),
 		capacity:           capacity,
 		logger:             logger,
 		disk:               disk,
@@ -234,6 +241,13 @@ func (m *runtimeCredentialManager) issue(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create Runtime certificate request: %w", err)
 	}
+	// Enrollment keeps the baseline-only contract. Once enrolled, renewal must
+	// carry the same exact configured capabilities as Hello; Core remains the
+	// authority that checks them against the Node's approved version/features.
+	features := RuntimeRequiredFeatures()
+	if disk.CertificateChainPEM != "" {
+		features = m.features
+	}
 	requestBody, err := json.Marshal(runtimeCredentialIssueRequest{
 		NodeID:                disk.NodeID,
 		DisplayName:           "runtime-" + strings.ReplaceAll(disk.NodeID, "-", "")[:12],
@@ -241,7 +255,7 @@ func (m *runtimeCredentialManager) issue(ctx context.Context) error {
 		ProtocolVersion:       RuntimeProtocolVersion,
 		RuntimeContractID:     RuntimeContractID,
 		RuntimeContractDigest: RuntimeContractDigest,
-		Features:              RuntimeRequiredFeatures(),
+		Features:              features,
 		Capacity:              m.capacity,
 		CSRPEM:                string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})),
 	})
