@@ -410,3 +410,17 @@ Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening a pull request.
 ## License
 
 Apache-2.0. See [LICENSE](./LICENSE).
+
+### Controlled authentication migration
+
+Core schema 100 can authorize an existing token-only identity to use mTLS.
+`RuntimeWorker` follows the authenticated, credential-scoped security policy,
+keeps its existing Node/Agent/Worker identity and refuses authentication downgrade
+or credential-bearing redirects. The server remains the authorization authority.
+`PrepareRuntimeCredential` is an offline, owner-only preparation API for a stopped
+installation with an acknowledged empty spool. It takes explicit DataDir,
+NodeID, AgentID and WorkerID, plus the independently read ConfiguredNodeID (or
+AgentToken for the token-derived default). A mismatch is rejected before writing
+a key. Preparation preserves the Worker epoch and emits only a public
+CSR and key fingerprint. Never expose the stored private key to a model process.
+An admin operation is still required; preparation alone does not switch modes.

@@ -172,6 +172,24 @@ func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
 	node.store = node.Store
 
 	if node.runtimeClient == nil {
+		connection, err = node.resolveRuntimeIdentityPolicy(startupCtx, connection)
+		if err != nil {
+			return err
+		}
+		if connection.CredentialOperationID != "" {
+			status, statusErr := runtimeStoreSpoolStatus(node.store)
+			if statusErr != nil {
+				return statusErr
+			}
+			if !status.Empty {
+				return errors.New("controlled Runtime authentication requires an empty acknowledged spool")
+			}
+		}
+		node.RuntimeURL = connection.RuntimeURL
+		node.runtimeMTLSRequired = connection.MTLSRequired
+		if node.RequireTokenOnly && connection.MTLSRequired {
+			return &RuntimeSecurityPolicyUnsupportedError{RequiredPolicy: "mtls"}
+		}
 		if err = node.configureRuntimeSecurity(startupCtx, connection); err != nil {
 			return err
 		}
@@ -268,7 +286,14 @@ func (node *RuntimeWorker) configureRuntimeSecurity(
 	if err != nil {
 		return err
 	}
-	if err = manager.Ensure(ctx, false); err != nil {
+	manager.operationID = connection.CredentialOperationID
+	if connection.SecurityPolicyEndpoint != "" {
+		manager.disk.MTLSRequired = true
+		if err = persistRuntimeCredential(manager.dataDir, manager.disk); err != nil {
+			return err
+		}
+	}
+	if err = manager.Ensure(ctx, connection.CredentialOperationID != ""); err != nil {
 		return err
 	}
 	node.NodeID, node.AgentID = manager.Identity()

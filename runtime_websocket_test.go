@@ -29,6 +29,8 @@ func TestRuntimeWebSocketFallbackReasonHeaderIsBounded(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			serverErr := make(chan error, 1)
+			done := make(chan struct{})
+			finish := sync.OnceFunc(func() { close(done) })
 			server := newRuntimeSDKWSServer(t, func(request *http.Request, conn *websocket.Conn) error {
 				if got := request.Header.Get(RuntimeFallbackReasonHeader); got != test.want {
 					return fmt.Errorf("fallback reason header = %q, want %q", got, test.want)
@@ -39,9 +41,15 @@ func TestRuntimeWebSocketFallbackReasonHeaderIsBounded(t *testing.T) {
 				if got := request.Header.Get("X-OpenLinker-SDK"); got == "attacker-sdk" || got == "" {
 					return fmt.Errorf("Runtime SDK identity = %q", got)
 				}
-				return serveRuntimeSDKWSReady(conn, time.Now().UTC())
+				if err := serveRuntimeSDKWSReady(conn, time.Now().UTC()); err != nil {
+					return err
+				}
+				// Keep the socket open until the client has consumed Ready. An
+				// immediate close races the handshake and tests EOF, not headers.
+				<-done
+				return nil
 			}, serverErr)
-			defer server.Close()
+			defer func() { finish(); server.Close() }()
 			runtimeClient, err := NewRuntime(
 				server.URL,
 				WithAgentToken("ol_agent_v2"),
@@ -58,6 +66,7 @@ func TestRuntimeWebSocketFallbackReasonHeaderIsBounded(t *testing.T) {
 				t.Fatal(err)
 			}
 			_ = connection.Close()
+			finish()
 			if err = <-serverErr; err != nil {
 				t.Fatal(err)
 			}

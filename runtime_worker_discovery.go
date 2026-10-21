@@ -27,13 +27,14 @@ type openLinkerDiscoveryManifest struct {
 		Runtime string `json:"runtime"`
 	} `json:"base_urls"`
 	Runtime struct {
-		Enabled             bool                               `json:"enabled"`
-		MTLSRequired        bool                               `json:"mtls_required"`
-		CredentialEndpoint  string                             `json:"credential_endpoint"`
-		TrustBundleEndpoint string                             `json:"trust_bundle_endpoint"`
-		Transports          []string                           `json:"transports"`
-		DefaultTransport    *string                            `json:"default_transport"`
-		TransportPolicy     *openLinkerManifestTransportPolicy `json:"transport_policy"`
+		Enabled                bool                               `json:"enabled"`
+		SecurityPolicyEndpoint string                             `json:"security_policy_endpoint"`
+		MTLSRequired           bool                               `json:"mtls_required"`
+		CredentialEndpoint     string                             `json:"credential_endpoint"`
+		TrustBundleEndpoint    string                             `json:"trust_bundle_endpoint"`
+		Transports             []string                           `json:"transports"`
+		DefaultTransport       *string                            `json:"default_transport"`
+		TransportPolicy        *openLinkerManifestTransportPolicy `json:"transport_policy"`
 	} `json:"runtime"`
 }
 
@@ -48,11 +49,13 @@ type openLinkerManifestTransportPolicy struct {
 }
 
 type runtimeConnectionInformation struct {
-	RuntimeURL          string
-	Policy              runtimeTransportPolicy
-	MTLSRequired        bool
-	CredentialEndpoint  string
-	TrustBundleEndpoint string
+	SecurityPolicyEndpoint string
+	CredentialOperationID  string
+	RuntimeURL             string
+	Policy                 runtimeTransportPolicy
+	MTLSRequired           bool
+	CredentialEndpoint     string
+	TrustBundleEndpoint    string
 }
 
 func resolveRuntimeConnection(ctx context.Context, platformURL, override string) (runtimeConnectionInformation, error) {
@@ -129,11 +132,12 @@ func resolveRuntimeConnection(ctx context.Context, platformURL, override string)
 		credentialEndpoint = platformOrigin + "/api/v1/runtime-credentials"
 	}
 	return runtimeConnectionInformation{
-		RuntimeURL:          runtimeURL,
-		Policy:              policy,
-		MTLSRequired:        manifest.Runtime.MTLSRequired,
-		CredentialEndpoint:  credentialEndpoint,
-		TrustBundleEndpoint: trustBundleEndpoint,
+		SecurityPolicyEndpoint: strings.TrimSpace(manifest.Runtime.SecurityPolicyEndpoint),
+		RuntimeURL:             runtimeURL,
+		Policy:                 policy,
+		MTLSRequired:           manifest.Runtime.MTLSRequired,
+		CredentialEndpoint:     credentialEndpoint,
+		TrustBundleEndpoint:    trustBundleEndpoint,
 	}, nil
 }
 

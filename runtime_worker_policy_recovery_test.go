@@ -2,6 +2,8 @@ package openlinker
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"io"
@@ -317,12 +319,12 @@ type runtimePolicyRecoveryHarness struct {
 	createReason      atomic.Value
 }
 
-func newRuntimePolicyRecoveryHarness(t *testing.T, retrySignals bool, durable bool) *runtimePolicyRecoveryHarness {
+func newRuntimePolicyRecoveryHarness(t *testing.T, retrySignals bool, durable bool, mutualTLS ...bool) *runtimePolicyRecoveryHarness {
 	t.Helper()
 	harness := &runtimePolicyRecoveryHarness{}
 	harness.createReason.Store("")
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case request.URL.Path == runtimeDelegatedRunReadPath:
@@ -381,6 +383,22 @@ func newRuntimePolicyRecoveryHarness(t *testing.T, retrySignals bool, durable bo
 			http.NotFound(w, request)
 		}
 	}))
+	var clientTLS *tls.Config
+	if len(mutualTLS) > 0 && mutualTLS[0] {
+		ca, certificate, certPEM, keyPEM := runtimeTestPKI(t)
+		roots := x509.NewCertPool()
+		roots.AppendCertsFromPEM(ca)
+		clientCertificate, err := tls.X509KeyPair(certPEM, keyPEM)
+		if err != nil {
+			t.Fatal(err)
+		}
+		server.TLS = &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{certificate}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: roots}
+		clientTLS = &tls.Config{MinVersion: tls.VersionTLS13, ServerName: "runtime.test", RootCAs: roots, Certificates: []tls.Certificate{clientCertificate}}
+	}
+	server.StartTLS()
+	if clientTLS != nil {
+		server.Client().Transport.(*http.Transport).TLSClientConfig = clientTLS
+	}
 	t.Cleanup(server.Close)
 
 	store := openRuntimeStoreForTest(t, t.TempDir())
@@ -477,4 +495,60 @@ func activeRuntimePolicyTestGate(t *testing.T, client RuntimeClient) *switchingR
 
 func runtimePolicyChangedTestError() error {
 	return &Error{StatusCode: http.StatusForbidden, Code: "FORBIDDEN", Message: runtimePolicyChangedMessage}
+}
+
+func TestRuntimePolicyRecoveryUsesMigratedIdentityPolicy(t *testing.T) {
+	for _, mode := range []string{"mtls", "token_only"} {
+		t.Run(mode, func(t *testing.T) {
+			h := newRuntimePolicyRecoveryHarness(t, false, false, true)
+			originalDiscovery := h.node.runtimeDiscovery
+			var policyCalls atomic.Int32
+			var platform *httptest.Server
+			platform = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/v1/runtime-security-policy" || r.Header.Get("Authorization") != "Bearer "+h.node.AgentToken {
+					t.Error("identity policy request went to unexpected destination")
+					w.WriteHeader(401)
+					return
+				}
+				policyCalls.Add(1)
+				// Obtain the harness Runtime URL without incrementing discovery evidence.
+				connection, err := originalDiscovery(r.Context(), h.node.PlatformURL)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				h.discoveryCalls.Add(-1)
+				response := map[string]any{"node_id": testNodeID, "agent_id": testAgentID, "authentication_mode": mode}
+				if mode == "mtls" {
+					response["runtime_url"] = connection.RuntimeURL
+					response["credential_endpoint"] = platform.URL + "/api/v1/runtime-credentials"
+				}
+				_ = json.NewEncoder(w).Encode(response)
+			}))
+			defer platform.Close()
+			h.node.PlatformURL = platform.URL
+			h.node.runtimeMTLSRequired = true
+			h.node.runtimeDiscovery = func(ctx context.Context, origin string) (runtimeConnectionInformation, error) {
+				connection, err := originalDiscovery(ctx, origin)
+				connection.RuntimeURL = "https://public-token-only.invalid"
+				connection.SecurityPolicyEndpoint = platform.URL + "/api/v1/runtime-security-policy"
+				connection.MTLSRequired = false
+				return connection, err
+			}
+			identity := h.store.Identity()
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			ready, err := h.client.HeartbeatRuntimeSession(ctx, h.hello)
+			if mode == "token_only" {
+				if err == nil || h.createCalls.Load() != 0 {
+					t.Fatalf("authentication downgrade accepted: %v", err)
+				}
+			} else if err != nil || ready == nil || h.createCalls.Load() != 1 || h.newHeartbeatCalls.Load() != 1 {
+				t.Fatalf("migrated recovery failed: ready=%v err=%v creates=%d heartbeat=%d", ready, err, h.createCalls.Load(), h.newHeartbeatCalls.Load())
+			}
+			if policyCalls.Load() != 1 || h.discoveryCalls.Load() != 1 || h.store.Identity() != identity {
+				t.Fatal("recovery changed identity or repeated discovery")
+			}
+		})
+	}
 }

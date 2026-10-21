@@ -148,7 +148,13 @@ type FileRuntimeStore struct {
 	hook     durableHook
 }
 
-func OpenFileRuntimeStore(dataDir string) (_ *FileRuntimeStore, retErr error) {
+func OpenFileRuntimeStore(dataDir string) (*FileRuntimeStore, error) {
+	return openFileRuntimeStore(dataDir, true)
+}
+
+// Offline credential preparation uses the identical lock/journal validation
+// without creating a Worker identity or advancing its Session epoch.
+func openFileRuntimeStore(dataDir string, startSession bool) (_ *FileRuntimeStore, retErr error) {
 	absDir, err := filepath.Abs(dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve runtime data directory: %w", err)
@@ -165,6 +171,14 @@ func OpenFileRuntimeStore(dataDir string) (_ *FileRuntimeStore, retErr error) {
 			_ = lock.close()
 		}
 	}()
+	if !startSession {
+		if _, err := os.Lstat(filepath.Join(absDir, runtimeIdentityFile)); err != nil {
+			return nil, ErrRuntimeIdentityMissing
+		}
+		if _, err := os.Lstat(filepath.Join(absDir, runtimeSpoolKeyFile)); err != nil {
+			return nil, ErrRuntimeIdentityMissing
+		}
+	}
 	if err := cleanupDurableTemps(absDir); err != nil {
 		return nil, fmt.Errorf("clean incomplete durable writes: %w", err)
 	}
@@ -215,11 +229,14 @@ func OpenFileRuntimeStore(dataDir string) (_ *FileRuntimeStore, retErr error) {
 	if err := store.reconcileSpoolAndJournalLocked(); err != nil {
 		return nil, err
 	}
-	identity, err := startRuntimeSession(absDir, identityDisk)
-	if err != nil {
-		return nil, err
+	store.identity = RuntimeIdentity{WorkerID: identityDisk.WorkerID, SessionEpoch: identityDisk.SessionEpoch}
+	if startSession {
+		identity, err := startRuntimeSession(absDir, identityDisk)
+		if err != nil {
+			return nil, err
+		}
+		store.identity = identity
 	}
-	store.identity = identity
 	if err := store.writeJournalSnapshotLocked(); err != nil {
 		return nil, fmt.Errorf("persist assignment journal snapshot: %w", err)
 	}
