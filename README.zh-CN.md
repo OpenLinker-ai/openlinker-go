@@ -380,3 +380,12 @@ Runtime 客户端私钥与加密 spool key 必须分开保护。信任 webhook p
 ## 许可证
 
 Apache-2.0。详见 [LICENSE](./LICENSE)。
+
+### 原身份受控 mTLS 迁移
+
+Core schema 100 可精确授权既有 token-only 身份迁移到 mTLS。Worker 启动和策略
+重发现均读取认证后的身份策略，保留 Node、Agent、Worker 和持久目录；失败不降级。
+`PrepareRuntimeCredential` 只为已停止且 spool 已确认清空的安装准备密钥和公开 CSR，
+不启动 Worker、不增加 epoch。调用方须独立读取原配置的 `ConfiguredNodeID`，或提供
+原 `AgentToken` 以计算既有默认 Node ID；与目标 NodeID 不同则在写文件前拒绝。
+准备本身不授予 Core 权限；私钥不得暴露给模型进程。

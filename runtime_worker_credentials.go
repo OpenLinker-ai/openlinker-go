@@ -36,6 +36,7 @@ const (
 
 type runtimeCredentialDisk struct {
 	Version              int       `json:"version"`
+	MTLSRequired         bool      `json:"mtls_required,omitempty"`
 	NodeID               string    `json:"node_id"`
 	AgentID              string    `json:"agent_id,omitempty"`
 	PrivateKeyPEM        string    `json:"private_key_pem"`
@@ -50,6 +51,7 @@ type runtimeCredentialDisk struct {
 }
 
 type runtimeCredentialIssueRequest struct {
+	OperationID           string   `json:"operation_id,omitempty"`
 	NodeID                string   `json:"node_id"`
 	DisplayName           string   `json:"display_name"`
 	NodeVersion           string   `json:"node_version"`
@@ -80,6 +82,7 @@ type runtimeCredentialManager struct {
 	renewMu            sync.Mutex
 	dataDir            string
 	credentialEndpoint string
+	operationID        string
 	agentToken         string
 	nodeVersion        string
 	features           []string
@@ -245,10 +248,11 @@ func (m *runtimeCredentialManager) issue(ctx context.Context) error {
 	// carry the same exact configured capabilities as Hello; Core remains the
 	// authority that checks them against the Node's approved version/features.
 	features := RuntimeRequiredFeatures()
-	if disk.CertificateChainPEM != "" {
+	if disk.CertificateChainPEM != "" || m.operationID != "" {
 		features = m.features
 	}
 	requestBody, err := json.Marshal(runtimeCredentialIssueRequest{
+		OperationID:           m.operationID,
 		NodeID:                disk.NodeID,
 		DisplayName:           "runtime-" + strings.ReplaceAll(disk.NodeID, "-", "")[:12],
 		NodeVersion:           m.nodeVersion,
@@ -307,6 +311,7 @@ func (m *runtimeCredentialManager) issue(ctx context.Context) error {
 	}
 	m.mu.Lock()
 	m.disk = disk
+	m.operationID = ""
 	err = m.loadTLSStateLocked()
 	closeIdle := m.closeIdle
 	m.mu.Unlock()

@@ -1,5 +1,14 @@
 # Changelog
 
+## Controlled Runtime authentication — Unreleased
+
+- Follow Core credential-scoped mTLS policy at startup and canonical recovery;
+  preserve installation identity and reject authentication downgrades.
+- Add offline, owner-only credential preparation with configured Node identity,
+  exclusive Store lock, empty acknowledged spool and unchanged Worker epoch.
+- Send exact operation ID and Hello features for administrator-authorized
+  token-to-mTLS conversion or certificate rotation on Core schema 100.
+
 ## Runtime certificate renewal — Unreleased
 
 - Keep initial enrollment on the baseline contract and send the same configured
