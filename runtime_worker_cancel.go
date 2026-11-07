@@ -23,6 +23,9 @@ func (node *RuntimeWorker) commandLoop() {
 				node.reportFatal(scrubRuntimeError(err))
 				return
 			}
+			if node.runtimeCtx.Err() == nil {
+				node.logRuntimeRetry("command poll", err)
+			}
 			if node.waitRetry(node.runtimeCtx, attempt) != nil {
 				return
 			}
@@ -58,7 +61,13 @@ func (node *RuntimeWorker) handleDecodedCommand(command RuntimeDecodedPendingCom
 			node.handleCancelCommand(*command.Cancel)
 		}()
 	case RuntimeDrain:
-		node.setDraining(true)
+		if node.markDraining() {
+			reason := "unspecified"
+			if command.Drain != nil && command.Drain.ReasonCode != "" {
+				reason = runtimeLoggableCode(command.Drain.ReasonCode)
+			}
+			node.logf("runtime drain requested by OpenLinker (reason %s); new runs are no longer accepted", reason)
+		}
 	case RuntimeLeaseRevoked:
 		if command.Revoke != nil {
 			node.handleLeaseRevoke(*command.Revoke)
