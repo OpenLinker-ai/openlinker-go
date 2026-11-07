@@ -89,11 +89,19 @@ func endpointAuthFingerprint(header string) string {
 	return hex.EncodeToString(sum[:])[:32]
 }
 
-// pendingCleanupTestHooks and pendingWriteTestHooks map an
-// *EnvRegistrationStore to a test hook that runs between the read a pending
-// record removal or write is based on and the re-read that guards it. They
-// live outside the store so the exported struct stays comparable.
-var pendingCleanupTestHooks, pendingWriteTestHooks sync.Map
+// pendingTestHooks maps an *EnvRegistrationStore to a test hook called with a
+// stage name inside its pending-record write and removal: "write.reread" and
+// "cleanup.reread" run between the read the change is based on and the
+// guarding re-read; "write.rename" and "cleanup.mutate" run after that guard,
+// just before the rename or remove. It lives outside the store so the exported
+// struct stays comparable.
+var pendingTestHooks sync.Map
+
+func runPendingTestHook(s *EnvRegistrationStore, stage string) {
+	if hook, ok := pendingTestHooks.Load(s); ok {
+		hook.(func(string))(stage)
+	}
+}
 
 // pendingRegistrationJournalFor journals only when the store's dynamic type is
 // exactly *EnvRegistrationStore. Custom stores, including types that embed it
@@ -171,18 +179,22 @@ var errPendingRegistrationContended = errors.New("openlinker: pending registrati
 const pendingRegistrationWriteAttempts = 3
 
 // savePendingAgentRegistration writes the record without losing data another
-// writer stores meanwhile: it renders from one read, re-reads right before the
+// writer stores meanwhile. In this process it holds the env file's path lock
+// from its read through the rename, like every other mutation of that file.
+// Against other processes it renders from one read, re-reads right before the
 // rename and replaces the file only if it is unchanged, otherwise it renders
 // again from the fresh content, a bounded number of times. There is no
-// cross-process lock, so a write between the final re-read and the rename can
-// still be lost; that is the same pre-existing limitation as concurrent
-// registrations against one env file.
+// cross-process lock, so another process's write between the final re-read
+// and the rename can still be lost; that is the same pre-existing limitation
+// as concurrent registrations against one env file. The directory is synced
+// after the rename, so the record is durable before the token is redeemed.
 func (s *EnvRegistrationStore) savePendingAgentRegistration(record *pendingAgentRegistration) error {
 	if s == nil || record == nil {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer lockRegistrationEnvPath(s.Path)()
 	if dir := filepath.Dir(s.Path); dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return err
@@ -216,11 +228,13 @@ func (s *EnvRegistrationStore) savePendingAgentRegistration(record *pendingAgent
 		if err != nil {
 			return err
 		}
-		if hook, ok := pendingWriteTestHooks.Load(s); ok {
-			hook.(func())()
-		}
+		runPendingTestHook(s, "write.reread")
 		replaced, err := replaceRegistrationEnvFile(s.Path, content, func() bool {
-			return registrationEnvUnchanged(s.Path, before, missing)
+			if !registrationEnvUnchanged(s.Path, before, missing) {
+				return false
+			}
+			runPendingTestHook(s, "write.rename")
+			return true
 		})
 		if err != nil || replaced {
 			return err
@@ -250,15 +264,18 @@ func registrationEnvUnchanged(path string, before []byte, missing bool) bool {
 //   - Otherwise only the pending key is removed, and only while it still holds
 //     agentToken; completed keys and other lines are kept as they are.
 //
-// There is no cross-process lock: another process can still write between the
-// final re-read and the rename or remove. That is the same pre-existing
-// limitation as concurrent registrations against one env file.
+// In this process the env file's path lock is held from the first read through
+// the rename or remove, like every other mutation of that file. There is no
+// cross-process lock: another process can still write between the final
+// re-read and the rename or remove. That is the same pre-existing limitation
+// as concurrent registrations against one env file.
 func (s *EnvRegistrationStore) clearPendingAgentRegistration(agentToken string) error {
 	if s == nil {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer lockRegistrationEnvPath(s.Path)()
 	before, err := os.ReadFile(s.Path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -281,15 +298,23 @@ func (s *EnvRegistrationStore) clearPendingAgentRegistration(agentToken string) 
 			return err
 		}
 	}
-	if hook, ok := pendingCleanupTestHooks.Load(s); ok {
-		hook.(func())()
+	runPendingTestHook(s, "cleanup.reread")
+	unchanged := func() bool {
+		if !registrationEnvUnchanged(s.Path, before, false) {
+			return false
+		}
+		runPendingTestHook(s, "cleanup.mutate")
+		return true
 	}
-	unchanged := func() bool { return registrationEnvUnchanged(s.Path, before, false) }
 	if deleteFile {
 		if !unchanged() {
 			return nil
 		}
-		return os.Remove(s.Path)
+		if err := os.Remove(s.Path); err != nil {
+			return err
+		}
+		syncRegistrationEnvDir(filepath.Dir(s.Path))
+		return nil
 	}
 	_, err = replaceRegistrationEnvFile(s.Path, content, unchanged)
 	return err

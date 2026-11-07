@@ -61,6 +61,7 @@ func (s *EnvRegistrationStore) SaveAgentRegistration(reg *AgentRegistration) err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	defer lockRegistrationEnvPath(s.Path)()
 	values, err := readRegistrationEnv(s.Path)
 	if err != nil && !os.IsNotExist(err) {
 		return err
@@ -88,6 +89,37 @@ var registrationEnvKeys = []string{
 	"OPENLINKER_API_BASE", "OPENLINKER_AGENT_ID", "OPENLINKER_AGENT_SLUG", "OPENLINKER_AGENT_NAME",
 	"OPENLINKER_AGENT_TOKEN", "OPENLINKER_AGENT_TOKEN_ID", "OPENLINKER_AGENT_TOKEN_PREFIX",
 	"OPENLINKER_REGISTERED_AT", "OPENLINKER_UPDATED_AT",
+}
+
+// registrationEnvPathLocks holds one mutex per absolute env file path. Every
+// mutation of a registration env file (completed save, pending-record write
+// and pending-record removal) holds it from its read through its final rename
+// or remove, so store instances for the same file in this process cannot
+// interleave. Processes are not coordinated; that remains the pre-existing
+// limitation of sharing one env file between concurrent registrations.
+var registrationEnvPathLocks sync.Map
+
+// lockRegistrationEnvPath locks path's mutex and returns its unlock function.
+// Callers take their store's own mutex first, so the order is always the same.
+func lockRegistrationEnvPath(path string) func() {
+	key := filepath.Clean(path)
+	if absolute, err := filepath.Abs(path); err == nil {
+		key = absolute
+	}
+	value, _ := registrationEnvPathLocks.LoadOrStore(key, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
+// syncRegistrationEnvDir flushes dir's entries, so a rename or remove inside
+// it is durable. It is best effort: platforms that cannot sync a directory,
+// such as Windows, skip it.
+func syncRegistrationEnvDir(dir string) {
+	if directory, err := os.Open(dir); err == nil {
+		_ = directory.Sync()
+		_ = directory.Close()
+	}
 }
 
 func readRegistrationEnv(path string) (map[string]string, error) {
@@ -219,10 +251,7 @@ func replaceRegistrationEnvFile(path, content string, beforeRename func() bool) 
 	if err = os.Chmod(path, 0o600); err != nil {
 		return false, err
 	}
-	if directory, openErr := os.Open(dir); openErr == nil {
-		_ = directory.Sync()
-		_ = directory.Close()
-	}
+	syncRegistrationEnvDir(dir)
 	removeTemporary = false
 	return true, nil
 }

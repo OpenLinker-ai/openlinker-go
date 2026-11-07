@@ -465,14 +465,69 @@ func TestEnsureAgentLeavesCompletedRegistrationUntouched(t *testing.T) {
 	}
 }
 
-func TestPendingCleanupKeepsCompletedRegistrationWrittenAfterComparison(t *testing.T) {
+const completedElsewhereEnv = "OPENLINKER_AGENT_ID=\"agent-elsewhere\"\nOPENLINKER_AGENT_TOKEN=\"ol_agent_completed_elsewhere\"\n"
+
+func completedElsewhere(apiBase string) *AgentRegistration {
+	return &AgentRegistration{
+		AgentID: "agent-elsewhere", AgentSlug: "other-agent", AgentName: "Other Agent",
+		AgentToken: "ol_agent_completed_elsewhere", APIBase: apiBase, UpdatedAt: time.Now().UTC(),
+	}
+}
+
+// writeAsOtherProcess appends a completed registration directly, as another
+// process sharing the env file would, without this process's path lock.
+func writeAsOtherProcess(t *testing.T, path string) {
+	t.Helper()
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		t.Errorf("read: %v", err)
+	}
+	if err := os.WriteFile(path, append(existing, completedElsewhereEnv...), 0o600); err != nil {
+		t.Errorf("write: %v", err)
+	}
+}
+
+// saveConcurrently starts another store instance's completed save for path
+// and gives it 200ms to land. While the caller holds the path lock it cannot.
+func saveConcurrently(path string, registration *AgentRegistration) <-chan error {
+	done := make(chan error, 1)
+	go func() { done <- NewEnvRegistrationStore(path).SaveAgentRegistration(registration) }()
+	select {
+	case err := <-done:
+		done <- err
+	case <-time.After(200 * time.Millisecond):
+	}
+	return done
+}
+
+func assertCompletedElsewhereSurvived(t *testing.T, path, existing string, saved <-chan error) {
+	t.Helper()
+	if saved != nil {
+		if err := <-saved; err != nil {
+			t.Fatalf("concurrent save: %v", err)
+		}
+	}
+	loaded, err := NewEnvRegistrationStore(path).LoadAgentRegistration()
+	if err != nil || loaded == nil || loaded.AgentToken != "ol_agent_completed_elsewhere" {
+		t.Fatalf("completed registration lost: %#v err=%v", loaded, err)
+	}
+	raw, _ := readPendingTestEnv(t, path)
+	if !strings.HasPrefix(raw, existing) {
+		t.Fatalf("other lines lost:\n%s", raw)
+	}
+}
+
+func TestPendingCleanupKeepsCompletedRegistrationWrittenMeanwhile(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name     string
-		existing string
+		name        string
+		existing    string
+		sameProcess bool
 	}{
-		{"file created by the record", ""},
-		{"file with other lines", "UNRELATED=value\n"},
+		{"other process, file created by the record", "", false},
+		{"other process, file with other lines", "UNRELATED=value\n", false},
+		{"another store instance, file created by the record", "", true},
+		{"another store instance, file with other lines", "UNRELATED=value\n", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -485,68 +540,75 @@ func TestPendingCleanupKeepsCompletedRegistrationWrittenAfterComparison(t *testi
 				}
 			}
 			store := NewEnvRegistrationStore(path)
-			completed := &AgentRegistration{
-				AgentID: testPendingAgentID, AgentSlug: "other-agent", AgentName: "Other Agent",
-				AgentToken: "ol_agent_completed_elsewhere", APIBase: core.server.URL, UpdatedAt: time.Now().UTC(),
-			}
-			// Another store instance completes a registration after this
-			// attempt compared the record but before it removes it.
-			pendingCleanupTestHooks.Store(store, func() {
-				if err := NewEnvRegistrationStore(path).SaveAgentRegistration(completed); err != nil {
-					t.Errorf("save completed registration: %v", err)
+			var saved <-chan error
+			// Another writer completes a registration after this attempt
+			// compared its record: another process before the guarding
+			// re-read, or another store instance just before the remove or
+			// rename.
+			pendingTestHooks.Store(store, func(stage string) {
+				switch {
+				case !tc.sameProcess && stage == "cleanup.reread":
+					writeAsOtherProcess(t, path)
+				case tc.sameProcess && stage == "cleanup.mutate" && saved == nil:
+					saved = saveConcurrently(path, completedElsewhere(core.server.URL))
 				}
 			})
-			t.Cleanup(func() { pendingCleanupTestHooks.Delete(store) })
+			t.Cleanup(func() { pendingTestHooks.Delete(store) })
 
 			_, err := EnsureAgent(context.Background(), AgentSpec{Slug: "taken-agent", Name: "Taken Agent"},
 				WithRegistrationAPIBase(core.server.URL), WithRegistrationUserToken("ol_user_creator"), WithRegistrationStore(store))
 			if !registrationStatus(err, http.StatusConflict) {
 				t.Fatalf("err = %v", err)
 			}
-			loaded, err := NewEnvRegistrationStore(path).LoadAgentRegistration()
-			if err != nil || loaded == nil || loaded.AgentToken != "ol_agent_completed_elsewhere" {
-				t.Fatalf("completed registration lost: %#v err=%v", loaded, err)
+			if tc.sameProcess && saved == nil {
+				t.Fatal("the cleanup never reached its mutation")
 			}
-			if raw, _ := readPendingTestEnv(t, path); !strings.HasPrefix(raw, tc.existing) {
-				t.Fatalf("other lines lost:\n%s", raw)
-			}
+			assertCompletedElsewhereSurvived(t, path, tc.existing, saved)
 		})
 	}
 }
 
 func TestPendingWriteKeepsCompletedRegistrationWrittenMeanwhile(t *testing.T) {
 	t.Parallel()
-	core := newReplayRegistrationCore(t)
-	core.slugs["taken-agent"] = true
-	path := filepath.Join(t.TempDir(), ".env")
-	storeB := NewEnvRegistrationStore(path)
-	completedA := &AgentRegistration{
-		AgentID: testPendingAgentID, AgentSlug: "agent-a", AgentName: "Agent A",
-		AgentToken: "ol_agent_completed_a", APIBase: core.server.URL, UpdatedAt: time.Now().UTC(),
-	}
-	// Start A completes and saves through its own store while B's record write
-	// is between its read and its rename.
-	var once sync.Once
-	pendingWriteTestHooks.Store(storeB, func() {
-		once.Do(func() {
-			if err := NewEnvRegistrationStore(path).SaveAgentRegistration(completedA); err != nil {
-				t.Errorf("save completed registration: %v", err)
+	for _, tc := range []struct {
+		name        string
+		sameProcess bool
+	}{{"other process", false}, {"another store instance", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			core := newReplayRegistrationCore(t)
+			core.slugs["taken-agent"] = true
+			path := filepath.Join(t.TempDir(), ".env")
+			storeB := NewEnvRegistrationStore(path)
+			var saved <-chan error
+			wrote := false
+			// Start A completes while start B's record write is in flight:
+			// another process before B's guarding re-read, or another store
+			// instance just before B's rename.
+			pendingTestHooks.Store(storeB, func(stage string) {
+				switch {
+				case !tc.sameProcess && stage == "write.reread" && !wrote:
+					wrote = true
+					writeAsOtherProcess(t, path)
+				case tc.sameProcess && stage == "write.rename" && saved == nil:
+					saved = saveConcurrently(path, completedElsewhere(core.server.URL))
+				}
+			})
+			t.Cleanup(func() { pendingTestHooks.Delete(storeB) })
+
+			_, err := EnsureAgent(context.Background(), AgentSpec{Slug: "taken-agent", Name: "Taken Agent"},
+				WithRegistrationAPIBase(core.server.URL), WithRegistrationUserToken("ol_user_creator"), WithRegistrationStore(storeB))
+			if !registrationStatus(err, http.StatusConflict) {
+				t.Fatalf("err = %v", err)
+			}
+			if tc.sameProcess && saved == nil {
+				t.Fatal("the record write never reached its rename")
+			}
+			assertCompletedElsewhereSurvived(t, path, "", saved)
+			if pending, err := storeB.loadPendingAgentRegistration(); err != nil || pending != nil {
+				t.Fatalf("B's record after its 409 = %#v err=%v", pending, err)
 			}
 		})
-	})
-	t.Cleanup(func() { pendingWriteTestHooks.Delete(storeB) })
-
-	_, err := EnsureAgent(context.Background(), AgentSpec{Slug: "taken-agent", Name: "Taken Agent"},
-		WithRegistrationAPIBase(core.server.URL), WithRegistrationUserToken("ol_user_creator"), WithRegistrationStore(storeB))
-	if !registrationStatus(err, http.StatusConflict) {
-		t.Fatalf("err = %v", err)
-	}
-	loaded, err := NewEnvRegistrationStore(path).LoadAgentRegistration()
-	if err != nil || loaded == nil || loaded.AgentToken != "ol_agent_completed_a" {
-		t.Fatalf("A's completed registration lost: %#v err=%v", loaded, err)
-	}
-	if pending, err := storeB.loadPendingAgentRegistration(); err != nil || pending != nil {
-		t.Fatalf("B's record after its 409 = %#v err=%v", pending, err)
 	}
 }
 
@@ -556,14 +618,17 @@ func TestPendingWriteGivesUpUnderContentionAndContinues(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".env")
 	store := NewEnvRegistrationStore(path)
 	writes := 0
-	// Another writer changes the file before every re-read.
-	pendingWriteTestHooks.Store(store, func() {
+	// Another process changes the file before every guarding re-read.
+	pendingTestHooks.Store(store, func(stage string) {
+		if stage != "write.reread" {
+			return
+		}
 		writes++
 		if err := os.WriteFile(path, []byte(fmt.Sprintf("OTHER_WRITER=%d\n", writes)), 0o600); err != nil {
 			t.Errorf("write: %v", err)
 		}
 	})
-	t.Cleanup(func() { pendingWriteTestHooks.Delete(store) })
+	t.Cleanup(func() { pendingTestHooks.Delete(store) })
 
 	registration, err := EnsureAgent(context.Background(), AgentSpec{Slug: "demo-agent", Name: "Demo Agent"},
 		WithRegistrationAPIBase(core.server.URL), WithRegistrationUserToken("ol_user_creator"), WithRegistrationStore(store))
