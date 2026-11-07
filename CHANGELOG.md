@@ -1,5 +1,28 @@
 # Changelog
 
+## Runtime Worker admission and observability — Unreleased
+
+- A WebSocket that attached with capacity 0 during local spool backpressure is
+  reattached through the existing disconnect/reconnect path once local
+  admission reopens, because Core reads WebSocket capacity only at attach.
+  Previously such a Session received no new work until an unrelated disconnect.
+  The reattach needs restored capacity on two consecutive heartbeat checks, runs
+  at most once per 30s, never happens while draining or stopping, and is atomic
+  with the Drain/Stop admission fence. No
+  protocol message, configuration or public API changed.
+- A capacity-only WebSocket hello mismatch now reports both capacities instead
+  of "attached to another session"; it is not logged during a drain.
+- Session attach, WebSocket activation, resume, claim, command-poll and
+  heartbeat retries log their cause: the first occurrence, then at most once per
+  30s per cause. The text uses only the platform code and status, the WebSocket
+  close code (never its reason), a fixed network/TLS/timeout class or the Go
+  error type names; error message text is never logged. A Core drain command
+  logs once.
+- Runtime security-policy and certificate errors include a validated platform
+  error code, for example `HTTP 403 (FORBIDDEN)`; a code outside the platform
+  shape `^[A-Z][A-Z0-9_]{1,63}$` is shown as `UNRECOGNIZED_CODE`, here and in
+  logs. Error types are unchanged.
+
 ## Controlled Runtime authentication — Unreleased
 
 - Follow Core credential-scoped mTLS policy at startup and canonical recovery;

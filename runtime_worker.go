@@ -113,8 +113,18 @@ type RuntimeWorker struct {
 	// Tests use this barrier to prove the final Stop/Drain linearization. It is
 	// nil in production and deliberately not part of the public API.
 	drainBeforeStop func()
+	// Tests use this barrier inside the capacity reattach decision, after the
+	// socket is retired and while stateMu is held. It is nil in production and
+	// deliberately not part of the public API.
+	capacityReattachRetired func()
 
 	jitter func(time.Duration) time.Duration
+
+	// retryLogs rate-limits diagnostics for automatic retries.
+	retryLogs runtimeRetryLogLimiter
+	// webSocketCapacity remembers the capacity the active WebSocket attached
+	// with; Core reads WebSocket capacity only at attach.
+	webSocketCapacity runtimeWebSocketCapacityState
 }
 
 func (node *RuntimeWorker) Start(parent context.Context) (retErr error) {
@@ -584,6 +594,16 @@ func (node *RuntimeWorker) setDraining(value bool) {
 	node.stateMu.Lock()
 	node.draining = value
 	node.stateMu.Unlock()
+}
+
+// markDraining fences admission like setDraining(true) and reports whether
+// this call changed the state, so the transition is logged once.
+func (node *RuntimeWorker) markDraining() bool {
+	node.stateMu.Lock()
+	defer node.stateMu.Unlock()
+	changed := !node.draining
+	node.draining = true
+	return changed
 }
 
 func (node *RuntimeWorker) setStopping() {

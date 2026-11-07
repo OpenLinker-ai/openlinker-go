@@ -65,6 +65,11 @@ func (node *RuntimeWorker) resolveRuntimeIdentityPolicy(ctx context.Context, con
 		}
 		defer response.Body.Close()
 		if response.StatusCode != http.StatusOK {
+			// Only a validated platform error code is added; the body text is not.
+			errorBody, _ := io.ReadAll(io.LimitReader(response.Body, openLinkerDiscoveryMaxBytes+1))
+			if code := runtimePlatformErrorCode(errorBody); code != "" {
+				return connection, fmt.Errorf("Runtime security policy unavailable: HTTP %d (%s)", response.StatusCode, code)
+			}
 			return connection, fmt.Errorf("Runtime security policy unavailable: HTTP %d", response.StatusCode)
 		}
 		raw, err := io.ReadAll(io.LimitReader(response.Body, openLinkerDiscoveryMaxBytes+1))

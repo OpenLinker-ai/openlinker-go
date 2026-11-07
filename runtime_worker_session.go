@@ -21,8 +21,14 @@ type spoolPermission struct {
 }
 
 func (node *RuntimeWorker) runtimeHello() RuntimeHelloPayload {
-	identity := node.store.Identity()
 	capacity, _ := node.capacitySnapshot()
+	return node.runtimeHelloWithCapacity(capacity)
+}
+
+// runtimeHelloWithCapacity builds the hello for an already computed capacity.
+// It does not take stateMu.
+func (node *RuntimeWorker) runtimeHelloWithCapacity(capacity int64) RuntimeHelloPayload {
+	identity := node.store.Identity()
 	return RuntimeHelloPayload{
 		NodeID:           node.NodeID,
 		AgentID:          node.AgentID,
@@ -62,6 +68,7 @@ func (node *RuntimeWorker) createSessionWithRetryClient(parent context.Context, 
 		if (runtimeErrorIsPermanent(err) && !runtimeAttachErrorIsRetryable(err)) || durableRuntimeErrorIsFatal(err) {
 			return nil, scrubRuntimeError(err)
 		}
+		node.logRuntimeRetry("session attach", err)
 		if err := node.waitRetry(parent, attempt); err != nil {
 			return nil, err
 		}
@@ -81,8 +88,9 @@ func (node *RuntimeWorker) heartbeatLoop() {
 					node.reportFatal(scrubRuntimeError(err))
 					return
 				}
-				node.logf("runtime heartbeat retrying: %v", scrubRuntimeError(err))
+				node.logHeartbeatRetry(err)
 			}
+			node.reattachWebSocketIfCapacityRestored(time.Now())
 		}
 	}
 }
@@ -128,6 +136,9 @@ func (node *RuntimeWorker) claimLoop() {
 			if runtimeErrorIsPermanent(err) {
 				node.reportFatal(scrubRuntimeError(err))
 				return
+			}
+			if node.runtimeCtx.Err() == nil {
+				node.logRuntimeRetry("claim", err)
 			}
 			if node.waitRetry(node.runtimeCtx, attempt) != nil {
 				return
@@ -373,6 +384,7 @@ func (node *RuntimeWorker) resumeDurableStateWithClient(parent context.Context, 
 		if runtimeErrorIsPermanent(err) {
 			return scrubRuntimeError(err)
 		}
+		node.logRuntimeRetry("resume", err)
 		if err := node.waitRetry(parent, attempt); err != nil {
 			return err
 		}

@@ -23,6 +23,10 @@ func (c *RuntimeWebSocket) CreateRuntimeSession(
 		return nil, err
 	}
 	if !runtimeHelloEqual(c.hello, hello) {
+		if runtimeHelloEqualExceptCapacity(c.hello, hello) {
+			// Same Session: only the advertised capacity changed since attach.
+			return nil, &runtimeWebSocketCapacityChangedError{Attached: c.hello.Capacity, Current: hello.Capacity}
+		}
 		return nil, errors.New("openlinker: runtime WebSocket is attached to another session")
 	}
 	ready := c.Ready()
