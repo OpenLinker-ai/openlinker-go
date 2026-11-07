@@ -133,6 +133,11 @@ type switchingRuntimeClient struct {
 	// transitionEpoch fences attach work that completes after a newer transport
 	// transition (especially shutdown) has already taken ownership of the gate.
 	transitionEpoch uint64
+	// retired marks the active client as being closed by the Worker (capacity
+	// reattach). New operations are refused with ErrRuntimeTransportSwitching,
+	// exactly as during a transition, while the active client stays visible to
+	// the supervisor that will replace it once the close completes.
+	retired bool
 }
 
 func newSwitchingRuntimeClient(callClient RuntimeClient) *switchingRuntimeClient {
@@ -182,6 +187,7 @@ func (client *switchingRuntimeClient) activateIfCurrent(epoch uint64, kind Runti
 	client.generation, client.cancel = context.WithCancel(context.Background())
 	client.active = active
 	client.kind = kind
+	client.retired = false
 	if kind == RuntimeTransportWebSocket {
 		client.state = RuntimeTransportWebSocketActive
 	} else {
@@ -202,6 +208,7 @@ func (client *switchingRuntimeClient) beginTransition(state RuntimeTransportStat
 	kind, active := client.kind, client.active
 	client.active = nil
 	client.kind = ""
+	client.retired = false
 	if client.cancel != nil {
 		client.cancel()
 	}
@@ -210,6 +217,27 @@ func (client *switchingRuntimeClient) beginTransition(state RuntimeTransportStat
 	}
 	client.mu.Unlock()
 	return epoch, kind, active
+}
+
+// retireActive marks active as closing so no new operation uses it. It is
+// local and non-blocking; it returns false when active is no longer published.
+func (client *switchingRuntimeClient) retireActive(active RuntimeClient) bool {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if active == nil || client.active != active || client.retired || client.state == RuntimeTransportStopped {
+		return false
+	}
+	client.retired = true
+	return true
+}
+
+// restoreActive undoes retireActive when the close did not disconnect active.
+func (client *switchingRuntimeClient) restoreActive(active RuntimeClient) {
+	client.mu.Lock()
+	if client.active == active {
+		client.retired = false
+	}
+	client.mu.Unlock()
 }
 
 func (client *switchingRuntimeClient) stop() (RuntimeTransportMode, RuntimeClient) {
@@ -226,7 +254,7 @@ func (client *switchingRuntimeClient) begin(
 	client.mu.Lock()
 	active := client.active
 	generation := client.generation
-	if active == nil || generation == nil {
+	if active == nil || generation == nil || client.retired {
 		client.mu.Unlock()
 		return nil, nil, nil, ErrRuntimeTransportSwitching
 	}

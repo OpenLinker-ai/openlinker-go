@@ -410,6 +410,7 @@ func (node *RuntimeWorker) activateWebSocketWithRetry(parent context.Context, re
 		if runtimeErrorIsPermanent(err) && !runtimeAttachErrorIsRetryable(err) {
 			return nil, err
 		}
+		node.logRuntimeRetry("WebSocket activation", err)
 		if waitErr := node.waitRetry(parent, attempt); waitErr != nil {
 			return nil, waitErr
 		}
@@ -421,7 +422,8 @@ func (node *RuntimeWorker) dialWebSocketOnce(parent context.Context, reason runt
 		return nil, nil, errors.New("runtime WebSocket dialer is unavailable")
 	}
 	callCtx, cancel := context.WithTimeout(withRuntimeFallbackReason(parent, reason), 20*time.Second)
-	connection, err := node.runtimeDialer.DialRuntimeWebSocket(callCtx, node.runtimeHello())
+	attachHello := node.runtimeHello()
+	connection, err := node.runtimeDialer.DialRuntimeWebSocket(callCtx, attachHello)
 	cancel()
 	if err != nil {
 		return nil, nil, err
@@ -433,6 +435,7 @@ func (node *RuntimeWorker) dialWebSocketOnce(parent context.Context, reason runt
 		}
 		return connection, nil, err
 	}
+	node.recordWebSocketAttachment(connection, attachHello)
 	return connection, ready, nil
 }
 

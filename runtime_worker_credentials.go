@@ -288,6 +288,10 @@ func (m *runtimeCredentialManager) issue(ctx context.Context) error {
 		return errors.New("Runtime certificate response exceeds 64 KiB")
 	}
 	if response.StatusCode != http.StatusOK {
+		// Only a validated platform error code is added; the body text is not.
+		if code := runtimePlatformErrorCode(body); code != "" {
+			return fmt.Errorf("Runtime certificate request failed with HTTP %d (%s)", response.StatusCode, code)
+		}
 		return fmt.Errorf("Runtime certificate request failed with HTTP %d", response.StatusCode)
 	}
 	var issued runtimeCredentialIssueResponse
