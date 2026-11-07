@@ -2,6 +2,7 @@ package openlinker
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -90,13 +91,16 @@ var registrationEnvKeys = []string{
 }
 
 func readRegistrationEnv(path string) (map[string]string, error) {
-	file, err := os.Open(path)
+	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	return parseRegistrationEnv(content)
+}
+
+func parseRegistrationEnv(content []byte) (map[string]string, error) {
 	values := map[string]string{}
-	scanner := bufio.NewScanner(file)
+	scanner := bufio.NewScanner(bytes.NewReader(content))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
@@ -112,6 +116,12 @@ func readRegistrationEnv(path string) (map[string]string, error) {
 }
 
 func writeRegistrationEnv(path string, values map[string]string) error {
+	return writeManagedRegistrationEnv(path, values, registrationEnvKeys)
+}
+
+// writeManagedRegistrationEnv rewrites only the given keys and keeps every
+// other line of the file as it is.
+func writeManagedRegistrationEnv(path string, values map[string]string, keys []string) error {
 	dir := filepath.Dir(path)
 	if dir != "." && dir != "" {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -122,8 +132,19 @@ func writeRegistrationEnv(path string, values map[string]string) error {
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	content, err := renderManagedRegistrationEnv(existing, values, keys)
+	if err != nil {
+		return err
+	}
+	_, err = replaceRegistrationEnvFile(path, content, nil)
+	return err
+}
+
+// renderManagedRegistrationEnv returns existing with only the given keys
+// rewritten from values; every other line is kept as it is.
+func renderManagedRegistrationEnv(existing []byte, values map[string]string, keys []string) (string, error) {
 	managed := map[string]struct{}{}
-	for _, key := range registrationEnvKeys {
+	for _, key := range keys {
 		managed[key] = struct{}{}
 	}
 	seen := map[string]struct{}{}
@@ -147,19 +168,27 @@ func writeRegistrationEnv(path string, values map[string]string) error {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return err
+		return "", err
 	}
-	for _, key := range registrationEnvKeys {
+	for _, key := range keys {
 		if _, ok := seen[key]; !ok && values[key] != "" {
 			out.WriteString(key + "=" + fmt.Sprintf("%q", values[key]) + "\n")
 		}
 	}
+	return out.String(), nil
+}
+
+// replaceRegistrationEnvFile atomically replaces path with content in mode
+// 0600 and reports whether it did. When beforeRename returns false, path is
+// left untouched.
+func replaceRegistrationEnvFile(path, content string, beforeRename func() bool) (bool, error) {
+	dir := filepath.Dir(path)
 	if dir == "" {
 		dir = "."
 	}
 	temporary, err := os.CreateTemp(dir, ".openlinker-registration-*.tmp")
 	if err != nil {
-		return err
+		return false, err
 	}
 	temporaryPath := temporary.Name()
 	removeTemporary := true
@@ -170,29 +199,32 @@ func writeRegistrationEnv(path string, values map[string]string) error {
 		}
 	}()
 	if err = temporary.Chmod(0o600); err != nil {
-		return err
+		return false, err
 	}
-	if _, err = temporary.WriteString(out.String()); err != nil {
-		return err
+	if _, err = temporary.WriteString(content); err != nil {
+		return false, err
 	}
 	if err = temporary.Sync(); err != nil {
-		return err
+		return false, err
 	}
 	if err = temporary.Close(); err != nil {
-		return err
+		return false, err
+	}
+	if beforeRename != nil && !beforeRename() {
+		return false, nil
 	}
 	if err = os.Rename(temporaryPath, path); err != nil {
-		return err
+		return false, err
 	}
 	if err = os.Chmod(path, 0o600); err != nil {
-		return err
+		return false, err
 	}
 	if directory, openErr := os.Open(dir); openErr == nil {
 		_ = directory.Sync()
 		_ = directory.Close()
 	}
 	removeTemporary = false
-	return nil
+	return true, nil
 }
 
 func setRegistrationEnv(values map[string]string, key, value string) {

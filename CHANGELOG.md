@@ -1,5 +1,16 @@
 # Changelog
 
+## Crash-safe Agent registration — Unreleased
+
+- `EnsureAgent` with the default `EnvRegistrationStore` records a pending
+  registration before redeeming a pending Agent Token, so a crash or lost
+  response after Core committed can be retried with the same token instead of
+  failing with 401 or a slug conflict. A record is replayed only when the API
+  base, every request field, the mint parameters, the creator credential and the
+  endpoint credential (fingerprints only) match exactly; otherwise the previous
+  flow runs. Custom stores, the public API and normal-path requests are
+  unchanged. Recovery needs a Core that replays redeemed registrations.
+
 ## Controlled Runtime authentication — Unreleased
 
 - Follow Core credential-scoped mTLS policy at startup and canonical recovery;
