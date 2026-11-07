@@ -15,30 +15,25 @@ func EnsureAgent(ctx context.Context, input any, opts ...RegistrationOption) (*A
 	if err != nil {
 		return nil, err
 	}
+	unlock, err := lockFirstRegistration(ctx, &req)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	req, stored, err := prepareEnsureAgentRequest(req)
 	if err != nil {
 		return nil, err
 	}
+	if stored != nil {
+		unlock()
+	}
 	if stored == nil && req.Policy == RegisterPolicyReuseExisting && req.AgentToken != "" && req.Name != "" {
-		registered, err := RegisterAgentViaToken(ctx, req.APIBase, req.AgentToken, RegisterAgentViaTokenRequest{
-			Slug: req.Slug, Name: req.Name, Description: req.Description, EndpointURL: req.EndpointURL,
-			EndpointAuthHeader: req.EndpointAuthHeader, PricePerCallCents: req.PricePerCallCents,
-			Tags: req.Tags, AbilityTags: req.Tags, SkillIDs: req.SkillIDs, Visibility: req.Visibility,
-			ConnectionMode: req.ConnectionMode, MCPToolName: req.MCPToolName,
-		})
+		// Same unauthenticated registration client RegisterAgentViaToken builds.
+		client, err := newClient(req.APIBase, false)
 		if err != nil {
 			return nil, err
 		}
-		now := time.Now().UTC()
-		registration := &AgentRegistration{
-			AgentID: registered.Agent.ID, AgentSlug: registered.Agent.Slug, AgentName: registered.Agent.Name,
-			AgentToken: req.AgentToken, TokenID: registered.AgentToken.ID, TokenPrefix: registered.AgentToken.Prefix,
-			APIBase: req.APIBase, RegisteredAt: now, UpdatedAt: now,
-		}
-		if err := saveAgentRegistration(req.Store, registration); err != nil {
-			return nil, err
-		}
-		return registration, nil
+		return client.redeemNewAgentRegistration(ctx, req, pendingRegistrationJournalFor(req.Store), req.AgentToken, nil)
 	}
 	client, err := NewClient(req.APIBase, WithUserToken(req.UserToken), WithSDKAgent("openlinker-go/register-v2"))
 	if err != nil {
@@ -55,9 +50,17 @@ func (c *Client) EnsureAgent(ctx context.Context, input any, opts ...Registratio
 	if err != nil {
 		return nil, err
 	}
+	unlock, err := lockFirstRegistration(ctx, &req)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	req, stored, err := prepareEnsureAgentRequest(req)
 	if err != nil {
 		return nil, err
+	}
+	if stored != nil {
+		unlock()
 	}
 	return c.ensureAgent(ctx, req, stored)
 }
@@ -94,7 +97,7 @@ func (c *Client) ensureAgent(ctx context.Context, req EnsureAgentRequest, stored
 		return nil, errors.New("openlinker: OPENLINKER_USER_TOKEN is required to create an Agent or rotate its Agent Token")
 	}
 	if req.Policy == RegisterPolicyForceNew || stored == nil {
-		return client.registerNewAgent(ctx, req)
+		return client.registerNewAgent(ctx, req, stored == nil)
 	}
 	return client.issueRuntimeTokenForStoredAgent(ctx, req, stored)
 }
@@ -200,38 +203,29 @@ func normalizeRegistrationConnectionMode(value string) string {
 	}
 }
 
-func (c *Client) registerNewAgent(ctx context.Context, req EnsureAgentRequest) (*AgentRegistration, error) {
+// registerNewAgent mints a pending Agent Token and redeems it. Only a first
+// registration (no completed one stored) is journaled; force_new over an
+// existing registration keeps its previous behaviour.
+func (c *Client) registerNewAgent(ctx context.Context, req EnsureAgentRequest, firstRegistration bool) (*AgentRegistration, error) {
 	if req.Slug == "" || req.Name == "" {
 		return nil, errors.New("openlinker: Agent slug and name are required to create an Agent")
 	}
-	pending, err := c.CreateAgentToken(ctx, CreateAgentTokenRequest{
-		Name: req.TokenName, Scopes: req.TokenScopes, ExpiresInMinutes: req.TokenExpiresInMinutes,
+	var journal *EnvRegistrationStore
+	if firstRegistration {
+		journal = pendingRegistrationJournalFor(req.Store)
+	}
+	return c.redeemNewAgentRegistration(ctx, req, journal, "", func(ctx context.Context) (pendingAgentRegistration, error) {
+		pending, err := c.CreateAgentToken(ctx, CreateAgentTokenRequest{
+			Name: req.TokenName, Scopes: req.TokenScopes, ExpiresInMinutes: req.TokenExpiresInMinutes,
+		})
+		if err != nil {
+			return pendingAgentRegistration{}, err
+		}
+		if pending.PlaintextToken == "" {
+			return pendingAgentRegistration{}, errors.New("openlinker: platform did not return pending Agent Token plaintext")
+		}
+		return pendingAgentRegistration{AgentToken: pending.PlaintextToken, TokenID: pending.ID, TokenPrefix: pending.Prefix}, nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	if pending.PlaintextToken == "" {
-		return nil, errors.New("openlinker: platform did not return pending Agent Token plaintext")
-	}
-	registered, err := c.registerAgentViaToken(ctx, pending.PlaintextToken, RegisterAgentViaTokenRequest{
-		Slug: req.Slug, Name: req.Name, Description: req.Description, EndpointURL: req.EndpointURL,
-		EndpointAuthHeader: req.EndpointAuthHeader, PricePerCallCents: req.PricePerCallCents,
-		Tags: req.Tags, AbilityTags: req.Tags, SkillIDs: req.SkillIDs, Visibility: req.Visibility,
-		ConnectionMode: req.ConnectionMode, MCPToolName: req.MCPToolName,
-	})
-	if err != nil {
-		return nil, err
-	}
-	now := time.Now().UTC()
-	registration := &AgentRegistration{
-		AgentID: registered.Agent.ID, AgentSlug: registered.Agent.Slug, AgentName: registered.Agent.Name,
-		AgentToken: pending.PlaintextToken, TokenID: registered.AgentToken.ID, TokenPrefix: registered.AgentToken.Prefix,
-		APIBase: req.APIBase, RegisteredAt: now, UpdatedAt: now,
-	}
-	if err := saveAgentRegistration(req.Store, registration); err != nil {
-		return nil, err
-	}
-	return registration, nil
 }
 
 func (c *Client) issueRuntimeTokenForStoredAgent(ctx context.Context, req EnsureAgentRequest, stored *AgentRegistration) (*AgentRegistration, error) {
