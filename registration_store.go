@@ -108,28 +108,43 @@ func lockRegistrationEnvPath(path string) func() {
 	return mu.Unlock
 }
 
-// canonicalRegistrationEnvPath names one env file however it is reached: the
-// absolute path with its longest existing ancestor directory resolved through
-// symlinks (for example /tmp/x.env and /private/tmp/x.env on macOS). Resolving
-// the nearest existing ancestor, not only the parent, keeps the name stable
-// when the parent directory is created later.
+// canonicalRegistrationEnvPath names one env file however it is reached: its
+// longest existing ancestor directory resolved through symlinks (for example
+// /tmp/x.env and /private/tmp/x.env on macOS), followed by the rest of the
+// path. Symlinks are resolved before any lexical cleaning, because the file
+// system reads "link/.." as the parent of link's target; filepath.Abs or Clean
+// would collapse it first and name another file. Resolving the nearest
+// existing ancestor, not only the parent, keeps the name stable when the
+// parent directory is created later.
 func canonicalRegistrationEnvPath(path string) string {
-	absolute, err := filepath.Abs(path)
-	if err != nil {
-		absolute = filepath.Clean(path)
+	absolute := path
+	if !filepath.IsAbs(absolute) {
+		if wd, err := os.Getwd(); err == nil {
+			absolute = wd + string(filepath.Separator) + absolute
+		}
 	}
-	dir, rest := filepath.Dir(absolute), filepath.Base(absolute)
+	dir, rest := filepath.Split(absolute)
 	for {
+		dir = trimRegistrationPathSeparators(dir)
 		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
 			return filepath.Join(resolved, rest)
 		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return absolute
+		parent, name := filepath.Split(dir)
+		if name == "" || parent == "" {
+			return filepath.Clean(absolute)
 		}
-		rest = filepath.Join(filepath.Base(dir), rest)
+		rest = name + string(filepath.Separator) + rest
 		dir = parent
 	}
+}
+
+// trimRegistrationPathSeparators drops trailing separators but keeps a root.
+func trimRegistrationPathSeparators(path string) string {
+	end := len(path)
+	for end > len(filepath.VolumeName(path))+1 && os.IsPathSeparator(path[end-1]) {
+		end--
+	}
+	return path[:end]
 }
 
 // syncRegistrationEnvDir flushes dir's entries, so a rename inside it is

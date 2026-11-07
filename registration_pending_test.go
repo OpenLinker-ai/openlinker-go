@@ -507,6 +507,26 @@ func aliasedEnvPath(t *testing.T, path string) string {
 	return filepath.Join(alias, filepath.Base(path))
 }
 
+// dotdotAliasEnvPath returns path as "<link>/../<name>", where link points to a
+// directory inside path's directory: the file system resolves link before
+// "..", so this names the same file although a lexical clean would not.
+func dotdotAliasEnvPath(t *testing.T, path string) string {
+	t.Helper()
+	inner := filepath.Join(filepath.Dir(path), "inner")
+	if err := os.Mkdir(inner, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(inner, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	alias := link + string(filepath.Separator) + ".." + string(filepath.Separator) + filepath.Base(path)
+	if got, want := canonicalRegistrationEnvPath(alias), canonicalRegistrationEnvPath(path); got != want {
+		t.Fatalf("canonical(%q) = %q, want %q", alias, got, want)
+	}
+	return alias
+}
+
 // saveConcurrently starts another store instance's completed save for path
 // and gives it 200ms to land. While the caller holds the path lock it cannot.
 func saveConcurrently(path string, registration *AgentRegistration) <-chan error {
@@ -666,15 +686,18 @@ func TestPendingWriteGivesUpUnderContentionAndContinues(t *testing.T) {
 
 func TestConcurrentFirstRegistrationsShareOneAttempt(t *testing.T) {
 	t.Parallel()
-	for _, aliased := range []bool{false, true} {
-		t.Run(fmt.Sprintf("aliased=%t", aliased), func(t *testing.T) {
+	for _, mode := range []string{"same path", "symlinked directory", "dotdot after a symlinked directory"} {
+		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 			core := newReplayRegistrationCore(t)
 			core.dropAfterCommit = 1
 			pathA := filepath.Join(t.TempDir(), ".env")
 			pathB := pathA
-			if aliased {
+			switch mode {
+			case "symlinked directory":
 				pathB = aliasedEnvPath(t, pathA)
+			case "dotdot after a symlinked directory":
+				pathB = dotdotAliasEnvPath(t, pathA)
 			}
 			ensure := func(path string) (*AgentRegistration, error) {
 				return EnsureAgent(context.Background(), AgentSpec{Slug: "demo-agent", Name: "Demo Agent"},
@@ -755,6 +778,76 @@ func TestPendingRecordDirectorySyncErrors(t *testing.T) {
 			}
 			if err != nil || registration.AgentToken != "ol_agent_minted_1" || len(tokens) != 1 {
 				t.Fatalf("registration=%#v err=%v register=%v", registration, err, tokens)
+			}
+		})
+	}
+}
+
+func TestPersistentDirectorySyncErrorNeverRedeems(t *testing.T) {
+	t.Parallel()
+	core := newReplayRegistrationCore(t)
+	path := filepath.Join(t.TempDir(), ".env")
+	ensure := func(syncErr error) (*AgentRegistration, error) {
+		store := NewEnvRegistrationStore(path)
+		pendingDirSyncTestHooks.Store(store, func(string) error { return syncErr })
+		t.Cleanup(func() { pendingDirSyncTestHooks.Delete(store) })
+		return EnsureAgent(context.Background(), AgentSpec{Slug: "demo-agent", Name: "Demo Agent"},
+			WithRegistrationAPIBase(core.server.URL), WithRegistrationUserToken("ol_user_creator"), WithRegistrationStore(store))
+	}
+	// The record's directory never syncs: the first start fails after
+	// writing it, the second before replaying it, and neither redeems.
+	for start := 1; start <= 2; start++ {
+		if _, err := ensure(syscall.EIO); !errors.Is(err, syscall.EIO) {
+			t.Fatalf("start %d err = %v", start, err)
+		}
+	}
+	if created, tokens := core.calls(); created != 1 || len(tokens) != 0 {
+		t.Fatalf("create-token=%d register=%v", created, tokens)
+	}
+	// Once the directory syncs, the recorded token is redeemed.
+	registration, err := ensure(nil)
+	if err != nil || registration.AgentToken != "ol_agent_minted_1" {
+		t.Fatalf("registration = %#v err=%v", registration, err)
+	}
+	if created, tokens := core.calls(); created != 1 || strings.Join(tokens, ",") != "ol_agent_minted_1" {
+		t.Fatalf("create-token=%d register=%v", created, tokens)
+	}
+}
+
+func TestPendingRecordSyncsParentsOfCreatedDirectories(t *testing.T) {
+	t.Parallel()
+	for _, failTop := range []bool{false, true} {
+		t.Run(fmt.Sprintf("failTop=%t", failTop), func(t *testing.T) {
+			t.Parallel()
+			core := newReplayRegistrationCore(t)
+			root := t.TempDir()
+			path := filepath.Join(root, "a", "b", ".env")
+			store := NewEnvRegistrationStore(path)
+			var synced []string
+			pendingDirSyncTestHooks.Store(store, func(dir string) error {
+				synced = append(synced, dir)
+				if failTop && dir == root {
+					return syscall.EIO
+				}
+				return nil
+			})
+			t.Cleanup(func() { pendingDirSyncTestHooks.Delete(store) })
+
+			registration, err := EnsureAgent(context.Background(), AgentSpec{Slug: "demo-agent", Name: "Demo Agent"},
+				WithRegistrationAPIBase(core.server.URL), WithRegistrationUserToken("ol_user_creator"), WithRegistrationStore(store))
+			_, tokens := core.calls()
+			if failTop {
+				// The parent sync runs before the record is written, so a
+				// failure leaves nothing to replay and nothing is redeemed.
+				if _, statErr := os.Stat(path); !errors.Is(err, syscall.EIO) || len(tokens) != 0 || !os.IsNotExist(statErr) {
+					t.Fatalf("err=%v register=%v stat=%v synced=%v", err, tokens, statErr, synced)
+				}
+				return
+			}
+			want := []string{root, filepath.Join(root, "a"), filepath.Join(root, "a", "b")}
+			if err != nil || registration.AgentToken != "ol_agent_minted_1" ||
+				len(synced) < len(want) || strings.Join(synced[:len(want)], "|") != strings.Join(want, "|") {
+				t.Fatalf("registration=%#v err=%v synced=%v", registration, err, synced)
 			}
 		})
 	}

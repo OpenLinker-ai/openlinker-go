@@ -236,10 +236,8 @@ func (s *EnvRegistrationStore) savePendingAgentRegistration(record *pendingAgent
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	defer lockRegistrationEnvPath(s.Path)()
-	if dir := filepath.Dir(s.Path); dir != "." && dir != "" {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return err
-		}
+	if err := s.makePendingRegistrationDir(registrationEnvDir(s.Path)); err != nil {
+		return err
 	}
 	for attempt := 0; attempt < pendingRegistrationWriteAttempts; attempt++ {
 		before, err := os.ReadFile(s.Path)
@@ -276,7 +274,7 @@ func (s *EnvRegistrationStore) savePendingAgentRegistration(record *pendingAgent
 			}
 			runPendingTestHook(s, "write.rename")
 			return true
-		}, s.syncPendingRegistrationDir)
+		}, s.syncRecordDir)
 		if err != nil || replaced {
 			return err
 		}
@@ -354,10 +352,62 @@ func (s *EnvRegistrationStore) clearPendingAgentRegistration(agentToken string) 
 		if err := os.Remove(s.Path); err != nil {
 			return err
 		}
-		return s.syncPendingRegistrationDir(filepath.Dir(s.Path))
+		return s.syncRecordDir("")
 	}
-	_, err = replaceRegistrationEnvFile(s.Path, content, unchanged, s.syncPendingRegistrationDir)
+	_, err = replaceRegistrationEnvFile(s.Path, content, unchanged, s.syncRecordDir)
 	return err
+}
+
+// makePendingRegistrationDir creates dir as MkdirAll does and then syncs the
+// parent of every directory it created, top down, so the record's path is
+// durable before the token is redeemed. It runs before the record is written,
+// so a failed sync leaves no record behind.
+func (s *EnvRegistrationStore) makePendingRegistrationDir(dir string) error {
+	if dir == "." || dir == "" {
+		return nil
+	}
+	var missing []string
+	for current := dir; ; {
+		if _, err := os.Stat(current); err == nil || !os.IsNotExist(err) {
+			break
+		}
+		missing = append(missing, current)
+		parent := registrationEnvDir(current)
+		if parent == current || parent == "." {
+			break
+		}
+		current = parent
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	for i := len(missing) - 1; i >= 0; i-- {
+		if err := s.syncPendingRegistrationDir(registrationEnvDir(missing[i])); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// registrationEnvDir is the directory that holds path as the file system
+// reads it: path without its last element and without lexical cleaning, so a
+// "link/.." stays the parent of link's target.
+func registrationEnvDir(path string) string {
+	dir, _ := filepath.Split(path)
+	if dir == "" {
+		return "."
+	}
+	return trimRegistrationPathSeparators(dir)
+}
+
+// syncRecordDir syncs the directory holding the store's env file, whatever
+// directory a caller passes, so the record's own directory entry is the one
+// made durable.
+func (s *EnvRegistrationStore) syncRecordDir(string) error {
+	return s.syncPendingRegistrationDir(registrationEnvDir(s.Path))
 }
 
 // syncPendingRegistrationDir makes a pending-record change durable before the
@@ -427,6 +477,12 @@ func (c *Client) redeemNewAgentRegistration(
 		// or creator) is never replayed; it stays until the attempt below
 		// replaces it.
 		if pendingRegistrationMatches(previous, apiBase, request, mintParameters) {
+			// An earlier start may have written this record and then failed
+			// to sync its directory, so confirm it is durable before Core is
+			// asked to redeem it.
+			if err := journal.syncRecordDir(""); err != nil {
+				return nil, err
+			}
 			replay := *previous
 			replay.Request.EndpointAuthHeader = request.EndpointAuthHeader
 			registration, err := c.redeemPendingAgentRegistration(ctx, req, journal, replay)
