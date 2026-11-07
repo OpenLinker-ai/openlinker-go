@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -39,6 +41,9 @@ type replayRegistrationCore struct {
 	dropAfterCommit  int
 	afterCommit      func()
 	beforeRegister   func(token string)
+	beforeMint       func()
+	// arrivals counts requests as they reach the server, before its lock.
+	arrivals atomic.Int32
 }
 
 func newReplayRegistrationCore(t *testing.T) *replayRegistrationCore {
@@ -52,12 +57,16 @@ func newReplayRegistrationCore(t *testing.T) *replayRegistrationCore {
 }
 
 func (core *replayRegistrationCore) serve(w http.ResponseWriter, request *http.Request) {
+	core.arrivals.Add(1)
 	core.mu.Lock()
 	defer core.mu.Unlock()
 	switch request.Method + " " + request.URL.Path {
 	case "POST /api/v1/creator/agent-tokens":
 		if !strings.HasPrefix(request.Header.Get("Authorization"), "Bearer ol_user_") {
 			core.t.Errorf("create token auth = %q", request.Header.Get("Authorization"))
+		}
+		if core.beforeMint != nil {
+			core.beforeMint()
 		}
 		core.createTokenCalls++
 		token := fmt.Sprintf("ol_agent_minted_%d", core.createTokenCalls)
@@ -487,6 +496,17 @@ func writeAsOtherProcess(t *testing.T, path string) {
 	}
 }
 
+// aliasedEnvPath returns path reached through a symlinked directory, so a
+// store using it shares the env file under another name.
+func aliasedEnvPath(t *testing.T, path string) string {
+	t.Helper()
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(filepath.Dir(path), alias); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	return filepath.Join(alias, filepath.Base(path))
+}
+
 // saveConcurrently starts another store instance's completed save for path
 // and gives it 200ms to land. While the caller holds the path lock it cannot.
 func saveConcurrently(path string, registration *AgentRegistration) <-chan error {
@@ -540,17 +560,18 @@ func TestPendingCleanupKeepsCompletedRegistrationWrittenMeanwhile(t *testing.T) 
 				}
 			}
 			store := NewEnvRegistrationStore(path)
+			alias := aliasedEnvPath(t, path)
 			var saved <-chan error
 			// Another writer completes a registration after this attempt
 			// compared its record: another process before the guarding
-			// re-read, or another store instance just before the remove or
-			// rename.
+			// re-read, or another store instance (reaching the file through
+			// a symlinked directory) just before the remove or rename.
 			pendingTestHooks.Store(store, func(stage string) {
 				switch {
 				case !tc.sameProcess && stage == "cleanup.reread":
 					writeAsOtherProcess(t, path)
 				case tc.sameProcess && stage == "cleanup.mutate" && saved == nil:
-					saved = saveConcurrently(path, completedElsewhere(core.server.URL))
+					saved = saveConcurrently(alias, completedElsewhere(core.server.URL))
 				}
 			})
 			t.Cleanup(func() { pendingTestHooks.Delete(store) })
@@ -580,6 +601,7 @@ func TestPendingWriteKeepsCompletedRegistrationWrittenMeanwhile(t *testing.T) {
 			core.slugs["taken-agent"] = true
 			path := filepath.Join(t.TempDir(), ".env")
 			storeB := NewEnvRegistrationStore(path)
+			alias := aliasedEnvPath(t, path)
 			var saved <-chan error
 			wrote := false
 			// Start A completes while start B's record write is in flight:
@@ -591,7 +613,7 @@ func TestPendingWriteKeepsCompletedRegistrationWrittenMeanwhile(t *testing.T) {
 					wrote = true
 					writeAsOtherProcess(t, path)
 				case tc.sameProcess && stage == "write.rename" && saved == nil:
-					saved = saveConcurrently(path, completedElsewhere(core.server.URL))
+					saved = saveConcurrently(alias, completedElsewhere(core.server.URL))
 				}
 			})
 			t.Cleanup(func() { pendingTestHooks.Delete(storeB) })
@@ -639,6 +661,102 @@ func TestPendingWriteGivesUpUnderContentionAndContinues(t *testing.T) {
 	if writes != pendingRegistrationWriteAttempts || strings.Contains(raw, pendingRegistrationEnvKey) ||
 		!strings.Contains(raw, fmt.Sprintf("OTHER_WRITER=%d", writes)) {
 		t.Fatalf("writes=%d env:\n%s", writes, raw)
+	}
+}
+
+func TestConcurrentFirstRegistrationsShareOneAttempt(t *testing.T) {
+	t.Parallel()
+	for _, aliased := range []bool{false, true} {
+		t.Run(fmt.Sprintf("aliased=%t", aliased), func(t *testing.T) {
+			t.Parallel()
+			core := newReplayRegistrationCore(t)
+			core.dropAfterCommit = 1
+			pathA := filepath.Join(t.TempDir(), ".env")
+			pathB := pathA
+			if aliased {
+				pathB = aliasedEnvPath(t, pathA)
+			}
+			ensure := func(path string) (*AgentRegistration, error) {
+				return EnsureAgent(context.Background(), AgentSpec{Slug: "demo-agent", Name: "Demo Agent"},
+					WithRegistrationAPIBase(core.server.URL), WithRegistrationUserToken("ol_user_creator"),
+					WithRegistrationStore(NewEnvRegistrationStore(path)))
+			}
+			type result struct {
+				registration *AgentRegistration
+				err          error
+			}
+			resultB := make(chan result, 1)
+			started := false
+			// Start B while A is minting. Without the registration lock B
+			// would read the empty record, mint a second token and reach Core
+			// within 200ms; with it, B waits for A's whole attempt.
+			core.beforeMint = func() {
+				if started {
+					return
+				}
+				started = true
+				go func() {
+					registration, err := ensure(pathB)
+					resultB <- result{registration, err}
+				}()
+				for deadline := time.Now().Add(200 * time.Millisecond); time.Now().Before(deadline) && core.arrivals.Load() < 2; {
+					time.Sleep(5 * time.Millisecond)
+				}
+			}
+
+			// A's redemption commits but its response is lost.
+			if _, err := ensure(pathA); err == nil {
+				t.Fatal("lost registration response succeeded")
+			}
+			b := <-resultB
+			if b.err != nil {
+				t.Fatalf("B err = %v", b.err)
+			}
+			created, tokens := core.calls()
+			// B replays A's recorded token, so nothing is orphaned.
+			if b.registration.AgentToken != "ol_agent_minted_1" || created != 1 ||
+				strings.Join(tokens, ",") != "ol_agent_minted_1,ol_agent_minted_1" {
+				t.Fatalf("B=%#v create-token=%d register=%v", b.registration, created, tokens)
+			}
+			loaded, err := NewEnvRegistrationStore(pathA).LoadAgentRegistration()
+			if err != nil || loaded == nil || loaded.AgentToken != "ol_agent_minted_1" {
+				t.Fatalf("stored = %#v err=%v", loaded, err)
+			}
+		})
+	}
+}
+
+func TestPendingRecordDirectorySyncErrors(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		syncErr error
+		fails   bool
+	}{
+		{"genuine I/O error fails before redemption", syscall.EIO, true},
+		{"unsupported directory sync is skipped", syscall.EINVAL, false},
+		{"unsupported operation is skipped", syscall.ENOTSUP, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			core := newReplayRegistrationCore(t)
+			store := NewEnvRegistrationStore(filepath.Join(t.TempDir(), ".env"))
+			pendingDirSyncTestHooks.Store(store, func(string) error { return tc.syncErr })
+			t.Cleanup(func() { pendingDirSyncTestHooks.Delete(store) })
+
+			registration, err := EnsureAgent(context.Background(), AgentSpec{Slug: "demo-agent", Name: "Demo Agent"},
+				WithRegistrationAPIBase(core.server.URL), WithRegistrationUserToken("ol_user_creator"), WithRegistrationStore(store))
+			created, tokens := core.calls()
+			if tc.fails {
+				if !errors.Is(err, syscall.EIO) || created != 1 || len(tokens) != 0 {
+					t.Fatalf("err=%v create-token=%d register=%v", err, created, tokens)
+				}
+				return
+			}
+			if err != nil || registration.AgentToken != "ol_agent_minted_1" || len(tokens) != 1 {
+				t.Fatalf("registration=%#v err=%v register=%v", registration, err, tokens)
+			}
+		})
 	}
 }
 

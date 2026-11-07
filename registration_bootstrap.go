@@ -15,9 +15,17 @@ func EnsureAgent(ctx context.Context, input any, opts ...RegistrationOption) (*A
 	if err != nil {
 		return nil, err
 	}
+	unlock, err := lockFirstRegistration(ctx, &req)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	req, stored, err := prepareEnsureAgentRequest(req)
 	if err != nil {
 		return nil, err
+	}
+	if stored != nil {
+		unlock()
 	}
 	if stored == nil && req.Policy == RegisterPolicyReuseExisting && req.AgentToken != "" && req.Name != "" {
 		// Same unauthenticated registration client RegisterAgentViaToken builds.
@@ -42,9 +50,17 @@ func (c *Client) EnsureAgent(ctx context.Context, input any, opts ...Registratio
 	if err != nil {
 		return nil, err
 	}
+	unlock, err := lockFirstRegistration(ctx, &req)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	req, stored, err := prepareEnsureAgentRequest(req)
 	if err != nil {
 		return nil, err
+	}
+	if stored != nil {
+		unlock()
 	}
 	return c.ensureAgent(ctx, req, stored)
 }

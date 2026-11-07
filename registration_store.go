@@ -102,19 +102,39 @@ var registrationEnvPathLocks sync.Map
 // lockRegistrationEnvPath locks path's mutex and returns its unlock function.
 // Callers take their store's own mutex first, so the order is always the same.
 func lockRegistrationEnvPath(path string) func() {
-	key := filepath.Clean(path)
-	if absolute, err := filepath.Abs(path); err == nil {
-		key = absolute
-	}
-	value, _ := registrationEnvPathLocks.LoadOrStore(key, &sync.Mutex{})
+	value, _ := registrationEnvPathLocks.LoadOrStore(canonicalRegistrationEnvPath(path), &sync.Mutex{})
 	mu := value.(*sync.Mutex)
 	mu.Lock()
 	return mu.Unlock
 }
 
-// syncRegistrationEnvDir flushes dir's entries, so a rename or remove inside
-// it is durable. It is best effort: platforms that cannot sync a directory,
-// such as Windows, skip it.
+// canonicalRegistrationEnvPath names one env file however it is reached: the
+// absolute path with its longest existing ancestor directory resolved through
+// symlinks (for example /tmp/x.env and /private/tmp/x.env on macOS). Resolving
+// the nearest existing ancestor, not only the parent, keeps the name stable
+// when the parent directory is created later.
+func canonicalRegistrationEnvPath(path string) string {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		absolute = filepath.Clean(path)
+	}
+	dir, rest := filepath.Dir(absolute), filepath.Base(absolute)
+	for {
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(resolved, rest)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return absolute
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
+		dir = parent
+	}
+}
+
+// syncRegistrationEnvDir flushes dir's entries, so a rename inside it is
+// durable. It is best effort and ignores every error, as completed saves
+// always have; the pending-record journal uses syncPendingRegistrationDir.
 func syncRegistrationEnvDir(dir string) {
 	if directory, err := os.Open(dir); err == nil {
 		_ = directory.Sync()
@@ -168,7 +188,7 @@ func writeManagedRegistrationEnv(path string, values map[string]string, keys []s
 	if err != nil {
 		return err
 	}
-	_, err = replaceRegistrationEnvFile(path, content, nil)
+	_, err = replaceRegistrationEnvFile(path, content, nil, nil)
 	return err
 }
 
@@ -212,8 +232,9 @@ func renderManagedRegistrationEnv(existing []byte, values map[string]string, key
 
 // replaceRegistrationEnvFile atomically replaces path with content in mode
 // 0600 and reports whether it did. When beforeRename returns false, path is
-// left untouched.
-func replaceRegistrationEnvFile(path, content string, beforeRename func() bool) (bool, error) {
+// left untouched. After the rename the directory is synced with syncDir, whose
+// error is returned, or best effort when syncDir is nil.
+func replaceRegistrationEnvFile(path, content string, beforeRename func() bool, syncDir func(string) error) (bool, error) {
 	dir := filepath.Dir(path)
 	if dir == "" {
 		dir = "."
@@ -251,8 +272,11 @@ func replaceRegistrationEnvFile(path, content string, beforeRename func() bool) 
 	if err = os.Chmod(path, 0o600); err != nil {
 		return false, err
 	}
-	syncRegistrationEnvDir(dir)
 	removeTemporary = false
+	if syncDir != nil {
+		return true, syncDir(dir)
+	}
+	syncRegistrationEnvDir(dir)
 	return true, nil
 }
 

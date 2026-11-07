@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -96,6 +97,46 @@ func endpointAuthFingerprint(header string) string {
 // just before the rename or remove. It lives outside the store so the exported
 // struct stays comparable.
 var pendingTestHooks sync.Map
+
+// pendingDirSyncTestHooks maps an *EnvRegistrationStore to a test stand-in for
+// the directory sync that makes its pending-record changes durable.
+var pendingDirSyncTestHooks sync.Map
+
+// registrationLocks holds one lock per canonical env file path. It serializes
+// a whole first registration in this process: loading the stored registration
+// and the record, choosing, minting, writing the record, redeeming, and saving
+// or cleaning up. A second start for the same file waits, then reuses the
+// completed registration or replays the matching record. It is taken before
+// any store or path mutation lock and is the only lock held across network
+// calls. Processes are not coordinated, as before.
+var registrationLocks sync.Map
+
+// lockFirstRegistration takes the registration lock of req's store, which it
+// defaults as EnsureAgent always has, and returns an idempotent unlock. Stores
+// other than *EnvRegistrationStore itself are not locked, as before. Waiting
+// ends early when ctx is done.
+func lockFirstRegistration(ctx context.Context, req *EnsureAgentRequest) (func(), error) {
+	if req.Store == nil {
+		req.Store = NewEnvRegistrationStore(DefaultRegistrationEnvPath)
+	}
+	store := pendingRegistrationJournalFor(req.Store)
+	if store == nil {
+		return func() {}, nil
+	}
+	value, _ := registrationLocks.LoadOrStore(canonicalRegistrationEnvPath(store.Path), make(chan struct{}, 1))
+	lock := value.(chan struct{})
+	var done <-chan struct{}
+	if ctx != nil {
+		done = ctx.Done()
+	}
+	select {
+	case lock <- struct{}{}:
+	case <-done:
+		return nil, ctx.Err()
+	}
+	var once sync.Once
+	return func() { once.Do(func() { <-lock }) }, nil
+}
 
 func runPendingTestHook(s *EnvRegistrationStore, stage string) {
 	if hook, ok := pendingTestHooks.Load(s); ok {
@@ -235,7 +276,7 @@ func (s *EnvRegistrationStore) savePendingAgentRegistration(record *pendingAgent
 			}
 			runPendingTestHook(s, "write.rename")
 			return true
-		})
+		}, s.syncPendingRegistrationDir)
 		if err != nil || replaced {
 			return err
 		}
@@ -313,10 +354,28 @@ func (s *EnvRegistrationStore) clearPendingAgentRegistration(agentToken string) 
 		if err := os.Remove(s.Path); err != nil {
 			return err
 		}
-		syncRegistrationEnvDir(filepath.Dir(s.Path))
+		return s.syncPendingRegistrationDir(filepath.Dir(s.Path))
+	}
+	_, err = replaceRegistrationEnvFile(s.Path, content, unchanged, s.syncPendingRegistrationDir)
+	return err
+}
+
+// syncPendingRegistrationDir makes a pending-record change durable before the
+// token is redeemed. Unlike completed saves it reports a genuine I/O error, so
+// the start fails as it would for a failed record write; a directory that
+// cannot be synced (EINVAL, ENOTSUP, EOPNOTSUPP, or Windows) is skipped.
+func (s *EnvRegistrationStore) syncPendingRegistrationDir(dir string) error {
+	if hook, ok := pendingDirSyncTestHooks.Load(s); ok {
+		return ignoreUnsupportedDirSync(hook.(func(string) error)(dir))
+	}
+	return syncRegistrationDirStrict(dir)
+}
+
+func ignoreUnsupportedDirSync(err error) error {
+	if err == nil || errors.Is(err, errors.ErrUnsupported) || errors.Is(err, syscall.EINVAL) ||
+		errors.Is(err, syscall.ENOTSUP) || errors.Is(err, syscall.EOPNOTSUPP) {
 		return nil
 	}
-	_, err = replaceRegistrationEnvFile(s.Path, content, unchanged)
 	return err
 }
 
