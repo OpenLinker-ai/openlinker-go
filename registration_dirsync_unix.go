@@ -9,11 +9,12 @@ import (
 )
 
 // syncRegistrationDirStrict syncs dir and reports a genuine failure; a
-// directory that cannot be synced is skipped.
+// directory that cannot be synced is skipped. A failure to open dir is marked
+// as a registrationDirOpenError.
 func syncRegistrationDirStrict(dir string) error {
 	directory, err := os.Open(dir)
 	if err != nil {
-		return ignoreUnsupportedDirSync(err)
+		return ignoreUnsupportedDirSync(&registrationDirOpenError{err: err})
 	}
 	defer directory.Close()
 	return ignoreUnsupportedDirSync(directory.Sync())

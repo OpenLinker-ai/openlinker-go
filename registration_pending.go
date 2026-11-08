@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -422,8 +423,16 @@ func (s *EnvRegistrationStore) syncRecordDir(string) error {
 // write and every replay syncs the whole chain again. Nothing extra is
 // persisted. The walk is lexical, like MkdirAll and registrationEnvDir, and
 // ends at a directory that cannot have been created that way (see
-// creatableRegistrationDirParent). Any sync or stat failure is reported, as for
-// the record's own directory, so nothing is redeemed on an unconfirmed path.
+// creatableRegistrationDirParent).
+//
+// The record's own directory is synced strictly, and so is the parent of every
+// directory this start created: makePendingRegistrationDir already synced
+// those before the record was written. An ancestor reached only by the walk
+// that this process may not open (a permission error, for example a 0311
+// directory) cannot be synced and so cannot be confirmed; the walk skips it
+// and stops there, because starts in such deployments succeeded before the
+// walk existed and must keep doing so. Every other open, sync or stat failure
+// is reported, so nothing is redeemed on an unconfirmed path.
 func (s *EnvRegistrationStore) syncRecordPath(string) error {
 	dir := registrationEnvDir(s.Path)
 	if err := s.syncPendingRegistrationDir(dir); err != nil {
@@ -435,10 +444,30 @@ func (s *EnvRegistrationStore) syncRecordPath(string) error {
 			return err
 		}
 		if err := s.syncPendingRegistrationDir(parent); err != nil {
+			if unopenableRegistrationDir(err) {
+				return nil
+			}
 			return err
 		}
 		dir = parent
 	}
+}
+
+// registrationDirOpenError marks a failure to open a directory for a sync, as
+// opposed to a failure of the sync itself. It reads and unwraps as the
+// underlying error, so callers see the same error as before.
+type registrationDirOpenError struct{ err error }
+
+func (e *registrationDirOpenError) Error() string { return e.err.Error() }
+
+func (e *registrationDirOpenError) Unwrap() error { return e.err }
+
+// unopenableRegistrationDir reports a permission error (EACCES or EPERM)
+// opening a directory for a sync. A permission error from the sync itself is
+// not one.
+func unopenableRegistrationDir(err error) bool {
+	var openErr *registrationDirOpenError
+	return errors.As(err, &openErr) && errors.Is(openErr.err, fs.ErrPermission)
 }
 
 // creatableRegistrationDirParent returns the directory whose sync makes dir's

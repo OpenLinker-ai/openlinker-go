@@ -19,6 +19,11 @@
   lexical and stops at `.`, `..`, a root, a symlink or the root of another file
   system. Sync errors still fail the start; only EINVAL, ENOTSUP and
   EOPNOTSUPP are skipped, and Windows still skips directory syncs.
+- The record's own directory and the parents of directories a start creates
+  are still synced strictly. An ancestor reached only by the upward walk that
+  cannot be opened because of a permission error (EACCES or EPERM, for example
+  a 0311 directory) is skipped and ends the walk, so starts that worked before
+  do not fail. Its durability cannot be confirmed there.
 
 ## Runtime Worker admission and observability — Unreleased
 
