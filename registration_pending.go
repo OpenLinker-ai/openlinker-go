@@ -227,8 +227,9 @@ const pendingRegistrationWriteAttempts = 3
 // again from the fresh content, a bounded number of times. There is no
 // cross-process lock, so another process's write between the final re-read
 // and the rename can still be lost; that is the same pre-existing limitation
-// as concurrent registrations against one env file. The directory is synced
-// after the rename, so the record is durable before the token is redeemed.
+// as concurrent registrations against one env file. The record's directory and
+// its ancestors are synced after the rename (see syncRecordPath), so the record
+// is durable before the token is redeemed.
 func (s *EnvRegistrationStore) savePendingAgentRegistration(record *pendingAgentRegistration) error {
 	if s == nil || record == nil {
 		return nil
@@ -274,7 +275,7 @@ func (s *EnvRegistrationStore) savePendingAgentRegistration(record *pendingAgent
 			}
 			runPendingTestHook(s, "write.rename")
 			return true
-		}, s.syncRecordDir)
+		}, s.syncRecordPath)
 		if err != nil || replaced {
 			return err
 		}
@@ -361,7 +362,9 @@ func (s *EnvRegistrationStore) clearPendingAgentRegistration(agentToken string) 
 // makePendingRegistrationDir creates dir as MkdirAll does and then syncs the
 // parent of every directory it created, top down, so the record's path is
 // durable before the token is redeemed. It runs before the record is written,
-// so a failed sync leaves no record behind.
+// so a failed sync leaves no record behind. A later start finds those
+// directories existing and creates nothing, so the record write does not rely
+// on this: syncRecordPath syncs the whole chain again on every write and replay.
 func (s *EnvRegistrationStore) makePendingRegistrationDir(dir string) error {
 	if dir == "." || dir == "" {
 		return nil
@@ -408,6 +411,55 @@ func registrationEnvDir(path string) string {
 // made durable.
 func (s *EnvRegistrationStore) syncRecordDir(string) error {
 	return s.syncPendingRegistrationDir(registrationEnvDir(s.Path))
+}
+
+// syncRecordPath makes the record durable before Core is asked to redeem it,
+// whatever directory a caller passes: it syncs the directory holding the
+// store's env file and then, walking up, the parent of every directory that
+// MkdirAll could have created on the way to it. An earlier start may have
+// created those directories and failed or stopped before syncing their
+// parents; a later start finds them existing and cannot tell, so every record
+// write and every replay syncs the whole chain again. Nothing extra is
+// persisted. The walk is lexical, like MkdirAll and registrationEnvDir, and
+// ends at a directory that cannot have been created that way (see
+// creatableRegistrationDirParent). Any sync or stat failure is reported, as for
+// the record's own directory, so nothing is redeemed on an unconfirmed path.
+func (s *EnvRegistrationStore) syncRecordPath(string) error {
+	dir := registrationEnvDir(s.Path)
+	if err := s.syncPendingRegistrationDir(dir); err != nil {
+		return err
+	}
+	for {
+		parent, ok, err := creatableRegistrationDirParent(dir)
+		if err != nil || !ok {
+			return err
+		}
+		if err := s.syncPendingRegistrationDir(parent); err != nil {
+			return err
+		}
+		dir = parent
+	}
+}
+
+// creatableRegistrationDirParent returns the directory whose sync makes dir's
+// own entry durable, or false when dir always existed and needs no sync:
+// ".", "..", a root or volume, and, where directories can be synced, a symlink
+// or other entry that is not a plain directory, or the root of another file
+// system (see registrationDirCreatable).
+func creatableRegistrationDirParent(dir string) (string, bool, error) {
+	_, name := filepath.Split(trimRegistrationPathSeparators(dir))
+	if name == "" || name == "." || name == ".." {
+		return "", false, nil
+	}
+	parent := registrationEnvDir(dir)
+	if parent == dir {
+		return "", false, nil
+	}
+	creatable, err := registrationDirCreatable(dir, parent)
+	if err != nil || !creatable {
+		return "", false, err
+	}
+	return parent, true, nil
 }
 
 // syncPendingRegistrationDir makes a pending-record change durable before the
@@ -478,9 +530,10 @@ func (c *Client) redeemNewAgentRegistration(
 		// replaces it.
 		if pendingRegistrationMatches(previous, apiBase, request, mintParameters) {
 			// An earlier start may have written this record and then failed
-			// to sync its directory, so confirm it is durable before Core is
-			// asked to redeem it.
-			if err := journal.syncRecordDir(""); err != nil {
+			// to sync its directory or one of the directories above it, so
+			// confirm the whole path is durable before Core is asked to
+			// redeem it.
+			if err := journal.syncRecordPath(""); err != nil {
 				return nil, err
 			}
 			replay := *previous

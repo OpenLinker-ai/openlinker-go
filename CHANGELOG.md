@@ -10,6 +10,15 @@
   endpoint credential (fingerprints only) match exactly; otherwise the previous
   flow runs. Custom stores, the public API and normal-path requests are
   unchanged. Recovery needs a Core that replays redeemed registrations.
+- Every write and every replay of the pending registration record now syncs
+  the record's directory and then the parent of each directory above it that
+  could have been created on the way, before the token is redeemed. Previously
+  only newly created directories were synced, so a start that created them and
+  failed to sync them left them unsynced for every later start, and a power
+  loss could drop the record after Core redeemed the token. The walk is
+  lexical and stops at `.`, `..`, a root, a symlink or the root of another file
+  system. Sync errors still fail the start; only EINVAL, ENOTSUP and
+  EOPNOTSUPP are skipped, and Windows still skips directory syncs.
 
 ## Runtime Worker admission and observability — Unreleased
 
