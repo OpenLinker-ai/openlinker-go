@@ -10,24 +10,27 @@
   endpoint credential (fingerprints only) match exactly; otherwise the previous
   flow runs. Custom stores, the public API and normal-path requests are
   unchanged. Recovery needs a Core that replays redeemed registrations.
-- Every write and every replay of the pending registration record now syncs
-  the record's directory and then every directory the configured path
-  traverses on the way to it, each distinct directory once, before the token
-  is redeemed. Previously only newly created directories were synced, so a
-  start that created them and failed to sync them left them unsynced for every
-  later start, and a power loss could drop the record after Core redeemed the
-  token. The walk follows the path as written: `.` is skipped and `name/..`
-  still traverses `name`, so for `base/a/b/../../.env` it syncs `base`,
-  `base/a` and `base/a/b`. It ends below the last component that always
-  existed: a root, the start of a relative path, a symlink or the root of
-  another file system. Sync errors still fail the start with the same OS error
-  as before; only EINVAL, ENOTSUP and EOPNOTSUPP are skipped, and Windows still
-  skips directory syncs.
+- Every directory `MkdirAll` can create along the configured env file path,
+  as written, is now durable before a pending registration is redeemed or
+  replayed. Previously only directories created by the current start were
+  synced, so a start that created them and then failed (a sync error, or
+  `MkdirAll` stopping at an existing symlink) left them unsynced for every
+  later start, and a power loss could make the record unreachable after Core
+  redeemed the token.
+- Every record write and every replay syncs the record's directory and then,
+  for each component of that directory's path as written, the directory that
+  holds the component's entry. Each distinct directory is synced once. `.` is
+  skipped and `name/..` still traverses `name`, so `base/a/b/../../link/.env`
+  syncs link's target, `base`, `base/a` and `base/a/b`. Symlinks do not end the
+  walk, and their targets are not followed beyond the written path. A
+  relative path ends at the working directory.
 - The record's own directory and the parents of directories a start creates
-  are still synced strictly. Another directory on the walk that cannot be
-  opened because of a permission error (EACCES or EPERM, for example
-  a 0311 directory) is skipped and ends the walk, so starts that worked before
-  do not fail. Its durability cannot be confirmed there.
+  are synced strictly. Any other directory on the walk that cannot be opened
+  because of a permission error (EACCES or EPERM, for example a 0311
+  directory) is skipped, so starts that worked before do not fail; its
+  durability cannot be confirmed there. Other errors still fail the start with
+  the same OS error as before; only EINVAL, ENOTSUP and EOPNOTSUPP are skipped,
+  and Windows still skips directory syncs.
 
 ## Runtime Worker admission and observability — Unreleased
 

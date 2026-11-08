@@ -415,32 +415,33 @@ func (s *EnvRegistrationStore) syncRecordDir(string) error {
 }
 
 // syncRecordPath makes the record durable before Core is asked to redeem it,
-// whatever directory a caller passes. It syncs the directory holding the
-// store's env file, then every directory the configured path traverses on the
-// way to it, from the deepest up, each distinct directory once: for every
-// component of the path, the directory that holds that component's entry. An
-// earlier start may have created some of those directories and failed or
-// stopped before syncing them; a later start finds them existing and cannot
-// tell, so every record write and every replay syncs them all again. Nothing
-// extra is persisted.
+// whatever directory a caller passes. The guarantee is that every directory
+// MkdirAll can create along the configured path, as written, is durable
+// before the token is redeemed or replayed. An earlier start may have created
+// some of them and then failed or stopped before syncing them (MkdirAll itself
+// can fail after creating directories, for example at an existing symlink); a
+// later start finds them existing and cannot tell, so every record write and
+// every replay syncs them all again. Nothing extra is persisted.
 //
-// The walk follows the path exactly as written, so "." is skipped and every
-// "name/.." still traverses name: for "base/a/b/../.." it syncs base (the
-// record's directory), base/a and base/a/b. It ends below the last component
-// that always existed, because nothing before it was created on the way: a
-// root, the start of a relative path, a symlink or other entry that is not a
-// plain directory, or the root of another file system (see
-// registrationEntryCreatable). A ".." right after such a component is not
-// synced either.
+// It syncs the directory holding the store's env file, then, for every
+// component of that directory's path as written, from the deepest up, the
+// directory that holds the component's entry: the path through the components
+// before it. "." is skipped; "name/.." traverses name, so name is synced too.
+// Each distinct directory (device and inode) is synced once. For
+// "base/a/b/../../link" that is link's target, base, base/a and base/a/b. No
+// component cuts the walk short, but symlink targets are not followed beyond
+// the written path: MkdirAll never creates a symlink's target or the
+// directories above it. A relative path ends at ".", which MkdirAll never
+// creates.
 //
 // The record's own directory is synced strictly, and so is the parent of every
 // directory this start created: makePendingRegistrationDir already synced
-// those before the record was written. Another directory that this process
+// those before the record was written. Any other directory that this process
 // may not open (a permission error, for example a 0311 directory) cannot be
-// synced and so cannot be confirmed; the walk skips it and stops there,
-// because starts in such deployments succeeded before the walk existed and
-// must keep doing so. Every other open, sync or stat failure is reported, as
-// the file system returned it, so nothing is redeemed on an unconfirmed path.
+// synced and so cannot be confirmed; it is skipped, because starts in such
+// deployments succeeded before the walk existed and must keep doing so. Every
+// other open, sync or stat failure is reported, as the file system returned
+// it, so nothing is redeemed on an unconfirmed path.
 func (s *EnvRegistrationStore) syncRecordPath(string) error {
 	dir := registrationEnvDir(s.Path)
 	if err := s.syncPendingRegistrationDir(dir); err != nil {
@@ -451,27 +452,9 @@ func (s *EnvRegistrationStore) syncRecordPath(string) error {
 		return err
 	}
 	synced := map[any]bool{recordDir: true}
-	prefixes, names := registrationPathPrefixes(dir)
-	// existed is the last component that always existed; 0 is the start.
-	existed := 0
-	for j := len(names); j >= 1; j-- {
-		if names[j-1] == ".." {
-			continue
-		}
-		creatable, err := registrationEntryCreatable(prefixes[j], prefixes[j-1])
-		if err != nil {
-			return err
-		}
-		if !creatable {
-			existed = j
-			break
-		}
-	}
-	for j := len(names); j > existed; j-- {
-		if names[j-1] == ".." && j-1 == existed {
-			continue
-		}
-		container := prefixes[j-1]
+	prefixes := registrationPathPrefixes(dir)
+	for j := len(prefixes) - 2; j >= 0; j-- {
+		container := prefixes[j]
 		identity, err := registrationDirIdentity(container)
 		if err != nil {
 			return err
@@ -480,21 +463,19 @@ func (s *EnvRegistrationStore) syncRecordPath(string) error {
 			continue
 		}
 		synced[identity] = true
-		if err := s.syncMarkedRegistrationDir(container); err != nil {
-			if unopenableRegistrationDir(err) {
-				return nil
-			}
+		if err := s.syncMarkedRegistrationDir(container); err != nil && !unopenableRegistrationDir(err) {
 			return unmarkRegistrationDirOpenError(err)
 		}
 	}
 	return nil
 }
 
-// registrationPathPrefixes splits dir into the components the file system
-// traverses, without empty and "." ones, which name the directory they are in.
-// names[j-1] is component j and prefixes[j] the path through it, spelled as
-// written; prefixes[0] is where the path starts: ".", a root or a volume.
-func registrationPathPrefixes(dir string) (prefixes, names []string) {
+// registrationPathPrefixes returns the paths through each component of dir
+// as written, without empty and "." components, which name the directory they
+// are in. prefixes[0] is where dir starts (".", a root or a volume), and
+// prefixes[j-1] holds the entry of component j, the last element of
+// prefixes[j].
+func registrationPathPrefixes(dir string) []string {
 	volume := filepath.VolumeName(dir)
 	rest := dir[len(volume):]
 	rooted := rest != "" && os.IsPathSeparator(rest[0])
@@ -505,7 +486,7 @@ func registrationPathPrefixes(dir string) (prefixes, names []string) {
 	if start == "" {
 		start = "."
 	}
-	prefixes = []string{start}
+	prefixes := []string{start}
 	current := start
 	for _, name := range strings.FieldsFunc(rest, func(r rune) bool { return r < 0x80 && os.IsPathSeparator(uint8(r)) }) {
 		if name == "." {
@@ -520,9 +501,8 @@ func registrationPathPrefixes(dir string) (prefixes, names []string) {
 			current += string(filepath.Separator) + name
 		}
 		prefixes = append(prefixes, current)
-		names = append(names, name)
 	}
-	return prefixes, names
+	return prefixes
 }
 
 // registrationDirOpenError marks a failure to open a directory for a sync, as

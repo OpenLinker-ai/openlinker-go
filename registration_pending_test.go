@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1126,12 +1127,14 @@ func TestPendingRecordDotSpellingsResyncTraversedDirectories(t *testing.T) {
 	}
 }
 
-func TestPendingRecordPathSyncStopsAtDirectoriesThatAlwaysExisted(t *testing.T) {
+func TestPendingRecordPathSyncsEveryContainerOnTheWrittenPath(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
+	// other holds symlink targets outside root's tree.
+	other := t.TempDir()
 	for _, dir := range []string{
-		filepath.Join(root, "a", "b"), filepath.Join(root, "c"), filepath.Join(root, "real", "sub"),
-		filepath.Join(root, "real", "inner"), filepath.Join(root, "real", "x"),
+		filepath.Join(root, "a", "b"), filepath.Join(root, "c"), filepath.Join(other, "real", "sub"),
+		filepath.Join(other, "real", "inner"), filepath.Join(other, "real", "x"),
 	} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
@@ -1149,69 +1152,88 @@ func TestPendingRecordPathSyncStopsAtDirectoriesThatAlwaysExisted(t *testing.T) 
 		if err := store.syncRecordPath(""); err != nil {
 			t.Fatalf("syncRecordPath(%s) = %v", path, err)
 		}
+		for i, dir := range synced {
+			for _, earlier := range synced[:i] {
+				if sameRegistrationTestDir(dir, earlier) {
+					t.Fatalf("%s: synced %s twice: %v", path, dir, synced)
+				}
+			}
+		}
 		return synced
 	}
+	hasPrefix := func(synced, want []string) bool {
+		return len(synced) >= len(want) && strings.Join(synced[:len(want)], "|") == strings.Join(want, "|")
+	}
 	separator := string(filepath.Separator)
+	top := filepath.VolumeName(root) + separator
 
-	// A plain chain is synced bottom up through root and, on the same file
-	// system, beyond it, each directory the parent of the one before.
+	// A plain path is synced bottom up to its root, each directory the
+	// parent of the one before.
 	synced := syncedFor(filepath.Join(root, "a", "b", ".env"))
-	want := []string{filepath.Join(root, "a", "b"), filepath.Join(root, "a"), root}
-	if len(synced) < len(want) || strings.Join(synced[:len(want)], "|") != strings.Join(want, "|") {
-		t.Fatalf("plain chain synced %v, want prefix %v", synced, want)
+	if want := []string{filepath.Join(root, "a", "b"), filepath.Join(root, "a"), root}; !hasPrefix(synced, want) {
+		t.Fatalf("plain path synced %v, want prefix %v", synced, want)
 	}
 	for i := 1; i < len(synced); i++ {
 		if synced[i] != registrationEnvDir(synced[i-1]) {
-			t.Fatalf("plain chain synced %v: %s is not the parent of %s", synced, synced[i], synced[i-1])
+			t.Fatalf("plain path synced %v: %s is not the parent of %s", synced, synced[i], synced[i-1])
 		}
+	}
+	if synced[len(synced)-1] != top {
+		t.Fatalf("plain path synced %v, want it to end at %s", synced, top)
 	}
 
 	// "." names the directory it is in; "name/.." still traverses name, so
 	// the directory holding ".." is synced as well as the one it leads to.
 	dot := root + separator + "a" + separator + "." + separator + "b"
-	synced = syncedFor(dot + separator + ".env")
-	if want := []string{dot, filepath.Join(root, "a"), root}; len(synced) < len(want) ||
-		strings.Join(synced[:len(want)], "|") != strings.Join(want, "|") {
-		t.Fatalf("dot chain synced %v, want prefix %v", synced, want)
+	if synced := syncedFor(dot + separator + ".env"); !hasPrefix(synced, []string{dot, filepath.Join(root, "a"), root}) {
+		t.Fatalf("dot path synced %v", synced)
 	}
 	dotdot := root + separator + "a" + separator + ".." + separator + "c"
-	synced = syncedFor(dotdot + separator + ".env")
-	if want := []string{dotdot, root + separator + "a" + separator + "..", filepath.Join(root, "a")}; len(synced) < len(want) ||
-		strings.Join(synced[:len(want)], "|") != strings.Join(want, "|") {
-		t.Fatalf("dot-dot chain synced %v, want prefix %v", synced, want)
-	}
-	for i, dir := range synced {
-		for _, earlier := range synced[:i] {
-			if sameRegistrationTestDir(dir, earlier) {
-				t.Fatalf("dot-dot chain synced %s twice: %v", dir, synced)
-			}
-		}
+	if synced := syncedFor(dotdot + separator + ".env"); !hasPrefix(synced, []string{dotdot, root + separator + "a" + separator + "..", filepath.Join(root, "a")}) {
+		t.Fatalf("dot-dot path synced %v", synced)
 	}
 
-	// A symlink always existed: the directory holding it is synced through
-	// it, nothing above it.
 	if runtime.GOOS != "windows" {
+		// A symlink does not cut the walk short: the directories holding it
+		// and everything before it on the written path are synced, but not
+		// the directories above its target.
 		link := filepath.Join(root, "link")
-		if err := os.Symlink(filepath.Join(root, "real"), link); err != nil {
+		if err := os.Symlink(filepath.Join(other, "real"), link); err != nil {
 			t.Fatalf("symlink: %v", err)
 		}
-		if synced := syncedFor(filepath.Join(link, "sub", ".env")); strings.Join(synced, "|") != filepath.Join(link, "sub")+"|"+link {
-			t.Fatalf("symlink chain synced %v", synced)
+		synced := syncedFor(filepath.Join(link, "sub", ".env"))
+		if !hasPrefix(synced, []string{filepath.Join(link, "sub"), link, root}) || synced[len(synced)-1] != top {
+			t.Fatalf("symlink path synced %v", synced)
 		}
-		// ".." after a symlink is the parent of its target, another tree: its
-		// directory is synced and nothing above it.
+		for _, dir := range synced {
+			if sameRegistrationTestDir(dir, other) {
+				t.Fatalf("symlink path chased its target to %s: %v", other, synced)
+			}
+		}
+		// "base/a/b/../../link": link's target, then base, base/a and
+		// base/a/b, which resolving the written path traverses.
+		nested := root + separator + strings.Join([]string{"a", "b", "..", "..", "link"}, separator)
+		want := []string{
+			nested,
+			root + separator + strings.Join([]string{"a", "b", "..", ".."}, separator),
+			root + separator + strings.Join([]string{"a", "b", ".."}, separator),
+			filepath.Join(root, "a", "b"),
+		}
+		if synced := syncedFor(nested + separator + ".env"); !hasPrefix(synced, want) {
+			t.Fatalf("nested dot-dot before a symlink synced %v, want prefix %v", synced, want)
+		}
+		// ".." after a symlink traverses the link's target, so the target
+		// holding ".." is synced as well, and so is the directory holding
+		// the link.
 		innerLink := filepath.Join(root, "inner-link")
-		if err := os.Symlink(filepath.Join(root, "real", "inner"), innerLink); err != nil {
+		if err := os.Symlink(filepath.Join(other, "real", "inner"), innerLink); err != nil {
 			t.Fatalf("symlink: %v", err)
 		}
 		afterLink := innerLink + separator + ".." + separator + "x"
-		if synced := syncedFor(afterLink + separator + ".env"); strings.Join(synced, "|") != afterLink+"|"+innerLink+separator+".." {
+		if synced := syncedFor(afterLink + separator + ".env"); !hasPrefix(synced, []string{afterLink, innerLink + separator + "..", innerLink, root}) {
 			t.Fatalf("dot-dot after a symlink synced %v", synced)
 		}
-		// A directory that cannot be inspected is an error, never a stop.
-		if _, err := registrationEntryCreatable(filepath.Join(root, "missing"), root); !os.IsNotExist(err) {
-			t.Fatalf("missing directory err=%v", err)
-		}
+		// A directory that cannot be inspected is an error.
 		if _, err := registrationDirIdentity(filepath.Join(root, "missing")); !os.IsNotExist(err) {
 			t.Fatalf("missing directory identity err=%v", err)
 		}
@@ -1225,11 +1247,94 @@ func TestPendingRecordPathSyncStopsAtDirectoriesThatAlwaysExisted(t *testing.T) 
 			"/..":      {"/", "/.."},
 			"/a/b/../": {"/", "/a", "/a/b", "/a/b/.."},
 		} {
-			prefixes, names := registrationPathPrefixes(spelled)
-			if strings.Join(prefixes, "|") != strings.Join(want, "|") || len(names) != len(prefixes)-1 {
-				t.Fatalf("registrationPathPrefixes(%q) = %q, %q; want prefixes %q", spelled, prefixes, names, want)
+			if prefixes := registrationPathPrefixes(spelled); strings.Join(prefixes, "|") != strings.Join(want, "|") {
+				t.Fatalf("registrationPathPrefixes(%q) = %q, want %q", spelled, prefixes, want)
 			}
 		}
+	}
+}
+
+func TestPendingRecordSymlinkAfterDotDotSyncsTraversedDirectories(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a symlink and directory syncs")
+	}
+	for _, scenario := range []string{"write", "replay"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
+			core := newReplayRegistrationCore(t)
+			var log syncEventLog
+			core.beforeRegister = func(string) { log.add("register") }
+			base := filepath.Join(t.TempDir(), "base")
+			target := filepath.Join(t.TempDir(), "target")
+			for _, dir := range []string{base, target} {
+				if err := os.Mkdir(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Symlink(target, filepath.Join(base, "link")); err != nil {
+				t.Fatalf("symlink: %v", err)
+			}
+			separator := string(filepath.Separator)
+			spell := func(names ...string) string { return base + separator + strings.Join(names, separator) }
+			a, b := filepath.Join(base, "a"), filepath.Join(base, "a", "b")
+			path := spell("a", "b", "..", "..", "link", ".env")
+
+			// MkdirAll creates a and b and then fails at the existing
+			// symlink, so this start syncs nothing and leaves both behind.
+			if _, err := ensureWithSyncLog(t, core, &log, path, ""); !errors.Is(err, fs.ErrExist) {
+				t.Fatalf("first start err = %v", err)
+			}
+			if events := log.take(); len(events) != 0 {
+				t.Fatalf("first start events = %v", events)
+			}
+			if _, err := os.Stat(b); err != nil {
+				t.Fatalf("directories MkdirAll created are gone: %v", err)
+			}
+			wantToken := "ol_agent_minted_2"
+			if scenario == "replay" {
+				// The record is written, but syncing a, which holds b, fails
+				// before the redeem request.
+				if _, err := ensureWithSyncLog(t, core, &log, path, a); !errors.Is(err, syscall.EIO) {
+					t.Fatalf("failed write err = %v", err)
+				}
+				synced, sent := syncedBeforeRegister(log.take())
+				if want := spell("a", "b", "..", "..", "link") + "|" + spell("a", "b", "..", "..") + "|" + spell("a", "b", ".."); sent ||
+					strings.Join(synced, "|") != want {
+					t.Fatalf("failed write sent=%t synced=%v, want %s", sent, synced, want)
+				}
+				if record, err := NewEnvRegistrationStore(path).loadPendingAgentRegistration(); err != nil || record == nil {
+					t.Fatalf("record after the failed write = %#v err=%v", record, err)
+				}
+			}
+
+			// The write (or the replay of the record) syncs link's target,
+			// base, a and b before the redeem request.
+			registration, err := ensureWithSyncLog(t, core, &log, path, "")
+			if err != nil || registration.AgentToken != wantToken {
+				t.Fatalf("registration = %#v err=%v", registration, err)
+			}
+			synced, sent := syncedBeforeRegister(log.take())
+			want := []string{spell("a", "b", "..", "..", "link"), spell("a", "b", "..", ".."), spell("a", "b", ".."), b}
+			if !sent || len(synced) < len(want) || strings.Join(synced[:len(want)], "|") != strings.Join(want, "|") {
+				t.Fatalf("synced before register = %v (sent %t), want prefix %v", synced, sent, want)
+			}
+			for _, dir := range []string{a, b} {
+				found := false
+				for _, each := range synced {
+					found = found || sameRegistrationTestDir(each, dir)
+				}
+				if !found {
+					t.Fatalf("%s was not synced before register: %v", dir, synced)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(target, ".env")); err != nil {
+				t.Fatalf("registration not saved in link's target: %v", err)
+			}
+			if created, tokens := core.calls(); created != 2 || strings.Join(tokens, ",") != wantToken {
+				t.Fatalf("create-token=%d register=%v", created, tokens)
+			}
+		})
 	}
 }
 
