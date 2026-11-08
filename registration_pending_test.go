@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -848,6 +849,561 @@ func TestPendingRecordSyncsParentsOfCreatedDirectories(t *testing.T) {
 			if err != nil || registration.AgentToken != "ol_agent_minted_1" ||
 				len(synced) < len(want) || strings.Join(synced[:len(want)], "|") != strings.Join(want, "|") {
 				t.Fatalf("registration=%#v err=%v synced=%v", registration, err, synced)
+			}
+		})
+	}
+}
+
+// syncEventLog records directory syncs and register requests in the order
+// they happen; the server and the client append from different goroutines.
+type syncEventLog struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func (l *syncEventLog) add(event string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.events = append(l.events, event)
+}
+
+func (l *syncEventLog) take() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	events := l.events
+	l.events = nil
+	return events
+}
+
+// syncedBeforeRegister returns the directories synced before the first
+// register request and whether one was sent.
+func syncedBeforeRegister(events []string) ([]string, bool) {
+	var synced []string
+	for _, event := range events {
+		if event == "register" {
+			return synced, true
+		}
+		synced = append(synced, strings.TrimPrefix(event, "sync "))
+	}
+	return synced, false
+}
+
+// ensureWithSyncLog runs one start against path with a fresh store whose
+// directory syncs are logged and fail with EIO for fail, however it is spelled.
+func ensureWithSyncLog(t *testing.T, core *replayRegistrationCore, log *syncEventLog, path, fail string) (*AgentRegistration, error) {
+	t.Helper()
+	store := NewEnvRegistrationStore(path)
+	pendingDirSyncTestHooks.Store(store, func(dir string) error {
+		log.add("sync " + dir)
+		if fail != "" && sameRegistrationTestDir(dir, fail) {
+			return syscall.EIO
+		}
+		return nil
+	})
+	defer pendingDirSyncTestHooks.Delete(store)
+	return EnsureAgent(context.Background(), AgentSpec{Slug: "demo-agent", Name: "Demo Agent"},
+		WithRegistrationAPIBase(core.server.URL), WithRegistrationUserToken("ol_user_creator"), WithRegistrationStore(store))
+}
+
+// sameRegistrationTestDir reports whether two spellings name one existing
+// directory.
+func sameRegistrationTestDir(left, right string) bool {
+	if left == right {
+		return true
+	}
+	leftInfo, leftErr := os.Stat(left)
+	rightInfo, rightErr := os.Stat(right)
+	return leftErr == nil && rightErr == nil && os.SameFile(leftInfo, rightInfo)
+}
+
+func TestPendingRecordResyncsDirectoriesLeftBySyncFailure(t *testing.T) {
+	t.Parallel()
+	core := newReplayRegistrationCore(t)
+	var log syncEventLog
+	core.beforeRegister = func(string) { log.add("register") }
+	root := t.TempDir()
+	a := filepath.Join(root, "a")
+	b := filepath.Join(a, "b")
+	path := filepath.Join(b, ".env")
+
+	// The first start creates a and b, syncs root for a and then fails to
+	// sync a for b: nothing is written or redeemed, but both directories stay.
+	if _, err := ensureWithSyncLog(t, core, &log, path, a); !errors.Is(err, syscall.EIO) {
+		t.Fatalf("first start err = %v", err)
+	}
+	if events := log.take(); strings.Join(events, "|") != "sync "+root+"|sync "+a {
+		t.Fatalf("first start events = %v", events)
+	}
+	if _, err := os.Stat(b); err != nil {
+		t.Fatalf("created directory is gone: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("record written after a failed parent sync: %v", err)
+	}
+
+	// The next start creates nothing, yet syncs the record's directory, a and
+	// root again before the redeem request is sent.
+	registration, err := ensureWithSyncLog(t, core, &log, path, "")
+	if err != nil || registration.AgentToken != "ol_agent_minted_2" {
+		t.Fatalf("second start registration = %#v err=%v", registration, err)
+	}
+	synced, sent := syncedBeforeRegister(log.take())
+	want := []string{b, a, root}
+	if !sent || len(synced) < len(want) || strings.Join(synced[:len(want)], "|") != strings.Join(want, "|") {
+		t.Fatalf("synced before register = %v (sent %t), want prefix %v", synced, sent, want)
+	}
+}
+
+func TestPendingRecordReplayResyncsAncestors(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		// The first start either fails to sync the directory above the
+		// record's or loses Core's response after Core committed.
+		failSync     bool
+		dropResponse bool
+	}{
+		{name: "ancestor sync failed after the record was written", failSync: true},
+		{name: "response lost after Core committed", dropResponse: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			core := newReplayRegistrationCore(t)
+			var log syncEventLog
+			core.beforeRegister = func(string) { log.add("register") }
+			if tc.dropResponse {
+				core.dropAfterCommit = 1
+			}
+			root := t.TempDir()
+			a := filepath.Join(root, "a")
+			b := filepath.Join(a, "b")
+			path := filepath.Join(b, ".env")
+			// a and b already exist, as an earlier start that created them and
+			// failed to sync them leaves them: no start creates them again.
+			if err := os.MkdirAll(b, 0o700); err != nil {
+				t.Fatal(err)
+			}
+
+			fail := ""
+			if tc.failSync {
+				fail = a
+			}
+			_, err := ensureWithSyncLog(t, core, &log, path, fail)
+			synced, sent := syncedBeforeRegister(log.take())
+			switch {
+			case tc.failSync && (!errors.Is(err, syscall.EIO) || sent || strings.Join(synced, "|") != b+"|"+a):
+				// The record is written and its directory synced, but a failed
+				// ancestor sync stops the start before the redeem request.
+				t.Fatalf("first start err=%v sent=%t synced=%v", err, sent, synced)
+			case tc.dropResponse && (err == nil || !sent):
+				t.Fatalf("first start err=%v sent=%t", err, sent)
+			}
+			if record, loadErr := NewEnvRegistrationStore(path).loadPendingAgentRegistration(); loadErr != nil || record == nil {
+				t.Fatalf("record after first start = %#v err=%v", record, loadErr)
+			}
+
+			// The replay syncs the record's directory, a and root before it
+			// sends the recorded token again.
+			registration, err := ensureWithSyncLog(t, core, &log, path, "")
+			if err != nil || registration.AgentToken != "ol_agent_minted_1" {
+				t.Fatalf("replay registration = %#v err=%v", registration, err)
+			}
+			synced, sent = syncedBeforeRegister(log.take())
+			want := []string{b, a, root}
+			if !sent || len(synced) < len(want) || strings.Join(synced[:len(want)], "|") != strings.Join(want, "|") {
+				t.Fatalf("synced before replay = %v (sent %t), want prefix %v", synced, sent, want)
+			}
+			if created, tokens := core.calls(); created != 1 || tokens[len(tokens)-1] != "ol_agent_minted_1" {
+				t.Fatalf("create-token=%d register=%v", created, tokens)
+			}
+		})
+	}
+}
+
+func TestPendingRecordDotSpellingsResyncTraversedDirectories(t *testing.T) {
+	t.Parallel()
+	// Paths are relative to base and use "/"; "" is base itself.
+	for _, tc := range []struct {
+		name string
+		// dir spells the record's directory and record is where the record
+		// really is.
+		dir, record string
+		// fail is the directory whose sync fails at the first start: one
+		// that holds an entry the path traverses.
+		fail string
+		// left exists before a replay's first start, as an earlier start
+		// that created it and failed to sync leaves it.
+		left string
+		// firstRetry and firstReplay are the syncs of the failed first
+		// start; walk is how the second start's syncs begin.
+		firstRetry, firstReplay, walk []string
+	}{
+		{
+			name: "dot", dir: "new/.", record: "new/.env", fail: "", left: "new",
+			firstRetry: []string{""}, firstReplay: []string{"new/.", ""}, walk: []string{"new/.", ""},
+		},
+		{
+			name: "dot-dot", dir: "new/sub/..", record: "new/.env", fail: "", left: "new/sub",
+			firstRetry:  []string{""},
+			firstReplay: []string{"new/sub/..", "new/sub", ""},
+			walk:        []string{"new/sub/..", "new/sub", ""},
+		},
+		{
+			// base/a/b/../.. is base, but resolving it still needs a in base
+			// and b in a, so a and b are synced as well.
+			name: "nested dot-dot", dir: "a/b/../..", record: ".env", fail: "a", left: "a/b",
+			firstRetry:  []string{"", "a"},
+			firstReplay: []string{"a/b/../..", "a/b/.."},
+			walk:        []string{"a/b/../..", "a/b/..", "a/b"},
+		},
+	} {
+		for _, scenario := range []string{"retry", "replay"} {
+			t.Run(tc.name+"/"+scenario, func(t *testing.T) {
+				t.Parallel()
+				core := newReplayRegistrationCore(t)
+				var log syncEventLog
+				core.beforeRegister = func(string) { log.add("register") }
+				base := filepath.Join(t.TempDir(), "base")
+				if err := os.Mkdir(base, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				under := func(relative string) string {
+					if relative == "" {
+						return base
+					}
+					return base + string(filepath.Separator) + filepath.FromSlash(relative)
+				}
+				spelled := func(relatives []string) string {
+					var dirs []string
+					for _, relative := range relatives {
+						dirs = append(dirs, under(relative))
+					}
+					return strings.Join(dirs, "|")
+				}
+				path := under(tc.dir) + string(filepath.Separator) + ".env"
+				// retry: the first start creates the directories itself and
+				// fails to sync one before writing the record. replay: they
+				// already exist, so the record is written and the walk fails.
+				wantFirst, wantToken, wantMinted := tc.firstRetry, "ol_agent_minted_2", 2
+				if scenario == "replay" {
+					if err := os.MkdirAll(under(tc.left), 0o700); err != nil {
+						t.Fatal(err)
+					}
+					wantFirst, wantToken, wantMinted = tc.firstReplay, "ol_agent_minted_1", 1
+				}
+
+				_, err := ensureWithSyncLog(t, core, &log, path, under(tc.fail))
+				synced, sent := syncedBeforeRegister(log.take())
+				if !errors.Is(err, syscall.EIO) || sent || strings.Join(synced, "|") != spelled(wantFirst) {
+					t.Fatalf("first start err=%v sent=%t synced=%v, want %s", err, sent, synced, spelled(wantFirst))
+				}
+				_, statErr := os.Stat(under(tc.record))
+				if (scenario == "retry") != os.IsNotExist(statErr) {
+					t.Fatalf("%s: record after the first start: %v", scenario, statErr)
+				}
+
+				// The next start syncs every traversed directory again,
+				// including the one that failed, before the redeem request.
+				registration, err := ensureWithSyncLog(t, core, &log, path, "")
+				if err != nil || registration.AgentToken != wantToken {
+					t.Fatalf("second start registration=%#v err=%v", registration, err)
+				}
+				synced, sent = syncedBeforeRegister(log.take())
+				if !sent || len(synced) < len(tc.walk) || strings.Join(synced[:len(tc.walk)], "|") != spelled(tc.walk) {
+					t.Fatalf("synced before register = %v (sent %t), want prefix %s", synced, sent, spelled(tc.walk))
+				}
+				failed := false
+				for _, dir := range synced {
+					failed = failed || sameRegistrationTestDir(dir, under(tc.fail))
+				}
+				if !failed {
+					t.Fatalf("%s was not synced again before register: %v", under(tc.fail), synced)
+				}
+				if created, tokens := core.calls(); created != wantMinted || strings.Join(tokens, ",") != wantToken {
+					t.Fatalf("create-token=%d register=%v", created, tokens)
+				}
+			})
+		}
+	}
+}
+
+func TestPendingRecordPathSyncsEveryContainerOnTheWrittenPath(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	// other holds symlink targets outside root's tree.
+	other := t.TempDir()
+	for _, dir := range []string{
+		filepath.Join(root, "a", "b"), filepath.Join(root, "c"), filepath.Join(other, "real", "sub"),
+		filepath.Join(other, "real", "inner"), filepath.Join(other, "real", "x"),
+	} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	syncedFor := func(path string) []string {
+		t.Helper()
+		store := NewEnvRegistrationStore(path)
+		var synced []string
+		pendingDirSyncTestHooks.Store(store, func(dir string) error {
+			synced = append(synced, dir)
+			return nil
+		})
+		defer pendingDirSyncTestHooks.Delete(store)
+		if err := store.syncRecordPath(""); err != nil {
+			t.Fatalf("syncRecordPath(%s) = %v", path, err)
+		}
+		for i, dir := range synced {
+			for _, earlier := range synced[:i] {
+				if sameRegistrationTestDir(dir, earlier) {
+					t.Fatalf("%s: synced %s twice: %v", path, dir, synced)
+				}
+			}
+		}
+		return synced
+	}
+	hasPrefix := func(synced, want []string) bool {
+		return len(synced) >= len(want) && strings.Join(synced[:len(want)], "|") == strings.Join(want, "|")
+	}
+	separator := string(filepath.Separator)
+	top := filepath.VolumeName(root) + separator
+
+	// A plain path is synced bottom up to its root, each directory the
+	// parent of the one before.
+	synced := syncedFor(filepath.Join(root, "a", "b", ".env"))
+	if want := []string{filepath.Join(root, "a", "b"), filepath.Join(root, "a"), root}; !hasPrefix(synced, want) {
+		t.Fatalf("plain path synced %v, want prefix %v", synced, want)
+	}
+	for i := 1; i < len(synced); i++ {
+		if synced[i] != registrationEnvDir(synced[i-1]) {
+			t.Fatalf("plain path synced %v: %s is not the parent of %s", synced, synced[i], synced[i-1])
+		}
+	}
+	if synced[len(synced)-1] != top {
+		t.Fatalf("plain path synced %v, want it to end at %s", synced, top)
+	}
+
+	// "." names the directory it is in; "name/.." still traverses name, so
+	// the directory holding ".." is synced as well as the one it leads to.
+	dot := root + separator + "a" + separator + "." + separator + "b"
+	if synced := syncedFor(dot + separator + ".env"); !hasPrefix(synced, []string{dot, filepath.Join(root, "a"), root}) {
+		t.Fatalf("dot path synced %v", synced)
+	}
+	dotdot := root + separator + "a" + separator + ".." + separator + "c"
+	if synced := syncedFor(dotdot + separator + ".env"); !hasPrefix(synced, []string{dotdot, root + separator + "a" + separator + "..", filepath.Join(root, "a")}) {
+		t.Fatalf("dot-dot path synced %v", synced)
+	}
+
+	if runtime.GOOS != "windows" {
+		// A symlink does not cut the walk short: the directories holding it
+		// and everything before it on the written path are synced, but not
+		// the directories above its target.
+		link := filepath.Join(root, "link")
+		if err := os.Symlink(filepath.Join(other, "real"), link); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+		synced := syncedFor(filepath.Join(link, "sub", ".env"))
+		if !hasPrefix(synced, []string{filepath.Join(link, "sub"), link, root}) || synced[len(synced)-1] != top {
+			t.Fatalf("symlink path synced %v", synced)
+		}
+		for _, dir := range synced {
+			if sameRegistrationTestDir(dir, other) {
+				t.Fatalf("symlink path chased its target to %s: %v", other, synced)
+			}
+		}
+		// "base/a/b/../../link": link's target, then base, base/a and
+		// base/a/b, which resolving the written path traverses.
+		nested := root + separator + strings.Join([]string{"a", "b", "..", "..", "link"}, separator)
+		want := []string{
+			nested,
+			root + separator + strings.Join([]string{"a", "b", "..", ".."}, separator),
+			root + separator + strings.Join([]string{"a", "b", ".."}, separator),
+			filepath.Join(root, "a", "b"),
+		}
+		if synced := syncedFor(nested + separator + ".env"); !hasPrefix(synced, want) {
+			t.Fatalf("nested dot-dot before a symlink synced %v, want prefix %v", synced, want)
+		}
+		// ".." after a symlink traverses the link's target, so the target
+		// holding ".." is synced as well, and so is the directory holding
+		// the link.
+		innerLink := filepath.Join(root, "inner-link")
+		if err := os.Symlink(filepath.Join(other, "real", "inner"), innerLink); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+		afterLink := innerLink + separator + ".." + separator + "x"
+		if synced := syncedFor(afterLink + separator + ".env"); !hasPrefix(synced, []string{afterLink, innerLink + separator + "..", innerLink, root}) {
+			t.Fatalf("dot-dot after a symlink synced %v", synced)
+		}
+		// A directory that cannot be inspected is an error.
+		if _, err := registrationDirIdentity(filepath.Join(root, "missing")); !os.IsNotExist(err) {
+			t.Fatalf("missing directory identity err=%v", err)
+		}
+		for spelled, want := range map[string][]string{
+			"/a/./b/":  {"/", "/a", "/a/b"},
+			"a//b/..":  {".", "a", "a/b", "a/b/.."},
+			"./a":      {".", "a"},
+			"../x":     {".", "..", "../x"},
+			".":        {"."},
+			"/":        {"/"},
+			"/..":      {"/", "/.."},
+			"/a/b/../": {"/", "/a", "/a/b", "/a/b/.."},
+		} {
+			if prefixes := registrationPathPrefixes(spelled); strings.Join(prefixes, "|") != strings.Join(want, "|") {
+				t.Fatalf("registrationPathPrefixes(%q) = %q, want %q", spelled, prefixes, want)
+			}
+		}
+	}
+}
+
+func TestPendingRecordWalkSkipsReadOnlyAncestors(t *testing.T) {
+	t.Parallel()
+	// ensure runs one start against path; syncing a directory in readOnly
+	// returns its error, as a read-only file system does, and every sync is
+	// recorded.
+	ensure := func(path string, readOnly map[string]error) (*AgentRegistration, []string, []string, error) {
+		t.Helper()
+		core := newReplayRegistrationCore(t)
+		store := NewEnvRegistrationStore(path)
+		var synced []string
+		pendingDirSyncTestHooks.Store(store, func(dir string) error {
+			synced = append(synced, dir)
+			for each, err := range readOnly {
+				if sameRegistrationTestDir(dir, each) {
+					return err
+				}
+			}
+			return nil
+		})
+		defer pendingDirSyncTestHooks.Delete(store)
+		registration, err := EnsureAgent(context.Background(), AgentSpec{Slug: "demo-agent", Name: "Demo Agent"},
+			WithRegistrationAPIBase(core.server.URL), WithRegistrationUserToken("ol_user_creator"), WithRegistrationStore(store))
+		_, tokens := core.calls()
+		return registration, synced, tokens, err
+	}
+	root := t.TempDir()
+	parent := registrationEnvDir(root)
+	app, own := filepath.Join(root, "app"), filepath.Join(root, "own")
+	for _, dir := range []string{app, own} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// EROFS from the sync and, marked as the open's failure, from the open.
+	openErr := &registrationDirOpenError{err: &fs.PathError{Op: "open", Path: parent, Err: syscall.EROFS}}
+
+	// Ancestors reached only by the walk on a read-only file system are
+	// skipped and the walk goes on above them: the start succeeds.
+	registration, synced, tokens, err := ensure(filepath.Join(app, ".env"), map[string]error{root: syscall.EROFS, parent: openErr})
+	if err != nil || registration.AgentToken != "ol_agent_minted_1" || len(tokens) != 1 || len(synced) < 4 ||
+		strings.Join(synced[:4], "|") != app+"|"+root+"|"+parent+"|"+registrationEnvDir(parent) {
+		t.Fatalf("read-only ancestors: registration=%#v err=%v register=%v synced=%v", registration, err, tokens, synced)
+	}
+
+	// The record's own directory stays strict, with the error as returned.
+	if _, synced, tokens, err := ensure(filepath.Join(own, ".env"), map[string]error{own: syscall.EROFS}); err != syscall.EROFS ||
+		len(tokens) != 0 || strings.Join(synced, "|") != own {
+		t.Fatalf("read-only record directory: err=%v register=%v synced=%v", err, tokens, synced)
+	}
+
+	// So does the parent of a directory this start creates: the start fails
+	// before the record is written.
+	created := filepath.Join(root, "created", ".env")
+	if _, synced, tokens, err := ensure(created, map[string]error{root: syscall.EROFS}); err != syscall.EROFS ||
+		len(tokens) != 0 || strings.Join(synced, "|") != root {
+		t.Fatalf("read-only parent of a created directory: err=%v register=%v synced=%v", err, tokens, synced)
+	}
+	if _, err := os.Stat(created); !os.IsNotExist(err) {
+		t.Fatalf("record written under an unsynced new directory: %v", err)
+	}
+
+	// Other errors from an ancestor stay strict.
+	if _, _, tokens, err := ensure(filepath.Join(app, "strict", ".env"), map[string]error{root: syscall.EIO}); !errors.Is(err, syscall.EIO) || len(tokens) != 0 {
+		t.Fatalf("I/O error from an ancestor: err=%v register=%v", err, tokens)
+	}
+	if !skippableRegistrationAncestorError(openErr) || !skippableRegistrationAncestorError(syscall.EROFS) ||
+		skippableRegistrationAncestorError(syscall.EIO) || skippableRegistrationAncestorError(syscall.EACCES) {
+		t.Fatal("skippable ancestor errors are wrong")
+	}
+}
+
+func TestPendingRecordSymlinkAfterDotDotSyncsTraversedDirectories(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("needs a symlink and directory syncs")
+	}
+	for _, scenario := range []string{"write", "replay"} {
+		t.Run(scenario, func(t *testing.T) {
+			t.Parallel()
+			core := newReplayRegistrationCore(t)
+			var log syncEventLog
+			core.beforeRegister = func(string) { log.add("register") }
+			base := filepath.Join(t.TempDir(), "base")
+			target := filepath.Join(t.TempDir(), "target")
+			for _, dir := range []string{base, target} {
+				if err := os.Mkdir(dir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Symlink(target, filepath.Join(base, "link")); err != nil {
+				t.Fatalf("symlink: %v", err)
+			}
+			separator := string(filepath.Separator)
+			spell := func(names ...string) string { return base + separator + strings.Join(names, separator) }
+			a, b := filepath.Join(base, "a"), filepath.Join(base, "a", "b")
+			path := spell("a", "b", "..", "..", "link", ".env")
+
+			// MkdirAll creates a and b and then fails at the existing
+			// symlink, so this start syncs nothing and leaves both behind.
+			if _, err := ensureWithSyncLog(t, core, &log, path, ""); !errors.Is(err, fs.ErrExist) {
+				t.Fatalf("first start err = %v", err)
+			}
+			if events := log.take(); len(events) != 0 {
+				t.Fatalf("first start events = %v", events)
+			}
+			if _, err := os.Stat(b); err != nil {
+				t.Fatalf("directories MkdirAll created are gone: %v", err)
+			}
+			wantToken := "ol_agent_minted_2"
+			if scenario == "replay" {
+				// The record is written, but syncing a, which holds b, fails
+				// before the redeem request.
+				if _, err := ensureWithSyncLog(t, core, &log, path, a); !errors.Is(err, syscall.EIO) {
+					t.Fatalf("failed write err = %v", err)
+				}
+				synced, sent := syncedBeforeRegister(log.take())
+				if want := spell("a", "b", "..", "..", "link") + "|" + spell("a", "b", "..", "..") + "|" + spell("a", "b", ".."); sent ||
+					strings.Join(synced, "|") != want {
+					t.Fatalf("failed write sent=%t synced=%v, want %s", sent, synced, want)
+				}
+				if record, err := NewEnvRegistrationStore(path).loadPendingAgentRegistration(); err != nil || record == nil {
+					t.Fatalf("record after the failed write = %#v err=%v", record, err)
+				}
+			}
+
+			// The write (or the replay of the record) syncs link's target,
+			// base, a and b before the redeem request.
+			registration, err := ensureWithSyncLog(t, core, &log, path, "")
+			if err != nil || registration.AgentToken != wantToken {
+				t.Fatalf("registration = %#v err=%v", registration, err)
+			}
+			synced, sent := syncedBeforeRegister(log.take())
+			want := []string{spell("a", "b", "..", "..", "link"), spell("a", "b", "..", ".."), spell("a", "b", ".."), b}
+			if !sent || len(synced) < len(want) || strings.Join(synced[:len(want)], "|") != strings.Join(want, "|") {
+				t.Fatalf("synced before register = %v (sent %t), want prefix %v", synced, sent, want)
+			}
+			for _, dir := range []string{a, b} {
+				found := false
+				for _, each := range synced {
+					found = found || sameRegistrationTestDir(each, dir)
+				}
+				if !found {
+					t.Fatalf("%s was not synced before register: %v", dir, synced)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(target, ".env")); err != nil {
+				t.Fatalf("registration not saved in link's target: %v", err)
+			}
+			if created, tokens := core.calls(); created != 2 || strings.Join(tokens, ",") != wantToken {
+				t.Fatalf("create-token=%d register=%v", created, tokens)
 			}
 		})
 	}

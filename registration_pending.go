@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -227,8 +228,9 @@ const pendingRegistrationWriteAttempts = 3
 // again from the fresh content, a bounded number of times. There is no
 // cross-process lock, so another process's write between the final re-read
 // and the rename can still be lost; that is the same pre-existing limitation
-// as concurrent registrations against one env file. The directory is synced
-// after the rename, so the record is durable before the token is redeemed.
+// as concurrent registrations against one env file. The record's directory and
+// its ancestors are synced after the rename (see syncRecordPath), so the record
+// is durable before the token is redeemed.
 func (s *EnvRegistrationStore) savePendingAgentRegistration(record *pendingAgentRegistration) error {
 	if s == nil || record == nil {
 		return nil
@@ -274,7 +276,7 @@ func (s *EnvRegistrationStore) savePendingAgentRegistration(record *pendingAgent
 			}
 			runPendingTestHook(s, "write.rename")
 			return true
-		}, s.syncRecordDir)
+		}, s.syncRecordPath)
 		if err != nil || replaced {
 			return err
 		}
@@ -361,7 +363,9 @@ func (s *EnvRegistrationStore) clearPendingAgentRegistration(agentToken string) 
 // makePendingRegistrationDir creates dir as MkdirAll does and then syncs the
 // parent of every directory it created, top down, so the record's path is
 // durable before the token is redeemed. It runs before the record is written,
-// so a failed sync leaves no record behind.
+// so a failed sync leaves no record behind. A later start finds those
+// directories existing and creates nothing, so the record write does not rely
+// on this: syncRecordPath syncs the whole chain again on every write and replay.
 func (s *EnvRegistrationStore) makePendingRegistrationDir(dir string) error {
 	if dir == "." || dir == "" {
 		return nil
@@ -410,11 +414,150 @@ func (s *EnvRegistrationStore) syncRecordDir(string) error {
 	return s.syncPendingRegistrationDir(registrationEnvDir(s.Path))
 }
 
+// syncRecordPath makes the record durable before Core is asked to redeem it,
+// whatever directory a caller passes. The guarantee is that every directory
+// MkdirAll can create along the configured path, as written, is durable
+// before the token is redeemed or replayed. An earlier start may have created
+// some of them and then failed or stopped before syncing them (MkdirAll itself
+// can fail after creating directories, for example at an existing symlink); a
+// later start finds them existing and cannot tell, so every record write and
+// every replay syncs them all again. Nothing extra is persisted.
+//
+// It syncs the directory holding the store's env file, then, for every
+// component of that directory's path as written, from the deepest up, the
+// directory that holds the component's entry: the path through the components
+// before it. "." is skipped; "name/.." traverses name, so name is synced too.
+// Each distinct directory (device and inode) is synced once. For
+// "base/a/b/../../link" that is link's target, base, base/a and base/a/b. No
+// component cuts the walk short, but symlink targets are not followed beyond
+// the written path: MkdirAll never creates a symlink's target or the
+// directories above it. A relative path ends at ".", which MkdirAll never
+// creates.
+//
+// The record's own directory is synced strictly, and so is the parent of every
+// directory this start created: makePendingRegistrationDir already synced
+// those before the record was written. Any other directory reached only by
+// the walk is skipped when it cannot be synced for one of two reasons, because
+// starts in such deployments succeeded before the walk existed and must keep
+// doing so:
+//
+//   - this process may not open it (a permission error, for example a 0311
+//     directory), so its durability cannot be confirmed;
+//   - it is on a read-only file system (EROFS from the open or the sync), as
+//     the root of a container with a writable volume is. Nothing can have
+//     been created there, so durability is unaffected.
+//
+// Every other open, sync or stat failure is reported, as the file system
+// returned it, so nothing is redeemed on an unconfirmed path.
+func (s *EnvRegistrationStore) syncRecordPath(string) error {
+	dir := registrationEnvDir(s.Path)
+	if err := s.syncPendingRegistrationDir(dir); err != nil {
+		return err
+	}
+	recordDir, err := registrationDirIdentity(dir)
+	if err != nil {
+		return err
+	}
+	synced := map[any]bool{recordDir: true}
+	prefixes := registrationPathPrefixes(dir)
+	for j := len(prefixes) - 2; j >= 0; j-- {
+		container := prefixes[j]
+		identity, err := registrationDirIdentity(container)
+		if err != nil {
+			return err
+		}
+		if synced[identity] {
+			continue
+		}
+		synced[identity] = true
+		if err := s.syncMarkedRegistrationDir(container); err != nil && !skippableRegistrationAncestorError(err) {
+			return unmarkRegistrationDirOpenError(err)
+		}
+	}
+	return nil
+}
+
+// registrationPathPrefixes returns the paths through each component of dir
+// as written, without empty and "." components, which name the directory they
+// are in. prefixes[0] is where dir starts (".", a root or a volume), and
+// prefixes[j-1] holds the entry of component j, the last element of
+// prefixes[j].
+func registrationPathPrefixes(dir string) []string {
+	volume := filepath.VolumeName(dir)
+	rest := dir[len(volume):]
+	rooted := rest != "" && os.IsPathSeparator(rest[0])
+	start := volume
+	if rooted {
+		start += string(filepath.Separator)
+	}
+	if start == "" {
+		start = "."
+	}
+	prefixes := []string{start}
+	current := start
+	for _, name := range strings.FieldsFunc(rest, func(r rune) bool { return r < 0x80 && os.IsPathSeparator(uint8(r)) }) {
+		if name == "." {
+			continue
+		}
+		switch {
+		case current == ".":
+			current = name
+		case current == volume && !rooted, os.IsPathSeparator(current[len(current)-1]):
+			current += name
+		default:
+			current += string(filepath.Separator) + name
+		}
+		prefixes = append(prefixes, current)
+	}
+	return prefixes
+}
+
+// registrationDirOpenError marks a failure to open a directory for a sync, as
+// opposed to a failure of the sync itself. It is only ever the outermost error
+// of a sync result and never reaches a caller: syncPendingRegistrationDir and
+// syncRecordPath return the file system's own error in its place.
+type registrationDirOpenError struct{ err error }
+
+func (e *registrationDirOpenError) Error() string { return e.err.Error() }
+
+func (e *registrationDirOpenError) Unwrap() error { return e.err }
+
+// skippableRegistrationAncestorError reports a sync failure the walk skips
+// for a directory it reached only by walking: a permission error opening it,
+// or a read-only file system (EROFS) from the open or the sync.
+func skippableRegistrationAncestorError(err error) bool {
+	return unopenableRegistrationDir(err) || errors.Is(err, syscall.EROFS)
+}
+
+// unopenableRegistrationDir reports a permission error (EACCES or EPERM)
+// opening a directory for a sync. A permission error from the sync itself is
+// not one.
+func unopenableRegistrationDir(err error) bool {
+	openErr, ok := err.(*registrationDirOpenError)
+	return ok && errors.Is(openErr.err, fs.ErrPermission)
+}
+
+// unmarkRegistrationDirOpenError returns the file system's own error for a
+// marked open failure, and any other error as it is.
+func unmarkRegistrationDirOpenError(err error) error {
+	if openErr, ok := err.(*registrationDirOpenError); ok {
+		return openErr.err
+	}
+	return err
+}
+
 // syncPendingRegistrationDir makes a pending-record change durable before the
 // token is redeemed. Unlike completed saves it reports a genuine I/O error, so
 // the start fails as it would for a failed record write; a directory that
-// cannot be synced (EINVAL, ENOTSUP, EOPNOTSUPP, or Windows) is skipped.
+// cannot be synced (EINVAL, ENOTSUP, EOPNOTSUPP, or Windows) is skipped. The
+// error is the file system's own, unmarked.
 func (s *EnvRegistrationStore) syncPendingRegistrationDir(dir string) error {
+	return unmarkRegistrationDirOpenError(s.syncMarkedRegistrationDir(dir))
+}
+
+// syncMarkedRegistrationDir is syncPendingRegistrationDir with a failure to
+// open dir still marked as a *registrationDirOpenError.
+func (s *EnvRegistrationStore) syncMarkedRegistrationDir(dir string) error {
 	if hook, ok := pendingDirSyncTestHooks.Load(s); ok {
 		return ignoreUnsupportedDirSync(hook.(func(string) error)(dir))
 	}
@@ -478,9 +621,10 @@ func (c *Client) redeemNewAgentRegistration(
 		// replaces it.
 		if pendingRegistrationMatches(previous, apiBase, request, mintParameters) {
 			// An earlier start may have written this record and then failed
-			// to sync its directory, so confirm it is durable before Core is
-			// asked to redeem it.
-			if err := journal.syncRecordDir(""); err != nil {
+			// to sync its directory or one of the directories above it, so
+			// confirm the whole path is durable before Core is asked to
+			// redeem it.
+			if err := journal.syncRecordPath(""); err != nil {
 				return nil, err
 			}
 			replay := *previous

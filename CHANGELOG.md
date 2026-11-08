@@ -10,6 +10,29 @@
   endpoint credential (fingerprints only) match exactly; otherwise the previous
   flow runs. Custom stores, the public API and normal-path requests are
   unchanged. Recovery needs a Core that replays redeemed registrations.
+- Every directory `MkdirAll` can create along the configured env file path,
+  as written, is now durable before a pending registration is redeemed or
+  replayed. Previously only directories created by the current start were
+  synced, so a start that created them and then failed (a sync error, or
+  `MkdirAll` stopping at an existing symlink) left them unsynced for every
+  later start, and a power loss could make the record unreachable after Core
+  redeemed the token.
+- Every record write and every replay syncs the record's directory and then,
+  for each component of that directory's path as written, the directory that
+  holds the component's entry. Each distinct directory is synced once. `.` is
+  skipped and `name/..` still traverses `name`, so `base/a/b/../../link/.env`
+  syncs link's target, `base`, `base/a` and `base/a/b`. Symlinks do not end the
+  walk, and their targets are not followed beyond the written path. A
+  relative path ends at the working directory.
+- The record's own directory and the parents of directories a start creates
+  are synced strictly. Any other directory on the walk is skipped, so starts
+  that worked before do not fail, when it cannot be opened because of a
+  permission error (EACCES or EPERM, for example a 0311 directory; its
+  durability cannot be confirmed there) or when its open or sync reports a
+  read-only file system (EROFS, for example a container's read-only root with
+  a writable volume; nothing can have been created there). Other errors still
+  fail the start with the same OS error as before; only EINVAL, ENOTSUP and
+  EOPNOTSUPP are skipped everywhere, and Windows still skips directory syncs.
 
 ## Runtime Worker admission and observability — Unreleased
 
