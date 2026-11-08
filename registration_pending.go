@@ -415,95 +415,114 @@ func (s *EnvRegistrationStore) syncRecordDir(string) error {
 }
 
 // syncRecordPath makes the record durable before Core is asked to redeem it,
-// whatever directory a caller passes: it syncs the directory holding the
-// store's env file and then, walking up, the parent of every directory that
-// MkdirAll could have created on the way to it. An earlier start may have
-// created those directories and failed or stopped before syncing their
-// parents; a later start finds them existing and cannot tell, so every record
-// write and every replay syncs the whole chain again. Nothing extra is
-// persisted. The walk follows the path as the file system resolves it (see
-// physicalRegistrationDir), so "." and "dir/.." spellings cannot cut it short,
-// and ends at a directory that cannot have been created on the way (see
-// creatableRegistrationDirParent).
+// whatever directory a caller passes. It syncs the directory holding the
+// store's env file, then every directory the configured path traverses on the
+// way to it, from the deepest up, each distinct directory once: for every
+// component of the path, the directory that holds that component's entry. An
+// earlier start may have created some of those directories and failed or
+// stopped before syncing them; a later start finds them existing and cannot
+// tell, so every record write and every replay syncs them all again. Nothing
+// extra is persisted.
+//
+// The walk follows the path exactly as written, so "." is skipped and every
+// "name/.." still traverses name: for "base/a/b/../.." it syncs base (the
+// record's directory), base/a and base/a/b. It ends below the last component
+// that always existed, because nothing before it was created on the way: a
+// root, the start of a relative path, a symlink or other entry that is not a
+// plain directory, or the root of another file system (see
+// registrationEntryCreatable). A ".." right after such a component is not
+// synced either.
 //
 // The record's own directory is synced strictly, and so is the parent of every
 // directory this start created: makePendingRegistrationDir already synced
-// those before the record was written. An ancestor reached only by the walk
-// that this process may not open (a permission error, for example a 0311
-// directory) cannot be synced and so cannot be confirmed; the walk skips it
-// and stops there, because starts in such deployments succeeded before the
-// walk existed and must keep doing so. Every other open, sync or stat failure
-// is reported, as the file system returned it, so nothing is redeemed on an
-// unconfirmed path.
+// those before the record was written. Another directory that this process
+// may not open (a permission error, for example a 0311 directory) cannot be
+// synced and so cannot be confirmed; the walk skips it and stops there,
+// because starts in such deployments succeeded before the walk existed and
+// must keep doing so. Every other open, sync or stat failure is reported, as
+// the file system returned it, so nothing is redeemed on an unconfirmed path.
 func (s *EnvRegistrationStore) syncRecordPath(string) error {
 	dir := registrationEnvDir(s.Path)
 	if err := s.syncPendingRegistrationDir(dir); err != nil {
 		return err
 	}
-	dir, err := physicalRegistrationDir(dir)
+	recordDir, err := registrationDirIdentity(dir)
 	if err != nil {
 		return err
 	}
-	for {
-		parent, ok, err := creatableRegistrationDirParent(dir)
-		if err != nil || !ok {
+	synced := map[any]bool{recordDir: true}
+	prefixes, names := registrationPathPrefixes(dir)
+	// existed is the last component that always existed; 0 is the start.
+	existed := 0
+	for j := len(names); j >= 1; j-- {
+		if names[j-1] == ".." {
+			continue
+		}
+		creatable, err := registrationEntryCreatable(prefixes[j], prefixes[j-1])
+		if err != nil {
 			return err
 		}
-		if err := s.syncMarkedRegistrationDir(parent); err != nil {
+		if !creatable {
+			existed = j
+			break
+		}
+	}
+	for j := len(names); j > existed; j-- {
+		if names[j-1] == ".." && j-1 == existed {
+			continue
+		}
+		container := prefixes[j-1]
+		identity, err := registrationDirIdentity(container)
+		if err != nil {
+			return err
+		}
+		if synced[identity] {
+			continue
+		}
+		synced[identity] = true
+		if err := s.syncMarkedRegistrationDir(container); err != nil {
 			if unopenableRegistrationDir(err) {
 				return nil
 			}
 			return unmarkRegistrationDirOpenError(err)
 		}
-		dir = parent
 	}
+	return nil
 }
 
-// physicalRegistrationDir spells dir as the file system resolves it, so that
-// every directory on the way to it is a component of the result: "." and empty
-// components are dropped, and "name/.." is collapsed when name is a plain
-// directory, whose ".." is its lexical parent. A ".." that follows a symlink
-// names the parent of the link's target, another tree; it is kept, and the
-// walk stops there, as does a leading "..". On Windows, which resolves ".."
-// lexically, every "name/.." is collapsed without a file system call.
-func physicalRegistrationDir(dir string) (string, error) {
+// registrationPathPrefixes splits dir into the components the file system
+// traverses, without empty and "." ones, which name the directory they are in.
+// names[j-1] is component j and prefixes[j] the path through it, spelled as
+// written; prefixes[0] is where the path starts: ".", a root or a volume.
+func registrationPathPrefixes(dir string) (prefixes, names []string) {
 	volume := filepath.VolumeName(dir)
 	rest := dir[len(volume):]
 	rooted := rest != "" && os.IsPathSeparator(rest[0])
-	spell := func(parts []string) string {
-		spelled := volume
-		if rooted {
-			spelled += string(filepath.Separator)
-		}
-		spelled += strings.Join(parts, string(filepath.Separator))
-		if spelled == "" {
-			return "."
-		}
-		return spelled
+	start := volume
+	if rooted {
+		start += string(filepath.Separator)
 	}
-	var parts []string
-	for _, part := range strings.FieldsFunc(rest, func(r rune) bool { return r < 0x80 && os.IsPathSeparator(uint8(r)) }) {
+	if start == "" {
+		start = "."
+	}
+	prefixes = []string{start}
+	current := start
+	for _, name := range strings.FieldsFunc(rest, func(r rune) bool { return r < 0x80 && os.IsPathSeparator(uint8(r)) }) {
+		if name == "." {
+			continue
+		}
 		switch {
-		case part == ".":
-		case part != "..":
-			parts = append(parts, part)
-		case len(parts) == 0 && rooted:
-			// ".." at a root is the root.
-		case len(parts) == 0 || parts[len(parts)-1] == "..":
-			parts = append(parts, part)
+		case current == ".":
+			current = name
+		case current == volume && !rooted, os.IsPathSeparator(current[len(current)-1]):
+			current += name
 		default:
-			lexical, err := registrationDotDotIsLexical(spell(parts))
-			if err != nil {
-				return "", err
-			}
-			if lexical {
-				parts = parts[:len(parts)-1]
-			} else {
-				parts = append(parts, part)
-			}
+			current += string(filepath.Separator) + name
 		}
+		prefixes = append(prefixes, current)
+		names = append(names, name)
 	}
-	return spell(parts), nil
+	return prefixes, names
 }
 
 // registrationDirOpenError marks a failure to open a directory for a sync, as
@@ -531,27 +550,6 @@ func unmarkRegistrationDirOpenError(err error) error {
 		return openErr.err
 	}
 	return err
-}
-
-// creatableRegistrationDirParent returns the directory whose sync makes dir's
-// own entry durable, or false when dir always existed and needs no sync:
-// ".", "..", a root or volume, and, where directories can be synced, a symlink
-// or other entry that is not a plain directory, or the root of another file
-// system (see registrationDirCreatable).
-func creatableRegistrationDirParent(dir string) (string, bool, error) {
-	_, name := filepath.Split(trimRegistrationPathSeparators(dir))
-	if name == "" || name == "." || name == ".." {
-		return "", false, nil
-	}
-	parent := registrationEnvDir(dir)
-	if parent == dir {
-		return "", false, nil
-	}
-	creatable, err := registrationDirCreatable(dir, parent)
-	if err != nil || !creatable {
-		return "", false, err
-	}
-	return parent, true, nil
 }
 
 // syncPendingRegistrationDir makes a pending-record change durable before the

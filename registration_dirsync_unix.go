@@ -5,6 +5,7 @@ package openlinker
 import (
 	"io/fs"
 	"os"
+	"path/filepath"
 	"syscall"
 )
 
@@ -21,35 +22,38 @@ func syncRegistrationDirStrict(dir string) error {
 	return ignoreUnsupportedDirSync(directory.Sync())
 }
 
-// registrationDirCreatable reports whether MkdirAll could have created dir,
-// which exists, inside parent: dir must be a plain directory, not a symlink or
-// other entry, on parent's file system rather than the root of a mount.
-// Otherwise dir always existed, and neither it nor anything above it was
-// created on the way to the record.
-func registrationDirCreatable(dir, parent string) (bool, error) {
-	info, err := os.Lstat(dir)
+// registrationEntryCreatable reports whether MkdirAll could have created
+// entry, which exists, inside container, the directory that holds it: entry
+// must be a plain directory, not a symlink or other entry, on container's file
+// system rather than the root of a mount. Otherwise entry always existed, and
+// nothing before it on the path was created on the way to the record.
+func registrationEntryCreatable(entry, container string) (bool, error) {
+	info, err := os.Lstat(entry)
 	if err != nil {
 		return false, err
 	}
 	if info.Mode().Type() != fs.ModeDir {
 		return false, nil
 	}
-	parentInfo, err := os.Stat(parent)
+	containerInfo, err := os.Stat(container)
 	if err != nil {
 		return false, err
 	}
-	return sameRegistrationFileSystem(info, parentInfo), nil
+	return sameRegistrationFileSystem(info, containerInfo), nil
 }
 
-// registrationDotDotIsLexical reports whether "dir/.." names dir's lexical
-// parent: dir is a plain directory, not a symlink whose ".." is the parent of
-// its target.
-func registrationDotDotIsLexical(dir string) (bool, error) {
-	info, err := os.Lstat(dir)
+// registrationDirIdentity identifies the directory dir resolves to by its
+// device and inode, so one directory reached by several spellings is synced
+// once.
+func registrationDirIdentity(dir string) (any, error) {
+	info, err := os.Stat(dir)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	return info.Mode().Type() == fs.ModeDir, nil
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok {
+		return [2]uint64{uint64(stat.Dev), uint64(stat.Ino)}, nil
+	}
+	return filepath.Clean(dir), nil
 }
 
 // sameRegistrationFileSystem reports whether two entries are on the same

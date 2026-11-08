@@ -153,7 +153,7 @@ func TestRegistrationDirChainStopsAtAnotherFileSystem(t *testing.T) {
 	if devErr != nil || rootErr != nil || dev.Mode().Type() != fs.ModeDir || sameRegistrationFileSystem(dev, root) {
 		t.Skip("/dev is not a separately mounted directory here")
 	}
-	if parent, ok, err := creatableRegistrationDirParent("/dev"); ok || err != nil {
-		t.Fatalf("creatableRegistrationDirParent(/dev) = %q, %t, %v", parent, ok, err)
+	if creatable, err := registrationEntryCreatable("/dev", "/"); creatable || err != nil {
+		t.Fatalf("registrationEntryCreatable(/dev, /) = %t, %v", creatable, err)
 	}
 }
