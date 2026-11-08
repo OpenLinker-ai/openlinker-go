@@ -421,8 +421,9 @@ func (s *EnvRegistrationStore) syncRecordDir(string) error {
 // created those directories and failed or stopped before syncing their
 // parents; a later start finds them existing and cannot tell, so every record
 // write and every replay syncs the whole chain again. Nothing extra is
-// persisted. The walk is lexical, like MkdirAll and registrationEnvDir, and
-// ends at a directory that cannot have been created that way (see
+// persisted. The walk follows the path as the file system resolves it (see
+// physicalRegistrationDir), so "." and "dir/.." spellings cannot cut it short,
+// and ends at a directory that cannot have been created on the way (see
 // creatableRegistrationDirParent).
 //
 // The record's own directory is synced strictly, and so is the parent of every
@@ -432,10 +433,15 @@ func (s *EnvRegistrationStore) syncRecordDir(string) error {
 // directory) cannot be synced and so cannot be confirmed; the walk skips it
 // and stops there, because starts in such deployments succeeded before the
 // walk existed and must keep doing so. Every other open, sync or stat failure
-// is reported, so nothing is redeemed on an unconfirmed path.
+// is reported, as the file system returned it, so nothing is redeemed on an
+// unconfirmed path.
 func (s *EnvRegistrationStore) syncRecordPath(string) error {
 	dir := registrationEnvDir(s.Path)
 	if err := s.syncPendingRegistrationDir(dir); err != nil {
+		return err
+	}
+	dir, err := physicalRegistrationDir(dir)
+	if err != nil {
 		return err
 	}
 	for {
@@ -443,19 +449,67 @@ func (s *EnvRegistrationStore) syncRecordPath(string) error {
 		if err != nil || !ok {
 			return err
 		}
-		if err := s.syncPendingRegistrationDir(parent); err != nil {
+		if err := s.syncMarkedRegistrationDir(parent); err != nil {
 			if unopenableRegistrationDir(err) {
 				return nil
 			}
-			return err
+			return unmarkRegistrationDirOpenError(err)
 		}
 		dir = parent
 	}
 }
 
+// physicalRegistrationDir spells dir as the file system resolves it, so that
+// every directory on the way to it is a component of the result: "." and empty
+// components are dropped, and "name/.." is collapsed when name is a plain
+// directory, whose ".." is its lexical parent. A ".." that follows a symlink
+// names the parent of the link's target, another tree; it is kept, and the
+// walk stops there, as does a leading "..". On Windows, which resolves ".."
+// lexically, every "name/.." is collapsed without a file system call.
+func physicalRegistrationDir(dir string) (string, error) {
+	volume := filepath.VolumeName(dir)
+	rest := dir[len(volume):]
+	rooted := rest != "" && os.IsPathSeparator(rest[0])
+	spell := func(parts []string) string {
+		spelled := volume
+		if rooted {
+			spelled += string(filepath.Separator)
+		}
+		spelled += strings.Join(parts, string(filepath.Separator))
+		if spelled == "" {
+			return "."
+		}
+		return spelled
+	}
+	var parts []string
+	for _, part := range strings.FieldsFunc(rest, func(r rune) bool { return r < 0x80 && os.IsPathSeparator(uint8(r)) }) {
+		switch {
+		case part == ".":
+		case part != "..":
+			parts = append(parts, part)
+		case len(parts) == 0 && rooted:
+			// ".." at a root is the root.
+		case len(parts) == 0 || parts[len(parts)-1] == "..":
+			parts = append(parts, part)
+		default:
+			lexical, err := registrationDotDotIsLexical(spell(parts))
+			if err != nil {
+				return "", err
+			}
+			if lexical {
+				parts = parts[:len(parts)-1]
+			} else {
+				parts = append(parts, part)
+			}
+		}
+	}
+	return spell(parts), nil
+}
+
 // registrationDirOpenError marks a failure to open a directory for a sync, as
-// opposed to a failure of the sync itself. It reads and unwraps as the
-// underlying error, so callers see the same error as before.
+// opposed to a failure of the sync itself. It is only ever the outermost error
+// of a sync result and never reaches a caller: syncPendingRegistrationDir and
+// syncRecordPath return the file system's own error in its place.
 type registrationDirOpenError struct{ err error }
 
 func (e *registrationDirOpenError) Error() string { return e.err.Error() }
@@ -466,8 +520,17 @@ func (e *registrationDirOpenError) Unwrap() error { return e.err }
 // opening a directory for a sync. A permission error from the sync itself is
 // not one.
 func unopenableRegistrationDir(err error) bool {
-	var openErr *registrationDirOpenError
-	return errors.As(err, &openErr) && errors.Is(openErr.err, fs.ErrPermission)
+	openErr, ok := err.(*registrationDirOpenError)
+	return ok && errors.Is(openErr.err, fs.ErrPermission)
+}
+
+// unmarkRegistrationDirOpenError returns the file system's own error for a
+// marked open failure, and any other error as it is.
+func unmarkRegistrationDirOpenError(err error) error {
+	if openErr, ok := err.(*registrationDirOpenError); ok {
+		return openErr.err
+	}
+	return err
 }
 
 // creatableRegistrationDirParent returns the directory whose sync makes dir's
@@ -494,8 +557,15 @@ func creatableRegistrationDirParent(dir string) (string, bool, error) {
 // syncPendingRegistrationDir makes a pending-record change durable before the
 // token is redeemed. Unlike completed saves it reports a genuine I/O error, so
 // the start fails as it would for a failed record write; a directory that
-// cannot be synced (EINVAL, ENOTSUP, EOPNOTSUPP, or Windows) is skipped.
+// cannot be synced (EINVAL, ENOTSUP, EOPNOTSUPP, or Windows) is skipped. The
+// error is the file system's own, unmarked.
 func (s *EnvRegistrationStore) syncPendingRegistrationDir(dir string) error {
+	return unmarkRegistrationDirOpenError(s.syncMarkedRegistrationDir(dir))
+}
+
+// syncMarkedRegistrationDir is syncPendingRegistrationDir with a failure to
+// open dir still marked as a *registrationDirOpenError.
+func (s *EnvRegistrationStore) syncMarkedRegistrationDir(dir string) error {
 	if hook, ok := pendingDirSyncTestHooks.Load(s); ok {
 		return ignoreUnsupportedDirSync(hook.(func(string) error)(dir))
 	}

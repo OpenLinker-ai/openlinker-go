@@ -15,10 +15,14 @@
   could have been created on the way, before the token is redeemed. Previously
   only newly created directories were synced, so a start that created them and
   failed to sync them left them unsynced for every later start, and a power
-  loss could drop the record after Core redeemed the token. The walk is
-  lexical and stops at `.`, `..`, a root, a symlink or the root of another file
-  system. Sync errors still fail the start; only EINVAL, ENOTSUP and
-  EOPNOTSUPP are skipped, and Windows still skips directory syncs.
+  loss could drop the record after Core redeemed the token. The walk follows
+  the path as the file system resolves it: `.` is dropped and `name/..` is
+  collapsed when `name` is a plain directory, so spellings such as
+  `base/new/./.env` or `base/new/sub/../.env` cannot cut it short. It stops at
+  a root, a leading `..`, a symlink (including a `..` after one) or the root of
+  another file system. Sync errors still fail the start with the same OS error
+  as before; only EINVAL, ENOTSUP and EOPNOTSUPP are skipped, and Windows still
+  skips directory syncs.
 - The record's own directory and the parents of directories a start creates
   are still synced strictly. An ancestor reached only by the upward walk that
   cannot be opened because of a permission error (EACCES or EPERM, for example

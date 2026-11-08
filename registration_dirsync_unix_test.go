@@ -45,9 +45,8 @@ func TestPendingRecordWalkStopsAtAncestorItCannotOpen(t *testing.T) {
 
 	// ensure runs one start against path; sync stands in for the directory
 	// sync, and every directory passed to it is recorded.
-	ensure := func(path string, sync func(string) error) (*AgentRegistration, []string, []string, error) {
+	ensureWith := func(core *replayRegistrationCore, path string, sync func(string) error) (*AgentRegistration, []string, []string, error) {
 		t.Helper()
-		core := newReplayRegistrationCore(t)
 		store := NewEnvRegistrationStore(path)
 		var synced []string
 		if sync != nil {
@@ -61,6 +60,10 @@ func TestPendingRecordWalkStopsAtAncestorItCannotOpen(t *testing.T) {
 			WithRegistrationAPIBase(core.server.URL), WithRegistrationUserToken("ol_user_creator"), WithRegistrationStore(store))
 		_, tokens := core.calls()
 		return registration, synced, tokens, err
+	}
+	ensure := func(path string, sync func(string) error) (*AgentRegistration, []string, []string, error) {
+		t.Helper()
+		return ensureWith(newReplayRegistrationCore(t), path, sync)
 	}
 
 	// An ancestor reached only by the walk that cannot be opened is skipped
@@ -90,7 +93,7 @@ func TestPendingRecordWalkStopsAtAncestorItCannotOpen(t *testing.T) {
 	// A directory this start creates inside it still needs its parent synced:
 	// the start fails before the record is written and nothing is redeemed.
 	created := filepath.Join(locked, "created", ".env")
-	if _, synced, tokens, err := ensure(created, syncRegistrationDirStrict); !errors.Is(err, fs.ErrPermission) ||
+	if _, synced, tokens, err := ensure(created, syncRegistrationDirStrict); !strictOpenPermissionError(err) ||
 		len(tokens) != 0 || strings.Join(synced, "|") != locked {
 		t.Fatalf("created: err=%v register=%v synced=%v", err, tokens, synced)
 	}
@@ -98,11 +101,29 @@ func TestPendingRecordWalkStopsAtAncestorItCannotOpen(t *testing.T) {
 		t.Fatalf("record written under an unsynced new directory: %v", err)
 	}
 
-	// The record's own directory is always synced strictly.
-	if _, synced, tokens, err := ensure(filepath.Join(ownDir, ".env"), syncRegistrationDirStrict); !errors.Is(err, fs.ErrPermission) ||
+	// The record's own directory is always synced strictly: the first start
+	// fails after writing the record, and so does its replay, here without
+	// any test hook.
+	ownCore := newReplayRegistrationCore(t)
+	if _, synced, tokens, err := ensureWith(ownCore, filepath.Join(ownDir, ".env"), syncRegistrationDirStrict); !strictOpenPermissionError(err) ||
 		len(tokens) != 0 || strings.Join(synced, "|") != ownDir {
 		t.Fatalf("own directory: err=%v register=%v synced=%v", err, tokens, synced)
 	}
+	if _, _, tokens, err := ensureWith(ownCore, filepath.Join(ownDir, ".env"), nil); !strictOpenPermissionError(err) || len(tokens) != 0 {
+		t.Fatalf("own directory replay: err=%v register=%v", err, tokens)
+	}
+	if created, _ := ownCore.calls(); created != 1 {
+		t.Fatalf("own directory replay minted again: create-token=%d", created)
+	}
+}
+
+// strictOpenPermissionError reports whether err is the file system's own
+// error for a directory that could not be opened, exactly as EnsureAgent
+// returned it before the ancestor walk: a *fs.PathError that os.IsPermission
+// and errors.Is(err, fs.ErrPermission) both classify.
+func strictOpenPermissionError(err error) bool {
+	_, isPathError := err.(*fs.PathError)
+	return isPathError && os.IsPermission(err) && errors.Is(err, fs.ErrPermission)
 }
 
 type registrationDirInfo struct{ sys any }

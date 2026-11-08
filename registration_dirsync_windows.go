@@ -10,3 +10,7 @@ func syncRegistrationDirStrict(string) error { return nil }
 // directory syncs are no-ops, so the ancestor chain is walked lexically only
 // and cannot fail a registration there.
 func registrationDirCreatable(string, string) (bool, error) { return true, nil }
+
+// registrationDotDotIsLexical is true on Windows, which resolves ".."
+// lexically, and makes no file system call.
+func registrationDotDotIsLexical(string) (bool, error) { return true, nil }

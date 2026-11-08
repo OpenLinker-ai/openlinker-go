@@ -10,7 +10,8 @@ import (
 
 // syncRegistrationDirStrict syncs dir and reports a genuine failure; a
 // directory that cannot be synced is skipped. A failure to open dir is marked
-// as a registrationDirOpenError.
+// as a *registrationDirOpenError, which syncPendingRegistrationDir and
+// syncRecordPath remove before any caller sees the error.
 func syncRegistrationDirStrict(dir string) error {
 	directory, err := os.Open(dir)
 	if err != nil {
@@ -38,6 +39,17 @@ func registrationDirCreatable(dir, parent string) (bool, error) {
 		return false, err
 	}
 	return sameRegistrationFileSystem(info, parentInfo), nil
+}
+
+// registrationDotDotIsLexical reports whether "dir/.." names dir's lexical
+// parent: dir is a plain directory, not a symlink whose ".." is the parent of
+// its target.
+func registrationDotDotIsLexical(dir string) (bool, error) {
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return false, err
+	}
+	return info.Mode().Type() == fs.ModeDir, nil
 }
 
 // sameRegistrationFileSystem reports whether two entries are on the same

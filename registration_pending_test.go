@@ -1008,10 +1008,78 @@ func TestPendingRecordReplayResyncsAncestors(t *testing.T) {
 	}
 }
 
+func TestPendingRecordDotSpellingsResyncAncestors(t *testing.T) {
+	t.Parallel()
+	separator := string(filepath.Separator)
+	for _, spelling := range []struct {
+		name string
+		// below spells the record's directory, base/new, under base.
+		below string
+	}{
+		{name: "dot", below: "new" + separator + "."},
+		{name: "dot-dot", below: "new" + separator + "sub" + separator + ".."},
+	} {
+		for _, scenario := range []string{"retry", "replay"} {
+			t.Run(spelling.name+"/"+scenario, func(t *testing.T) {
+				t.Parallel()
+				core := newReplayRegistrationCore(t)
+				var log syncEventLog
+				core.beforeRegister = func(string) { log.add("register") }
+				base := filepath.Join(t.TempDir(), "base")
+				newDir := filepath.Join(base, "new")
+				if err := os.Mkdir(base, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				recordDir := base + separator + spelling.below
+				path := recordDir + separator + ".env"
+				// retry: the first start creates new itself. replay: new
+				// already exists, as an earlier start that created it and
+				// failed to sync base leaves it, so the record is written.
+				wantFirst, wantToken, wantMinted := base, "ol_agent_minted_2", 2
+				if scenario == "replay" {
+					if err := os.MkdirAll(filepath.Join(newDir, "sub"), 0o700); err != nil {
+						t.Fatal(err)
+					}
+					wantFirst, wantToken, wantMinted = recordDir+"|"+base, "ol_agent_minted_1", 1
+				}
+
+				// The first start fails to sync base, which holds new's entry.
+				_, err := ensureWithSyncLog(t, core, &log, path, base)
+				synced, sent := syncedBeforeRegister(log.take())
+				if !errors.Is(err, syscall.EIO) || sent || strings.Join(synced, "|") != wantFirst {
+					t.Fatalf("first start err=%v sent=%t synced=%v, want synced %s", err, sent, synced, wantFirst)
+				}
+				_, statErr := os.Stat(filepath.Join(newDir, ".env"))
+				if (scenario == "retry") != os.IsNotExist(statErr) {
+					t.Fatalf("%s: record after the first start: %v", scenario, statErr)
+				}
+
+				// The next start syncs base again before the redeem request,
+				// however the record's directory is spelled.
+				registration, err := ensureWithSyncLog(t, core, &log, path, "")
+				if err != nil || registration.AgentToken != wantToken {
+					t.Fatalf("second start registration=%#v err=%v", registration, err)
+				}
+				synced, sent = syncedBeforeRegister(log.take())
+				if want := []string{recordDir, base}; !sent || len(synced) < len(want) ||
+					strings.Join(synced[:len(want)], "|") != strings.Join(want, "|") {
+					t.Fatalf("synced before register = %v (sent %t), want prefix %v", synced, sent, want)
+				}
+				if created, tokens := core.calls(); created != wantMinted || strings.Join(tokens, ",") != wantToken {
+					t.Fatalf("create-token=%d register=%v", created, tokens)
+				}
+			})
+		}
+	}
+}
+
 func TestPendingRecordPathSyncStopsAtDirectoriesThatAlwaysExisted(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
-	for _, dir := range []string{filepath.Join(root, "a", "b"), filepath.Join(root, "c"), filepath.Join(root, "real", "sub")} {
+	for _, dir := range []string{
+		filepath.Join(root, "a", "b"), filepath.Join(root, "c"), filepath.Join(root, "real", "sub"),
+		filepath.Join(root, "real", "inner"), filepath.Join(root, "real", "x"),
+	} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -1045,11 +1113,18 @@ func TestPendingRecordPathSyncStopsAtDirectoriesThatAlwaysExisted(t *testing.T) 
 		}
 	}
 
-	// ".." always existed, so nothing above it is synced; the walk stays
-	// lexical, like MkdirAll.
+	// "." and "name/.." are spelled as the file system resolves them, so the
+	// walk continues to the directories the record really sits under.
+	dot := root + separator + "a" + separator + "." + separator + "b"
+	synced = syncedFor(dot + separator + ".env")
+	if want := []string{dot, filepath.Join(root, "a"), root}; len(synced) < len(want) ||
+		strings.Join(synced[:len(want)], "|") != strings.Join(want, "|") {
+		t.Fatalf("dot chain synced %v, want prefix %v", synced, want)
+	}
 	dotdot := root + separator + "a" + separator + ".." + separator + "c"
-	if synced := syncedFor(dotdot + separator + ".env"); strings.Join(synced, "|") != dotdot+"|"+root+separator+"a"+separator+".." {
-		t.Fatalf("dot-dot chain synced %v", synced)
+	synced = syncedFor(dotdot + separator + ".env")
+	if want := []string{dotdot, root}; len(synced) < len(want) || strings.Join(synced[:len(want)], "|") != strings.Join(want, "|") {
+		t.Fatalf("dot-dot chain synced %v, want prefix %v", synced, want)
 	}
 
 	// A symlink always existed: the directory holding it is synced through
@@ -1062,9 +1137,38 @@ func TestPendingRecordPathSyncStopsAtDirectoriesThatAlwaysExisted(t *testing.T) 
 		if synced := syncedFor(filepath.Join(link, "sub", ".env")); strings.Join(synced, "|") != filepath.Join(link, "sub")+"|"+link {
 			t.Fatalf("symlink chain synced %v", synced)
 		}
+		// ".." after a symlink is the parent of its target, another tree: its
+		// directory is synced and nothing above it.
+		innerLink := filepath.Join(root, "inner-link")
+		if err := os.Symlink(filepath.Join(root, "real", "inner"), innerLink); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+		afterLink := innerLink + separator + ".." + separator + "x"
+		if synced := syncedFor(afterLink + separator + ".env"); strings.Join(synced, "|") != afterLink+"|"+innerLink+separator+".." {
+			t.Fatalf("dot-dot after a symlink synced %v", synced)
+		}
+		for spelled, want := range map[string]string{
+			root + "/a/./b/":            filepath.Join(root, "a", "b"),
+			root + "//a/b/..":           filepath.Join(root, "a"),
+			root + "/a/b/../../c":       filepath.Join(root, "c"),
+			root + "/link/sub/..":       filepath.Join(root, "link"),
+			root + "/inner-link/../x":   root + "/inner-link/../x",
+			root + "/inner-link/./../x": root + "/inner-link/../x",
+			"/..":                       "/",
+			"./a":                       "a",
+			".":                         ".",
+			"../x/./y":                  "../x/y",
+		} {
+			if got, err := physicalRegistrationDir(spelled); err != nil || got != want {
+				t.Fatalf("physicalRegistrationDir(%q) = %q, %v; want %q", spelled, got, err, want)
+			}
+		}
 		// A directory that cannot be inspected is an error, never a stop.
 		if _, ok, err := creatableRegistrationDirParent(filepath.Join(root, "missing")); ok || !os.IsNotExist(err) {
 			t.Fatalf("missing directory ok=%t err=%v", ok, err)
+		}
+		if _, err := physicalRegistrationDir(root + "/missing/../c"); !os.IsNotExist(err) {
+			t.Fatalf("missing directory before .. err=%v", err)
 		}
 	}
 
