@@ -436,12 +436,19 @@ func (s *EnvRegistrationStore) syncRecordDir(string) error {
 //
 // The record's own directory is synced strictly, and so is the parent of every
 // directory this start created: makePendingRegistrationDir already synced
-// those before the record was written. Any other directory that this process
-// may not open (a permission error, for example a 0311 directory) cannot be
-// synced and so cannot be confirmed; it is skipped, because starts in such
-// deployments succeeded before the walk existed and must keep doing so. Every
-// other open, sync or stat failure is reported, as the file system returned
-// it, so nothing is redeemed on an unconfirmed path.
+// those before the record was written. Any other directory reached only by
+// the walk is skipped when it cannot be synced for one of two reasons, because
+// starts in such deployments succeeded before the walk existed and must keep
+// doing so:
+//
+//   - this process may not open it (a permission error, for example a 0311
+//     directory), so its durability cannot be confirmed;
+//   - it is on a read-only file system (EROFS from the open or the sync), as
+//     the root of a container with a writable volume is. Nothing can have
+//     been created there, so durability is unaffected.
+//
+// Every other open, sync or stat failure is reported, as the file system
+// returned it, so nothing is redeemed on an unconfirmed path.
 func (s *EnvRegistrationStore) syncRecordPath(string) error {
 	dir := registrationEnvDir(s.Path)
 	if err := s.syncPendingRegistrationDir(dir); err != nil {
@@ -463,7 +470,7 @@ func (s *EnvRegistrationStore) syncRecordPath(string) error {
 			continue
 		}
 		synced[identity] = true
-		if err := s.syncMarkedRegistrationDir(container); err != nil && !unopenableRegistrationDir(err) {
+		if err := s.syncMarkedRegistrationDir(container); err != nil && !skippableRegistrationAncestorError(err) {
 			return unmarkRegistrationDirOpenError(err)
 		}
 	}
@@ -514,6 +521,13 @@ type registrationDirOpenError struct{ err error }
 func (e *registrationDirOpenError) Error() string { return e.err.Error() }
 
 func (e *registrationDirOpenError) Unwrap() error { return e.err }
+
+// skippableRegistrationAncestorError reports a sync failure the walk skips
+// for a directory it reached only by walking: a permission error opening it,
+// or a read-only file system (EROFS) from the open or the sync.
+func skippableRegistrationAncestorError(err error) bool {
+	return unopenableRegistrationDir(err) || errors.Is(err, syscall.EROFS)
+}
 
 // unopenableRegistrationDir reports a permission error (EACCES or EPERM)
 // opening a directory for a sync. A permission error from the sync itself is

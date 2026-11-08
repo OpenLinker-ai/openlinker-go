@@ -25,12 +25,14 @@
   walk, and their targets are not followed beyond the written path. A
   relative path ends at the working directory.
 - The record's own directory and the parents of directories a start creates
-  are synced strictly. Any other directory on the walk that cannot be opened
-  because of a permission error (EACCES or EPERM, for example a 0311
-  directory) is skipped, so starts that worked before do not fail; its
-  durability cannot be confirmed there. Other errors still fail the start with
-  the same OS error as before; only EINVAL, ENOTSUP and EOPNOTSUPP are skipped,
-  and Windows still skips directory syncs.
+  are synced strictly. Any other directory on the walk is skipped, so starts
+  that worked before do not fail, when it cannot be opened because of a
+  permission error (EACCES or EPERM, for example a 0311 directory; its
+  durability cannot be confirmed there) or when its open or sync reports a
+  read-only file system (EROFS, for example a container's read-only root with
+  a writable volume; nothing can have been created there). Other errors still
+  fail the start with the same OS error as before; only EINVAL, ENOTSUP and
+  EOPNOTSUPP are skipped everywhere, and Windows still skips directory syncs.
 
 ## Runtime Worker admission and observability — Unreleased
 

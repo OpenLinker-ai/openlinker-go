@@ -1254,6 +1254,77 @@ func TestPendingRecordPathSyncsEveryContainerOnTheWrittenPath(t *testing.T) {
 	}
 }
 
+func TestPendingRecordWalkSkipsReadOnlyAncestors(t *testing.T) {
+	t.Parallel()
+	// ensure runs one start against path; syncing a directory in readOnly
+	// returns its error, as a read-only file system does, and every sync is
+	// recorded.
+	ensure := func(path string, readOnly map[string]error) (*AgentRegistration, []string, []string, error) {
+		t.Helper()
+		core := newReplayRegistrationCore(t)
+		store := NewEnvRegistrationStore(path)
+		var synced []string
+		pendingDirSyncTestHooks.Store(store, func(dir string) error {
+			synced = append(synced, dir)
+			for each, err := range readOnly {
+				if sameRegistrationTestDir(dir, each) {
+					return err
+				}
+			}
+			return nil
+		})
+		defer pendingDirSyncTestHooks.Delete(store)
+		registration, err := EnsureAgent(context.Background(), AgentSpec{Slug: "demo-agent", Name: "Demo Agent"},
+			WithRegistrationAPIBase(core.server.URL), WithRegistrationUserToken("ol_user_creator"), WithRegistrationStore(store))
+		_, tokens := core.calls()
+		return registration, synced, tokens, err
+	}
+	root := t.TempDir()
+	parent := registrationEnvDir(root)
+	app, own := filepath.Join(root, "app"), filepath.Join(root, "own")
+	for _, dir := range []string{app, own} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// EROFS from the sync and, marked as the open's failure, from the open.
+	openErr := &registrationDirOpenError{err: &fs.PathError{Op: "open", Path: parent, Err: syscall.EROFS}}
+
+	// Ancestors reached only by the walk on a read-only file system are
+	// skipped and the walk goes on above them: the start succeeds.
+	registration, synced, tokens, err := ensure(filepath.Join(app, ".env"), map[string]error{root: syscall.EROFS, parent: openErr})
+	if err != nil || registration.AgentToken != "ol_agent_minted_1" || len(tokens) != 1 || len(synced) < 4 ||
+		strings.Join(synced[:4], "|") != app+"|"+root+"|"+parent+"|"+registrationEnvDir(parent) {
+		t.Fatalf("read-only ancestors: registration=%#v err=%v register=%v synced=%v", registration, err, tokens, synced)
+	}
+
+	// The record's own directory stays strict, with the error as returned.
+	if _, synced, tokens, err := ensure(filepath.Join(own, ".env"), map[string]error{own: syscall.EROFS}); err != syscall.EROFS ||
+		len(tokens) != 0 || strings.Join(synced, "|") != own {
+		t.Fatalf("read-only record directory: err=%v register=%v synced=%v", err, tokens, synced)
+	}
+
+	// So does the parent of a directory this start creates: the start fails
+	// before the record is written.
+	created := filepath.Join(root, "created", ".env")
+	if _, synced, tokens, err := ensure(created, map[string]error{root: syscall.EROFS}); err != syscall.EROFS ||
+		len(tokens) != 0 || strings.Join(synced, "|") != root {
+		t.Fatalf("read-only parent of a created directory: err=%v register=%v synced=%v", err, tokens, synced)
+	}
+	if _, err := os.Stat(created); !os.IsNotExist(err) {
+		t.Fatalf("record written under an unsynced new directory: %v", err)
+	}
+
+	// Other errors from an ancestor stay strict.
+	if _, _, tokens, err := ensure(filepath.Join(app, "strict", ".env"), map[string]error{root: syscall.EIO}); !errors.Is(err, syscall.EIO) || len(tokens) != 0 {
+		t.Fatalf("I/O error from an ancestor: err=%v register=%v", err, tokens)
+	}
+	if !skippableRegistrationAncestorError(openErr) || !skippableRegistrationAncestorError(syscall.EROFS) ||
+		skippableRegistrationAncestorError(syscall.EIO) || skippableRegistrationAncestorError(syscall.EACCES) {
+		t.Fatal("skippable ancestor errors are wrong")
+	}
+}
+
 func TestPendingRecordSymlinkAfterDotDotSyncsTraversedDirectories(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
